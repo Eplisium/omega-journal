@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - App
 
@@ -56,6 +57,7 @@ enum OmegaTheme {
 
 struct ContentView: View {
     @StateObject private var vm = JournalViewModel()
+    @ObservedObject private var theme = ThemeManager.shared
     @State private var sidebarSelection: SidebarItem? = .all
 
     var body: some View {
@@ -73,15 +75,18 @@ struct ContentView: View {
         } content: {
             EntryListView(vm: vm, selection: $sidebarSelection)
         } detail: {
-            DetailView(vm: vm)
+            DetailView(vm: vm, selection: $sidebarSelection)
         }
         .navigationSplitViewStyle(.balanced)
+        .tint(theme.accentColor)
+        .preferredColorScheme(.dark)
+        .onAppear { _ = ThemeManager.shared }
     }
 }
 
 // MARK: - Sidebar
 
-enum SidebarItem: Hashable { case all, favorites, thisWeek, mood(Mood) }
+enum SidebarItem: Hashable { case all, favorites, thisWeek, mood(Mood), insights, onThisDay }
 
 struct SidebarView: View {
     @ObservedObject var vm: JournalViewModel
@@ -89,6 +94,11 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
+            Section {
+                SidebarRow(label: "Insights", icon: "chart.xyaxis.line", color: .accentColor, count: 0, tag: .insights)
+                SidebarRow(label: "On This Day", icon: "clock.arrow.circlepath", color: .teal, count: vm.onThisDay.count, tag: .onThisDay)
+            } header: { SidebarHeader("Discover") }
+
             Section {
                 SidebarRow(label: "All Entries", icon: "book.closed.fill", color: .accentColor, count: vm.entryCount, tag: .all)
                 SidebarRow(label: "Favorites", icon: "star.fill", color: .yellow, count: vm.entries.filter { $0.isFavorite }.count, tag: .favorites)
@@ -172,6 +182,8 @@ struct EntryListView: View {
         case .favorites: return vm.entries.filter { $0.isFavorite }
         case .thisWeek: return vm.entries.filter { $0.createdAt >= Date().addingTimeInterval(-7*24*3600) }
         case .mood(let m): return vm.entries.filter { $0.mood == m }
+        case .onThisDay: return vm.onThisDay
+        case .insights: return vm.entries
         }
     }
 
@@ -290,14 +302,18 @@ struct EntryCardView: View {
 
 struct DetailView: View {
     @ObservedObject var vm: JournalViewModel
+    @Binding var selection: SidebarItem?
+
     var body: some View {
         Group {
-            if let eid = vm.editingEntryId, let entry = vm.entries.first(where: { $0.id == eid }) {
+            if selection == .insights {
+                InsightsView(vm: vm)
+            } else if let eid = vm.editingEntryId, let entry = vm.entries.first(where: { $0.id == eid }) {
                 EditorView(vm: vm, entry: entry)
             } else if let entry = vm.selectedEntry {
                 ReadView(entry: entry, vm: vm)
             } else {
-                EmptyDetail()
+                EmptyDetail(vm: vm)
             }
         }
     }
@@ -306,16 +322,37 @@ struct DetailView: View {
 // MARK: - Empty Detail
 
 struct EmptyDetail: View {
+    @ObservedObject var vm: JournalViewModel
+
     var body: some View {
         VStack(spacing: 24) {
             ZStack {
                 Circle().fill(OmegaTheme.accent.opacity(0.08)).frame(width: 120, height: 120)
                 Image(systemName: "book.pages").font(.system(size: 44)).foregroundColor(OmegaTheme.accent.opacity(0.5))
             }
-            Text("Select an entry or create a new one").font(.system(size: 18, weight: .medium)).foregroundColor(.secondary)
-            Text("⌘N to start writing").font(.system(size: 12)).foregroundColor(.secondary.opacity(0.6))
+            VStack(spacing: 6) {
+                Text("Select an entry or create a new one").font(.system(size: 18, weight: .medium)).foregroundColor(.secondary)
+                Text("⌘N to start writing").font(.system(size: 12)).foregroundColor(.secondary.opacity(0.6))
+            }
+
+            Divider().frame(maxWidth: 320)
+
+            VStack(spacing: 12) {
+                Text("Today's prompt").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary).textCase(.uppercase).tracking(0.6)
+                Text(PromptGenerator.today())
+                    .font(.system(size: 16, weight: .medium))
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: 420)
+                Button { vm.createEntryFromPrompt() } label: {
+                    Label("Write on this prompt", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Start a new entry pre-filled with today's prompt")
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
     }
 }
 
@@ -510,6 +547,7 @@ struct EditorView: View {
 
 struct SettingsView: View {
     @State private var dbPath = DatabaseManager.shared.databasePath
+
     var body: some View {
         TabView {
             Form {
@@ -519,11 +557,140 @@ struct SettingsView: View {
                         Button("Show in Finder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: (dbPath as NSString).deletingLastPathComponent) }
                     }
                 }
-                LabeledContent("Total entries") { Text("\(DatabaseManager.shared.entryCount())") }
+                LabeledContent("Total entries") { Text("\\(DatabaseManager.shared.entryCount())") }
             }
             .tabItem { Label("General", systemImage: "gear") }
+
+            ThemesTab()
+                .tabItem { Label("Appearance", systemImage: "paintbrush") }
+
+            ExportTab()
+                .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
         }
-        .frame(width: 450, height: 200)
+        .frame(width: 460, height: 320)
+    }
+}
+
+// MARK: - Themes Tab
+
+struct ThemesTab: View {
+    @ObservedObject private var theme = ThemeManager.shared
+    @State private var accent: Color = .accentColor
+    @State private var background: Color = .black
+    @State private var sidebar: Color = .black
+    @State private var card: Color = .gray
+
+    private let columns = [GridItem(.adaptive(minimum: 130), spacing: 10)]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                GroupBox {
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        ForEach(Array(ThemePresets.all.keys).sorted(), id: \.self) { name in
+                            presetButton(name)
+                        }
+                    }
+                } label: { Label("Preset themes", systemImage: "swatchpalette") }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ColorPicker("Accent", selection: $accent, supportsOpacity: false)
+                        ColorPicker("Background", selection: $background, supportsOpacity: false)
+                        ColorPicker("Sidebar", selection: $sidebar, supportsOpacity: false)
+                        ColorPicker("Card", selection: $card, supportsOpacity: false)
+                        Text("Custom colors save automatically as a “Custom” theme.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                } label: { Label("Custom colors", systemImage: "eyedropper") }
+            }
+            .padding(16)
+        }
+        .onAppear {
+            accent = theme.accentColor
+            background = theme.backgroundColor
+            sidebar = theme.sidebarColor
+            card = theme.cardColor
+        }
+        .onChange(of: accent) { _, n in applyCustom() }
+        .onChange(of: background) { _, _ in applyCustom() }
+        .onChange(of: sidebar) { _, _ in applyCustom() }
+        .onChange(of: card) { _, _ in applyCustom() }
+    }
+
+    private func applyCustom() {
+        theme.applyCustom(accent: accent, background: background, sidebar: sidebar, card: card)
+    }
+
+    private func presetButton(_ name: String) -> some View {
+        let preset = ThemePresets.all[name]!
+        let selected = theme.themeName == name
+        return Button {
+            theme.applyTheme(named: name)
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 3) {
+                        ForEach(preset.swatchColors, id: \.self) { c in
+                            Circle().fill(c).frame(width: 13, height: 13)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(theme.accentColor)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? theme.accentColor : Color.secondary.opacity(0.15), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Export Tab
+
+struct ExportTab: View {
+    @State private var exportMessage = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Export all entries as a single Markdown file.").font(.system(size: 13))
+                    Button {
+                        exportAll()
+                    } label: {
+                        Label("Export to Markdown…", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if !exportMessage.isEmpty {
+                        Text(exportMessage).font(.system(size: 12)).foregroundColor(.secondary)
+                    }
+                }
+                .padding(6)
+            } label: { Label("Markdown export", systemImage: "doc.text") }
+        }
+        .padding(16)
+    }
+
+    private func exportAll() {
+        let panel = NSSavePanel()
+        panel.title = "Export journal as Markdown"
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = "Omega-Journal-Export.md"
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try MDExporter.export(DatabaseManager.shared.fetchAllEntries(), to: url)
+                exportMessage = "Exported \(DatabaseManager.shared.entryCount()) entries to \(url.lastPathComponent)"
+            } catch {
+                exportMessage = "Export failed: \(error.localizedDescription)"
+            }
+        }
     }
 }
 
