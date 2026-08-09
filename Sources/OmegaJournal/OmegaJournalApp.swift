@@ -672,43 +672,75 @@ struct ReadView: View {
     }
 }
 
-// MARK: - Custom Tooltip
+// MARK: - Shared Hover Card / Tooltip chrome
+// Used by action-button tooltips and the Insights calendar day hovers.
+
+enum OmegaHoverChrome {
+    static let fill = Color(red: 0.11, green: 0.10, blue: 0.16)
+    static let cornerRadius: CGFloat = 10
+    static let arrowWidth: CGFloat = 10
+    static let arrowHeight: CGFloat = 5
+}
+
+/// Dark glass card with accent border — shared look for tooltips & calendar hovers.
+struct OmegaHoverCard<Content: View>: View {
+    let accent: Color
+    var showsArrow: Bool = true
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: OmegaHoverChrome.cornerRadius, style: .continuous)
+                            .fill(OmegaHoverChrome.fill)
+                        RoundedRectangle(cornerRadius: OmegaHoverChrome.cornerRadius, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent.opacity(0.14), Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        RoundedRectangle(cornerRadius: OmegaHoverChrome.cornerRadius, style: .continuous)
+                            .strokeBorder(accent.opacity(0.55), lineWidth: 1)
+                    }
+                )
+                .shadow(color: Color.black.opacity(0.45), radius: 14, x: 0, y: 6)
+                .shadow(color: accent.opacity(0.22), radius: 8, x: 0, y: 2)
+
+            if showsArrow {
+                Triangle()
+                    .fill(OmegaHoverChrome.fill)
+                    .frame(width: OmegaHoverChrome.arrowWidth, height: OmegaHoverChrome.arrowHeight)
+                    .overlay(
+                        Triangle()
+                            .stroke(accent.opacity(0.55), lineWidth: 1)
+                            .frame(width: OmegaHoverChrome.arrowWidth, height: OmegaHoverChrome.arrowHeight)
+                    )
+                    .offset(y: -1)
+            }
+        }
+        .compositingGroup()
+    }
+}
 
 struct CustomTooltip: View {
     let text: String
     let color: Color
 
     var body: some View {
-        VStack(spacing: 0) {
+        OmegaHoverCard(accent: color) {
             Text(text)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(.white)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(red: 0.12, green: 0.10, blue: 0.20))
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(color.opacity(0.6), lineWidth: 1)
-                    }
-                )
-                .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 4)
-                .shadow(color: color.opacity(0.3), radius: 6, x: 0, y: 2)
-
-            Triangle()
-                .fill(Color(red: 0.12, green: 0.10, blue: 0.20))
-                .frame(width: 8, height: 4)
-                .overlay(
-                    Triangle()
-                        .stroke(color.opacity(0.6), lineWidth: 1)
-                        .frame(width: 8, height: 4)
-                )
-                .offset(y: -1)
         }
-        .compositingGroup()
     }
 }
 
@@ -725,7 +757,7 @@ struct TooltipContainer<Content: View>: View {
                 if hovering {
                     isHovered = true
                     Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        try? await Task.sleep(nanoseconds: 180_000_000)
                         if isHovered { showTip = true }
                     }
                 } else {
@@ -734,14 +766,14 @@ struct TooltipContainer<Content: View>: View {
                 }
             }
             .background(alignment: .top) {
-                if showTip {
+                if showTip && !tooltip.isEmpty {
                     CustomTooltip(text: tooltip, color: color)
-                        .offset(y: -40)
-                        .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .bottom)))
+                        .offset(y: -44)
+                        .transition(.opacity.combined(with: .scale(scale: 0.88, anchor: .bottom)))
                         .allowsHitTesting(false)
                 }
             }
-            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: showTip)
+            .animation(.spring(response: 0.25, dampingFraction: 0.82), value: showTip)
             .zIndex(showTip ? 1000 : 0)
     }
 }
@@ -799,8 +831,17 @@ struct ActionButton: View {
                     .foregroundColor(iconColor)
                     .frame(width: 36, height: 36)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(hoverBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                hover
+                                    ? (isDestructive ? Color.red.opacity(0.35) : color.opacity(active ? 0.45 : 0.25))
+                                    : Color.clear,
+                                lineWidth: 1
+                            )
                     )
                     .scaleEffect(hover ? 1.08 : 1.0)
             }
