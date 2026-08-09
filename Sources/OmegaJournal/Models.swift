@@ -342,6 +342,14 @@ final class JournalViewModel: ObservableObject {
         editingEntryId = entry.id
     }
 
+    func toggleSelection(_ entry: JournalEntry) {
+        if selectedEntryId == entry.id {
+            selectedEntryId = nil
+        } else {
+            selectedEntryId = entry.id
+        }
+    }
+
     func startEditing(_ entry: JournalEntry) { editingEntryId = entry.id }
 
     func autoSave(_ entry: JournalEntry) {
@@ -430,6 +438,34 @@ final class JournalViewModel: ObservableObject {
             map[cal.startOfDay(for: e.createdAt), default: 0] += 1
         }
         return map
+    }
+
+    /// Rich per-day info for the calendar heatmap hover.
+    struct DayInfo {
+        let date: Date
+        let count: Int
+        let moods: [Mood]
+        let titles: [String]
+    }
+
+    func dailyInfo(daysBack: Int = 210) -> [Date: DayInfo] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let start = cal.date(byAdding: .day, value: -(daysBack - 1), to: today) else { return [:] }
+        var map: [Date: [JournalEntry]] = [:]
+        for e in entries where e.createdAt >= start {
+            map[cal.startOfDay(for: e.createdAt), default: []].append(e)
+        }
+        var result: [Date: DayInfo] = [:]
+        for (date, dayEntries) in map {
+            result[date] = DayInfo(
+                date: date,
+                count: dayEntries.count,
+                moods: dayEntries.map(\.mood),
+                titles: dayEntries.prefix(3).map { $0.title.isEmpty ? "Untitled" : $0.title }
+            )
+        }
+        return result
     }
 
     var moodDistribution: [MoodCount] {

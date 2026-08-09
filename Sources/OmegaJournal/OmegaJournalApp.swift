@@ -39,18 +39,48 @@ extension Notification.Name {
 // MARK: - Theme
 
 enum OmegaTheme {
-    static let accent = Color(red: 0.35, green: 0.45, blue: 0.75)
-    static let accentGradient = LinearGradient(
-        colors: [Color(red: 0.30, green: 0.40, blue: 0.70), Color(red: 0.45, green: 0.35, blue: 0.65)],
-        startPoint: .topLeading, endPoint: .bottomTrailing
-    )
-    static let sidebarGradient = LinearGradient(
-        colors: [Color(red: 0.12, green: 0.13, blue: 0.18), Color(red: 0.08, green: 0.09, blue: 0.14)],
-        startPoint: .top, endPoint: .bottom
-    )
-    static let titleFont = Font.system(size: 30, weight: .bold, design: .serif)
+    // MARK: Spacing & Layout
+    static let contentMaxWidth: CGFloat = 720
+    static let contentPadding: CGFloat = 48
+    static let cardPadding: CGFloat = 18
+    static let cardRadius: CGFloat = 12
+    static let buttonRadius: CGFloat = 8
+    static let sidebarWidth: CGFloat = 260
+
+    // MARK: Typography
+    static let titleFont = Font.system(size: 34, weight: .bold, design: .serif)
     static let bodyFont = Font.system(size: 16, design: .serif)
     static let headerFont = Font.system(size: 11, weight: .semibold)
+    static let sectionTitleFont = Font.system(size: 13, weight: .semibold)
+    static let metaFont = Font.system(size: 12)
+    static let captionFont = Font.system(size: 11)
+
+    // MARK: Surfaces
+    static func cardBackground(isDark: Bool) -> Color {
+        isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)
+    }
+    static func cardBorder(isDark: Bool) -> Color {
+        isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
+    }
+    static func hairline(isDark: Bool) -> Color {
+        isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.10)
+    }
+
+    // MARK: Shadows
+    static let cardShadow = Color.black.opacity(0.15)
+    static let cardShadowRadius: CGFloat = 4
+    static let cardShadowY: CGFloat = 2
+
+    // MARK: Interactive
+    static func hoverFill(isDark: Bool) -> Color {
+        isDark ? Color.white.opacity(0.04) : Color.black.opacity(0.03)
+    }
+    static func selectedFill(accent: Color) -> Color { accent.opacity(0.14) }
+    static func accentSoft(accent: Color) -> Color { accent.opacity(0.20) }
+
+    // MARK: Buttons
+    static let toolbarButtonSize: CGFloat = 28
+    static let toolbarIconSize: CGFloat = 13
 }
 
 // MARK: - Content
@@ -95,47 +125,73 @@ struct SidebarView: View {
     @Binding var selection: SidebarItem?
 
     var body: some View {
-        List(selection: $selection) {
-            Section {
-                SidebarRow(label: "Insights", icon: "chart.xyaxis.line", color: .accentColor, count: 0, tag: .insights)
-                SidebarRow(label: "On This Day", icon: "clock.arrow.circlepath", color: .teal, count: vm.onThisDay.count, tag: .onThisDay)
-            } header: { SidebarHeader("Discover") }
+        VStack(spacing: 0) {
+            brandHeader
+            List(selection: $selection) {
+                Section {
+                    SidebarRow(label: "Insights", icon: "chart.xyaxis.line", color: .accentColor, count: 0, tag: .insights)
+                    SidebarRow(label: "On This Day", icon: "clock.arrow.circlepath", color: .teal, count: vm.onThisDay.count, tag: .onThisDay)
+                } header: { SidebarHeader("Discover") }
 
-            Section {
-                SidebarRow(label: "All Entries", icon: "book.closed.fill", color: .accentColor, count: vm.entryCount, tag: .all)
-                SidebarRow(label: "Favorites", icon: "star.fill", color: .yellow, count: vm.entries.filter { $0.isFavorite }.count, tag: .favorites)
-                SidebarRow(label: "This Week", icon: "calendar", color: .green, count: vm.entriesThisWeek, tag: .thisWeek)
-            } header: { SidebarHeader("Library") }
+                Section {
+                    SidebarRow(label: "All Entries", icon: "book.closed.fill", color: .accentColor, count: vm.entryCount, tag: .all)
+                    SidebarRow(label: "Favorites", icon: "star.fill", color: .yellow, count: vm.entries.filter { $0.isFavorite }.count, tag: .favorites)
+                    SidebarRow(label: "This Week", icon: "calendar", color: .green, count: vm.entriesThisWeek, tag: .thisWeek)
+                } header: { SidebarHeader("Library") }
 
-            Section {
-                ForEach(Mood.allCases) { mood in
-                    HStack(spacing: 10) {
-                        Text(mood.emoji).font(.title3)
-                        Text(mood.label).foregroundColor(.primary)
-                        Spacer()
-                        if let c = vm.moodThisWeek[mood], c > 0 {
-                            Text("\(c)").font(.caption2.weight(.medium))
-                                .padding(.horizontal, 7).padding(.vertical, 3)
-                                .background(mood.color.opacity(0.25)).clipShape(Capsule())
-                        }
+                Section {
+                    ForEach(Mood.allCases) { mood in
+                        moodRow(mood)
                     }
-                    .tag(SidebarItem.mood(mood))
-                }
-            } header: { SidebarHeader("Moods") }
+                } header: { SidebarHeader("Moods") }
 
-            Section {
-                StatRow(title: "Total Entries", value: "\(vm.entryCount)")
-                StatRow(title: "This Week", value: "\(vm.entriesThisWeek)")
-                StatRow(title: "Avg Mood", value: String(format: "%.1f", vm.averageMood))
-                StatRow(title: "Total Words", value: "\(vm.totalWordCount)")
-                StatRow(title: "Writing Streak", value: "\(vm.writingStreak) days")
-            } header: { SidebarHeader("Statistics") }
+                Section {
+                    StatRow(title: "Total Entries", value: "\(vm.entryCount)")
+                    StatRow(title: "This Week", value: "\(vm.entriesThisWeek)")
+                    StatRow(title: "Avg Mood", value: String(format: "%.1f", vm.averageMood))
+                    StatRow(title: "Total Words", value: "\(vm.totalWordCount)")
+                    StatRow(title: "Writing Streak", value: "\(vm.writingStreak) days")
+                } header: { SidebarHeader("Statistics") }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(theme.sidebarColor)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
         .background(theme.sidebarColor)
-        .navigationTitle("Omega Journal")
-        .frame(minWidth: 240)
+        .frame(minWidth: OmegaTheme.sidebarWidth)
+    }
+
+    private var brandHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "book.pages")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(theme.accentColor)
+            Text("Omega Journal")
+                .font(.system(size: 15, weight: .semibold, design: .serif))
+                .foregroundColor(.primary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .background(theme.sidebarColor)
+    }
+
+    private func moodRow(_ mood: Mood) -> some View {
+        HStack(spacing: 10) {
+            Text(mood.emoji).font(.title3)
+            Text(mood.label).foregroundColor(.primary)
+            Spacer()
+            if let c = vm.moodThisWeek[mood], c > 0 {
+                Text("\(c)")
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(mood.color.opacity(0.25))
+                    .clipShape(Capsule())
+            }
+        }
+        .tag(SidebarItem.mood(mood))
     }
 }
 
@@ -147,7 +203,8 @@ struct SidebarHeader: View {
             .font(OmegaTheme.headerFont)
             .foregroundColor(.secondary)
             .textCase(.uppercase)
-            .tracking(0.5)
+            .tracking(0.8)
+            .padding(.leading, 2)
     }
 }
 
@@ -157,11 +214,20 @@ struct SidebarRow: View {
     let tag: SidebarItem
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).foregroundColor(color).frame(width: 20)
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .font(.system(size: 13))
+                .frame(width: 20)
             Text(label)
+                .font(.system(size: 13))
             Spacer()
-            if count > 0 { Text("\(count)").font(.caption2.weight(.medium)).foregroundColor(.secondary) }
+            if count > 0 {
+                Text("\(count)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundColor(.secondary)
+            }
         }
+        .padding(.vertical, 3)
         .tag(tag)
     }
 }
@@ -169,7 +235,16 @@ struct SidebarRow: View {
 struct StatRow: View {
     let title: String, value: String
     var body: some View {
-        HStack { Text(title).font(.caption).foregroundColor(.secondary); Spacer(); Text(value).font(.caption.weight(.medium)) }
+        HStack {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.medium))
+                .foregroundColor(.primary)
+        }
+        .padding(.vertical, 1)
     }
 }
 
@@ -207,64 +282,87 @@ struct EntryListView: View {
 
     private var searchBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundColor(.secondary).font(.system(size: 13))
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+                .font(.system(size: 13))
             TextField("Search entries...", text: $vm.searchText)
-                .textFieldStyle(.plain).font(.system(size: 13))
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
                 .onChange(of: vm.searchText) { _, _ in vm.reload() }
             if !vm.searchText.isEmpty {
-                Button { vm.searchText = ""; vm.reload() } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
-                    .buttonStyle(.plain)
+                Button { vm.searchText = ""; vm.reload() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private var sortBar: some View {
         HStack {
             Menu {
-                ForEach(SortOrder.allCases) { o in Button(o.rawValue) { vm.sortOrder = o; vm.reload() } }
+                ForEach(SortOrder.allCases) { o in
+                    Button(o.rawValue) { vm.sortOrder = o; vm.reload() }
+                }
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 10))
-                    Text(vm.sortOrder.rawValue).font(.system(size: 11))
-                }.foregroundColor(.secondary)
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 10))
+                    Text(vm.sortOrder.rawValue)
+                        .font(.system(size: 11))
+                }
+                .foregroundColor(.secondary)
             }
-            .menuStyle(.borderlessButton).fixedSize()
+            .menuStyle(.borderlessButton)
+            .fixedSize()
             Spacer()
             Text("\(filteredEntries.count) \(filteredEntries.count == 1 ? "entry" : "entries")")
-                .font(.system(size: 11)).foregroundColor(.secondary)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
         }
-        .padding(.horizontal, 12).padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
     private var entryList: some View {
         if filteredEntries.isEmpty {
             VStack(spacing: 16) {
-                Image(systemName: "book").font(.system(size: 44)).foregroundColor(.secondary.opacity(0.5))
+                Image(systemName: "book")
+                    .font(.system(size: 44))
+                    .foregroundColor(.secondary.opacity(0.5))
                 Text(vm.searchText.isEmpty ? "No entries yet" : "No results found")
-                    .font(.system(size: 16, weight: .medium)).foregroundColor(.secondary)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.secondary)
                 Text(vm.searchText.isEmpty ? "Press ⌘N or click ✏️ to start writing" : "Try a different search")
-                    .font(.system(size: 12)).foregroundColor(.secondary.opacity(0.7))
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary.opacity(0.7))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(selection: $vm.selectedEntryId) {
-                ForEach(filteredEntries) { entry in
-                    EntryCardView(entry: entry, isSelected: vm.selectedEntryId == entry.id)
-                        .tag(entry.id)
-                        .contextMenu {
-                            Button(entry.isPinned ? "Unpin" : "Pin") { vm.togglePin(entry) }
-                            Button(entry.isFavorite ? "Unfavorite" : "Favorite") { vm.toggleFavorite(entry) }
-                            Divider()
-                            Button("Delete", role: .destructive) { vm.deleteEntry(entry) }
-                        }
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(filteredEntries) { entry in
+                        EntryCardView(entry: entry, isSelected: vm.selectedEntryId == entry.id)
+                            .tag(entry.id)
+                            .onTapGesture { vm.toggleSelection(entry) }
+                            .contextMenu {
+                                Button(entry.isPinned ? "Unpin" : "Pin") { vm.togglePin(entry) }
+                                Button(entry.isFavorite ? "Unfavorite" : "Favorite") { vm.toggleFavorite(entry) }
+                                Divider()
+                                Button("Delete", role: .destructive) { vm.deleteEntry(entry) }
+                            }
+                    }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .listStyle(.inset)
             .scrollContentBackground(.hidden)
             .background(theme.backgroundColor)
-            .alternatingRowBackgrounds()
         }
     }
 }
@@ -275,35 +373,120 @@ struct EntryCardView: View {
     let entry: JournalEntry
     let isSelected: Bool
     @ObservedObject private var theme = ThemeManager.shared
+    @State private var isHovered = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var isDark: Bool { theme.colorScheme == .dark }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+            .fill(isSelected
+                ? theme.accentColor.opacity(0.14)
+                : (isHovered
+                    ? theme.cardColor.opacity(0.85)
+                    : theme.cardColor.opacity(0.55)))
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Title row
             HStack(spacing: 6) {
-                Circle().fill(entry.mood.color).frame(width: 8, height: 8)
-                if entry.isPinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundColor(.orange) }
-                if entry.isFavorite { Image(systemName: "star.fill").font(.system(size: 9)).foregroundColor(.yellow) }
+                Circle()
+                    .fill(entry.mood.color)
+                    .frame(width: 7, height: 7)
                 Text(entry.title.isEmpty ? "Untitled" : entry.title)
-                    .font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
                     .foregroundColor(entry.title.isEmpty ? .secondary : .primary)
                 Spacer()
+                if entry.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.orange)
+                }
+                if entry.isFavorite {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.yellow)
+                }
             }
-            Text(entry.preview).font(.system(size: 12)).foregroundColor(.secondary).lineLimit(2)
-            HStack(spacing: 8) {
-                Text(entry.createdAt.formatted(.dateTime.month().day().year()))
-                    .font(.system(size: 10)).foregroundColor(.secondary.opacity(0.7))
-                Text("·").font(.system(size: 10)).foregroundColor(.secondary.opacity(0.5))
-                Text("\(entry.wordCount) words").font(.system(size: 10)).foregroundColor(.secondary.opacity(0.7))
+
+            // Preview
+            Text(entry.preview)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .lineSpacing(2)
+
+            // Metadata row
+            HStack(spacing: 6) {
+                Text(relativeDate(entry.createdAt))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.7))
+                Text("·")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.5))
+                Text("\(entry.wordCount) words")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.7))
                 if !entry.tags.isEmpty {
                     Spacer()
-                    HStack(spacing: 3) {
-                        ForEach(entry.tags.prefix(2), id: \.self) { Text("#\($0)").font(.system(size: 9)).foregroundColor(theme.accentColor.opacity(0.85)) }
-                        if entry.tags.count > 2 { Text("+\(entry.tags.count - 2)").font(.system(size: 9)).foregroundColor(.secondary.opacity(0.5)) }
+                    HStack(spacing: 4) {
+                        ForEach(entry.tags.prefix(2), id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(theme.accentColor.opacity(0.85))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(theme.accentColor.opacity(0.10))
+                                .clipShape(Capsule())
+                        }
+                        if entry.tags.count > 2 {
+                            Text("+\(entry.tags.count - 2)")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary.opacity(0.5))
+                        }
                     }
                 }
             }
         }
-        .padding(.vertical, 6).padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? theme.accentColor.opacity(0.18) : theme.cardColor.opacity(0.55)))
+        .padding(OmegaTheme.cardPadding)
+        .background(cardBackground)
+        .contentShape(Rectangle())
+        .overlay(
+            RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                .strokeBorder(
+                    isSelected
+                        ? theme.accentColor.opacity(0.35)
+                        : (isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)),
+                    lineWidth: 1
+                )
+        )
+        .shadow(
+            color: isDark ? Color.black.opacity(0.25) : Color.black.opacity(0.08),
+            radius: isSelected ? 6 : 3,
+            x: 0,
+            y: isSelected ? 3 : 1
+        )
+        .scaleEffect(isHovered && !isSelected ? 1.01 : 1.0)
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .onHover { isHovered = $0 }
+    }
+
+    var body: some View {
+        content
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(entry.title.isEmpty ? "Untitled entry" : entry.title)
+            .accessibilityHint("Double-tap to open")
+            .accessibilityAddTraits(.isButton)
+    }
+
+    private func relativeDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let days = cal.dateComponents([.day], from: date, to: Date()).day ?? 0
+        if days < 7 { return "\(days)d ago" }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
     }
 }
 
@@ -335,34 +518,51 @@ struct EmptyDetail: View {
     @ObservedObject private var theme = ThemeManager.shared
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             ZStack {
-                Circle().fill(theme.accentColor.opacity(0.14)).frame(width: 120, height: 120)
-                Image(systemName: "book.pages").font(.system(size: 44)).foregroundColor(theme.accentColor.opacity(0.8))
-            }
-            VStack(spacing: 6) {
-                Text("Select an entry or create a new one").font(.system(size: 18, weight: .medium)).foregroundColor(.secondary)
-                Text("⌘N to start writing").font(.system(size: 12)).foregroundColor(.secondary.opacity(0.6))
+                Circle()
+                    .fill(theme.accentColor.opacity(0.10))
+                    .frame(width: 110, height: 110)
+                Image(systemName: "book.pages")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundColor(theme.accentColor.opacity(0.7))
             }
 
-            Divider().frame(maxWidth: 320)
+            VStack(spacing: 8) {
+                Text("Select an entry or create a new one")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundColor(.secondary)
+                Text("⌘N to start writing")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
 
-            VStack(spacing: 12) {
-                Text("Today's prompt").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary).textCase(.uppercase).tracking(0.6)
+            Divider()
+                .frame(maxWidth: 280)
+
+            VStack(spacing: 14) {
+                Text("Today's prompt")
+                    .font(OmegaTheme.headerFont)
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.8)
                 Text(PromptGenerator.today())
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 16, weight: .medium, design: .serif))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.primary)
-                    .frame(maxWidth: 420)
+                    .lineSpacing(3)
+                    .frame(maxWidth: 380)
                 Button { vm.createEntryFromPrompt() } label: {
                     Label("Write on this prompt", systemImage: "square.and.pencil")
+                        .font(.system(size: 13, weight: .medium))
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .help("Start a new entry pre-filled with today's prompt")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
+        .padding(48)
     }
 }
 
@@ -374,48 +574,83 @@ struct ReadView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @State private var showDeleteConfirm = false
 
+    private var isDark: Bool { theme.colorScheme == .dark }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
+                // Hero section
                 HStack(alignment: .top, spacing: 16) {
-                    Text(entry.mood.emoji).font(.system(size: 40))
+                    Text(entry.mood.emoji)
+                        .font(.system(size: 44))
                     VStack(alignment: .leading, spacing: 6) {
                         Text(entry.title.isEmpty ? "Untitled" : entry.title)
                             .font(OmegaTheme.titleFont)
-                        HStack(spacing: 10) {
+                            .foregroundColor(.primary)
+                        HStack(spacing: 8) {
                             Text(entry.createdAt.formatted(date: .complete, time: .shortened))
-                                .font(.system(size: 12)).foregroundColor(.secondary)
+                                .font(OmegaTheme.metaFont)
+                                .foregroundColor(.secondary)
                             if entry.updatedAt > entry.createdAt.addingTimeInterval(1) {
-                                Text("· Edited \(entry.updatedAt.formatted(.relative(presentation: .named)))")
-                                    .font(.system(size: 12)).foregroundColor(.secondary)
+                                Text("·")
+                                    .font(OmegaTheme.metaFont)
+                                    .foregroundColor(.secondary.opacity(0.5))
+                                Text("Edited \(entry.updatedAt.formatted(.relative(presentation: .named)))")
+                                    .font(OmegaTheme.metaFont)
+                                    .foregroundColor(.secondary)
                             }
+                            Text("·")
+                                .font(OmegaTheme.metaFont)
+                                .foregroundColor(.secondary.opacity(0.5))
+                            Text(entry.readingTime)
+                                .font(OmegaTheme.metaFont)
+                                .foregroundColor(.secondary)
                         }
                     }
                     Spacer()
                     actionButtons
                 }
-                HStack(spacing: 8) {
-                    Text("Mood:").font(.system(size: 13)).foregroundColor(.secondary)
-                    Text(entry.mood.label).font(.system(size: 13, weight: .medium)).foregroundColor(entry.mood.color)
-                    Spacer()
-                }
-                if !entry.tags.isEmpty {
-                    FlowLayout(spacing: 6) {
-                        ForEach(entry.tags, id: \.self) { tag in
-                            Text("#\(tag)").font(.system(size: 12))
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(theme.accentColor.opacity(0.14)).clipShape(Capsule())
+
+                // Mood & tags
+                HStack(spacing: 12) {
+                    HStack(spacing: 6) {
+                        Text("Mood:")
+                            .font(OmegaTheme.metaFont)
+                            .foregroundColor(.secondary)
+                        Text(entry.mood.label)
+                            .font(OmegaTheme.metaFont.weight(.medium))
+                            .foregroundColor(entry.mood.color)
+                    }
+                    if !entry.tags.isEmpty {
+                        FlowLayout(spacing: 6) {
+                            ForEach(entry.tags, id: \.self) { tag in
+                                Text("#\(tag)")
+                                    .font(OmegaTheme.captionFont.weight(.medium))
+                                    .foregroundColor(theme.accentColor)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(theme.accentColor.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
                         }
                     }
+                    Spacer()
                 }
+
                 Divider()
+                    .background(isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.10))
+
+                // Body
                 Text(entry.body.isEmpty ? "No content" : entry.body)
                     .font(OmegaTheme.bodyFont)
                     .foregroundColor(entry.body.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled).lineSpacing(4)
+                    .textSelection(.enabled)
+                    .lineSpacing(5)
             }
-            .padding(40).frame(maxWidth: 650, alignment: .leading).frame(maxWidth: .infinity)
+            .padding(OmegaTheme.contentPadding)
+            .frame(maxWidth: OmegaTheme.contentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.backgroundColor)
@@ -428,7 +663,7 @@ struct ReadView: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: .orange, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin entry" : "Pin entry") { vm.togglePin(entry) }
             ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite, tooltip: entry.isFavorite ? "Remove from favorites" : "Add to favorites") { vm.toggleFavorite(entry) }
             ActionButton(icon: "pencil", color: theme.accentColor, active: false, tooltip: "Edit entry") { vm.startEditing(entry) }
@@ -589,46 +824,74 @@ struct EditorView: View {
     @State private var tags: [String] = []
     @State private var tagInput = ""
     @State private var saveStatus = "Saved"
+    @State private var isBodyFocused = false
+
+    private var isDark: Bool { theme.colorScheme == .dark }
+    private var currentWordCount: Int { bodyText.isEmpty ? 0 : bodyText.split(whereSeparator: { $0.isWhitespace }).count }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     TextField("Entry title...", text: $title, axis: .vertical)
-                        .font(OmegaTheme.titleFont).textFieldStyle(.plain).lineLimit(1...3)
+                        .font(OmegaTheme.titleFont)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1...3)
                         .onChange(of: title) { _, _ in autoSave() }
 
                     HStack(spacing: 12) {
                         Text(entry.createdAt.formatted(date: .complete, time: .shortened))
-                            .font(.system(size: 12)).foregroundColor(.secondary)
-                        Text("·").font(.system(size: 12)).foregroundColor(.secondary.opacity(0.5))
-                        Text("\(currentWordCount) words").font(.system(size: 12)).foregroundColor(.secondary)
+                            .font(OmegaTheme.metaFont)
+                            .foregroundColor(.secondary)
+                        Text("·")
+                            .font(OmegaTheme.metaFont)
+                            .foregroundColor(.secondary.opacity(0.5))
+                        Text("\(currentWordCount) words")
+                            .font(OmegaTheme.metaFont)
+                            .foregroundColor(.secondary)
                         Spacer()
-                        Text(saveStatus).font(.system(size: 11)).foregroundColor(.secondary.opacity(0.5))
+                        saveIndicator
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("How are you feeling?").font(.system(size: 14, weight: .medium))
-                        HStack(spacing: 8) { ForEach(Mood.allCases) { moodButton($0) } }
+                        Text("How are you feeling?")
+                            .font(OmegaTheme.sectionTitleFont)
+                        HStack(spacing: 8) {
+                            ForEach(Mood.allCases) { moodButton($0) }
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Tags").font(.system(size: 14, weight: .medium))
+                        Text("Tags")
+                            .font(OmegaTheme.sectionTitleFont)
                         FlowLayout(spacing: 6) {
                             ForEach(tags, id: \.self) { tag in
                                 HStack(spacing: 4) {
-                                    Text("#\(tag)").font(.system(size: 12))
-                                    Button { tags.removeAll { $0 == tag }; autoSave() } label: {
-                                        Image(systemName: "xmark.circle.fill").font(.system(size: 10)).foregroundColor(.secondary)
-                                    }.buttonStyle(.plain)
+                                    Text("#\(tag)")
+                                        .font(OmegaTheme.captionFont)
+                                    Button {
+                                        tags.removeAll { $0 == tag }
+                                        autoSave()
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(theme.accentColor.opacity(0.14)).clipShape(Capsule())
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(theme.accentColor.opacity(0.12))
+                                .clipShape(Capsule())
                             }
                             TextField("Add tag...", text: $tagInput)
-                                .font(.system(size: 12)).textFieldStyle(.plain)
-                                .padding(.horizontal, 8).padding(.vertical, 5)
-                                .background(Color(nsColor: .controlBackgroundColor)).clipShape(Capsule()).frame(width: 110)
+                                .font(OmegaTheme.captionFont)
+                                .textFieldStyle(.plain)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(theme.cardColor.opacity(0.6))
+                                .clipShape(Capsule())
+                                .frame(width: 100)
                                 .onSubmit {
                                     let t = tagInput.trimmingCharacters(in: .whitespaces)
                                     if !t.isEmpty && !tags.contains(t) { tags.append(t); autoSave() }
@@ -638,48 +901,111 @@ struct EditorView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Entry").font(.system(size: 14, weight: .medium))
+                        Text("Entry")
+                            .font(OmegaTheme.sectionTitleFont)
                         TextEditor(text: $bodyText)
-                            .font(OmegaTheme.bodyFont).frame(minHeight: 280).padding(12)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .textBackgroundColor)))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
-                            .onChange(of: bodyText) { _, _ in autoSave() }.lineSpacing(4)
+                            .font(OmegaTheme.bodyFont)
+                            .frame(minHeight: 320)
+                            .padding(14)
+                            .background(
+                                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                                    .fill(theme.cardColor.opacity(0.4))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                                    .strokeBorder(
+                                        isBodyFocused
+                                            ? theme.accentColor.opacity(0.5)
+                                            : (isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.10)),
+                                        lineWidth: 1
+                                    )
+                            )
+                            .onChange(of: bodyText) { _, _ in autoSave() }
+                            .lineSpacing(5)
+                            .onTapGesture { isBodyFocused = true }
                     }
                 }
-                .padding(40).frame(maxWidth: 650, alignment: .leading).frame(maxWidth: .infinity)
+                .padding(OmegaTheme.contentPadding)
+                .frame(maxWidth: OmegaTheme.contentMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
+
+            // Bottom bar
             HStack {
-                Button("Cancel") { vm.stopEditing() }.buttonStyle(.bordered)
+                Button("Cancel") { vm.stopEditing() }
+                    .buttonStyle(.bordered)
                 Spacer()
-                Button("Done") { vm.stopEditing() }.buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
+                Button("Done") { vm.stopEditing() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: .command)
             }
-            .padding(.horizontal, 40).padding(.vertical, 12).background(theme.sidebarColor)
+            .padding(.horizontal, OmegaTheme.contentPadding)
+            .padding(.vertical, 12)
+            .background(theme.sidebarColor)
+            .overlay(alignment: .top) {
+                Divider()
+                    .background(isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.10))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { title = entry.title; bodyText = entry.body; mood = entry.mood; tags = entry.tags }
+        .onAppear {
+            title = entry.title
+            bodyText = entry.body
+            mood = entry.mood
+            tags = entry.tags
+        }
     }
 
-    private var currentWordCount: Int { bodyText.isEmpty ? 0 : bodyText.split(whereSeparator: { $0.isWhitespace }).count }
+    private var saveIndicator: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(saveStatus == "Saved" ? Color.green : Color.orange)
+                .frame(width: 6, height: 6)
+            Text(saveStatus)
+                .font(OmegaTheme.captionFont)
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+    }
 
     private func moodButton(_ m: Mood) -> some View {
         let sel = mood == m
-        return Button { mood = m; autoSave() } label: {
+        return Button {
+            mood = m
+            autoSave()
+        } label: {
             VStack(spacing: 4) {
-                Text(m.emoji).font(.system(size: 26))
-                Text(m.label).font(.system(size: 10))
+                Text(m.emoji)
+                    .font(.system(size: 26))
+                Text(m.label)
+                    .font(.system(size: 10))
+                    .foregroundColor(sel ? .primary : .secondary)
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(sel ? theme.accentColor.opacity(0.2) : theme.cardColor))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(sel ? theme.accentColor : Color.clear, lineWidth: 2))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                    .fill(sel ? theme.accentColor.opacity(0.18) : theme.cardColor.opacity(0.4))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                    .strokeBorder(sel ? theme.accentColor : Color.clear, lineWidth: 1.5)
+            )
         }
         .buttonStyle(.plain)
     }
 
     private func autoSave() {
         saveStatus = "Saving..."
-        var u = entry; u.title = title; u.body = bodyText; u.mood = mood; u.tags = tags
+        var u = entry
+        u.title = title
+        u.body = bodyText
+        u.mood = mood
+        u.tags = tags
         vm.autoSave(u)
-        Task { @MainActor in try? await Task.sleep(nanoseconds: 900_000_000); saveStatus = "Saved" }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            saveStatus = "Saved"
+        }
     }
 }
 
@@ -707,7 +1033,7 @@ struct SettingsView: View {
             ExportTab()
                 .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
         }
-        .frame(width: 460, height: 320)
+        .frame(width: 520, height: 380)
     }
 }
 
@@ -720,31 +1046,40 @@ struct ThemesTab: View {
     @State private var sidebar: Color = .black
     @State private var card: Color = .gray
 
-    private let columns = [GridItem(.adaptive(minimum: 130), spacing: 10)]
+    private let columns = [GridItem(.adaptive(minimum: 140), spacing: 12)]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 GroupBox {
-                    LazyVGrid(columns: columns, spacing: 10) {
+                    LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(Array(ThemePresets.all.keys).sorted(), id: \.self) { name in
                             presetButton(name)
                         }
                     }
-                } label: { Label("Preset themes", systemImage: "swatchpalette") }
+                    .padding(.vertical, 4)
+                } label: {
+                    Label("Preset themes", systemImage: "swatchpalette")
+                        .font(.system(size: 13, weight: .medium))
+                }
 
                 GroupBox {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
                         ColorPicker("Accent", selection: $accent, supportsOpacity: false)
                         ColorPicker("Background", selection: $background, supportsOpacity: false)
                         ColorPicker("Sidebar", selection: $sidebar, supportsOpacity: false)
                         ColorPicker("Card", selection: $card, supportsOpacity: false)
                         Text("Custom colors save automatically as a “Custom” theme.")
-                            .font(.caption).foregroundColor(.secondary)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                } label: { Label("Custom colors", systemImage: "eyedropper") }
+                    .padding(.vertical, 4)
+                } label: {
+                    Label("Custom colors", systemImage: "eyedropper")
+                        .font(.system(size: 13, weight: .medium))
+                }
             }
-            .padding(16)
+            .padding(20)
         }
         .onAppear {
             accent = theme.accentColor
@@ -752,7 +1087,7 @@ struct ThemesTab: View {
             sidebar = theme.sidebarColor
             card = theme.cardColor
         }
-        .onChange(of: accent) { _, n in applyCustom() }
+        .onChange(of: accent) { _, _ in applyCustom() }
         .onChange(of: background) { _, _ in applyCustom() }
         .onChange(of: sidebar) { _, _ in applyCustom() }
         .onChange(of: card) { _, _ in applyCustom() }
@@ -768,23 +1103,39 @@ struct ThemesTab: View {
         return Button {
             theme.applyTheme(named: name)
         } label: {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(name).font(.system(size: 12, weight: .medium))
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.primary)
                     HStack(spacing: 3) {
                         ForEach(preset.swatchColors, id: \.self) { c in
-                            Circle().fill(c).frame(width: 13, height: 13)
+                            Circle()
+                                .fill(c)
+                                .frame(width: 12, height: 12)
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
                         }
                     }
                 }
                 Spacer(minLength: 0)
                 if selected {
-                    Image(systemName: "checkmark.circle.fill").foregroundColor(theme.accentColor)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(theme.accentColor)
+                        .font(.system(size: 14))
                 }
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? theme.accentColor : Color.secondary.opacity(0.15), lineWidth: 1))
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
+                    .strokeBorder(
+                        selected ? theme.accentColor : Color.secondary.opacity(0.12),
+                        lineWidth: selected ? 1.5 : 1
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
@@ -796,24 +1147,32 @@ struct ExportTab: View {
     @State private var exportMessage = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 20) {
             GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Export all entries as a single Markdown file.").font(.system(size: 13))
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Export all entries as a single Markdown file.")
+                        .font(.system(size: 13))
                     Button {
                         exportAll()
                     } label: {
                         Label("Export to Markdown…", systemImage: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     if !exportMessage.isEmpty {
-                        Text(exportMessage).font(.system(size: 12)).foregroundColor(.secondary)
+                        Text(exportMessage)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
                     }
                 }
-                .padding(6)
-            } label: { Label("Markdown export", systemImage: "doc.text") }
+                .padding(.vertical, 6)
+            } label: {
+                Label("Markdown export", systemImage: "doc.text")
+                    .font(.system(size: 13, weight: .medium))
+            }
         }
-        .padding(16)
+        .padding(20)
     }
 
     private func exportAll() {
