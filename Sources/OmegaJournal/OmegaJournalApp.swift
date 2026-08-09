@@ -79,7 +79,8 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .tint(theme.accentColor)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.colorScheme)
+        .background(theme.backgroundColor)
         .onAppear { _ = ThemeManager.shared }
     }
 }
@@ -90,6 +91,7 @@ enum SidebarItem: Hashable { case all, favorites, thisWeek, mood(Mood), insights
 
 struct SidebarView: View {
     @ObservedObject var vm: JournalViewModel
+    @ObservedObject private var theme = ThemeManager.shared
     @Binding var selection: SidebarItem?
 
     var body: some View {
@@ -130,6 +132,8 @@ struct SidebarView: View {
             } header: { SidebarHeader("Statistics") }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(theme.sidebarColor)
         .navigationTitle("Omega Journal")
         .frame(minWidth: 240)
     }
@@ -173,6 +177,7 @@ struct StatRow: View {
 
 struct EntryListView: View {
     @ObservedObject var vm: JournalViewModel
+    @ObservedObject private var theme = ThemeManager.shared
     @Binding var selection: SidebarItem?
 
     var filteredEntries: [JournalEntry] {
@@ -195,6 +200,7 @@ struct EntryListView: View {
             entryList
         }
         .frame(minWidth: 320)
+        .background(theme.backgroundColor)
         .onReceive(NotificationCenter.default.publisher(for: .newEntry)) { _ in vm.createEntry() }
         .onReceive(NotificationCenter.default.publisher(for: .deleteEntry)) { _ in if let e = vm.selectedEntry { vm.deleteEntry(e) } }
     }
@@ -256,6 +262,8 @@ struct EntryListView: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+            .background(theme.backgroundColor)
             .alternatingRowBackgrounds()
         }
     }
@@ -266,6 +274,7 @@ struct EntryListView: View {
 struct EntryCardView: View {
     let entry: JournalEntry
     let isSelected: Bool
+    @ObservedObject private var theme = ThemeManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -287,14 +296,14 @@ struct EntryCardView: View {
                 if !entry.tags.isEmpty {
                     Spacer()
                     HStack(spacing: 3) {
-                        ForEach(entry.tags.prefix(2), id: \.self) { Text("#\($0)").font(.system(size: 9)).foregroundColor(.accentColor.opacity(0.7)) }
+                        ForEach(entry.tags.prefix(2), id: \.self) { Text("#\($0)").font(.system(size: 9)).foregroundColor(theme.accentColor.opacity(0.85)) }
                         if entry.tags.count > 2 { Text("+\(entry.tags.count - 2)").font(.system(size: 9)).foregroundColor(.secondary.opacity(0.5)) }
                     }
                 }
             }
         }
         .padding(.vertical, 6).padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? Color.accentColor.opacity(0.08) : Color.clear))
+        .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? theme.accentColor.opacity(0.18) : theme.cardColor.opacity(0.55)))
     }
 }
 
@@ -323,12 +332,13 @@ struct DetailView: View {
 
 struct EmptyDetail: View {
     @ObservedObject var vm: JournalViewModel
+    @ObservedObject private var theme = ThemeManager.shared
 
     var body: some View {
         VStack(spacing: 24) {
             ZStack {
-                Circle().fill(OmegaTheme.accent.opacity(0.08)).frame(width: 120, height: 120)
-                Image(systemName: "book.pages").font(.system(size: 44)).foregroundColor(OmegaTheme.accent.opacity(0.5))
+                Circle().fill(theme.accentColor.opacity(0.14)).frame(width: 120, height: 120)
+                Image(systemName: "book.pages").font(.system(size: 44)).foregroundColor(theme.accentColor.opacity(0.8))
             }
             VStack(spacing: 6) {
                 Text("Select an entry or create a new one").font(.system(size: 18, weight: .medium)).foregroundColor(.secondary)
@@ -361,6 +371,7 @@ struct EmptyDetail: View {
 struct ReadView: View {
     let entry: JournalEntry
     @ObservedObject var vm: JournalViewModel
+    @ObservedObject private var theme = ThemeManager.shared
 
     var body: some View {
         ScrollView {
@@ -392,7 +403,7 @@ struct ReadView: View {
                         ForEach(entry.tags, id: \.self) { tag in
                             Text("#\(tag)").font(.system(size: 12))
                                 .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(Color.accentColor.opacity(0.1)).clipShape(Capsule())
+                                .background(theme.accentColor.opacity(0.14)).clipShape(Capsule())
                         }
                     }
                 }
@@ -406,14 +417,14 @@ struct ReadView: View {
             .padding(40).frame(maxWidth: 650, alignment: .leading).frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(theme.backgroundColor)
     }
 
     private var actionButtons: some View {
         HStack(spacing: 4) {
             ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: .orange, active: entry.isPinned) { vm.togglePin(entry) }
             ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite) { vm.toggleFavorite(entry) }
-            ActionButton(icon: "pencil", color: .accentColor, active: false) { vm.startEditing(entry) }
+            ActionButton(icon: "pencil", color: theme.accentColor, active: false) { vm.startEditing(entry) }
             ActionButton(icon: "trash", color: .red, active: false) { vm.deleteEntry(entry) }
         }
     }
@@ -442,6 +453,7 @@ struct ActionButton: View {
 struct EditorView: View {
     @ObservedObject var vm: JournalViewModel
     let entry: JournalEntry
+    @ObservedObject private var theme = ThemeManager.shared
 
     @State private var title = ""
     @State private var bodyText = ""
@@ -483,7 +495,7 @@ struct EditorView: View {
                                     }.buttonStyle(.plain)
                                 }
                                 .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(Color.accentColor.opacity(0.1)).clipShape(Capsule())
+                                .background(theme.accentColor.opacity(0.14)).clipShape(Capsule())
                             }
                             TextField("Add tag...", text: $tagInput)
                                 .font(.system(size: 12)).textFieldStyle(.plain)
@@ -513,7 +525,7 @@ struct EditorView: View {
                 Spacer()
                 Button("Done") { vm.stopEditing() }.buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
             }
-            .padding(.horizontal, 40).padding(.vertical, 12).background(Color(nsColor: .controlBackgroundColor))
+            .padding(.horizontal, 40).padding(.vertical, 12).background(theme.sidebarColor)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { title = entry.title; bodyText = entry.body; mood = entry.mood; tags = entry.tags }
@@ -529,8 +541,8 @@ struct EditorView: View {
                 Text(m.label).font(.system(size: 10))
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(sel ? m.color.opacity(0.15) : Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(sel ? m.color : Color.clear, lineWidth: 2))
+            .background(RoundedRectangle(cornerRadius: 10).fill(sel ? theme.accentColor.opacity(0.2) : theme.cardColor))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(sel ? theme.accentColor : Color.clear, lineWidth: 2))
         }
         .buttonStyle(.plain)
     }

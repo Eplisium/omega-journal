@@ -15,6 +15,7 @@ final class ThemeManager: ObservableObject {
     @Published var bodyTextColor: Color
     @Published var secondaryTextColor: Color
     @Published var themeName: String
+    @Published var colorScheme: ColorScheme
 
     // Light-on-dark text for all overlay UI
     private init() {
@@ -32,6 +33,7 @@ final class ThemeManager: ObservableObject {
         titleTextColor = .white
         bodyTextColor = Color.white.opacity(0.9)
         secondaryTextColor = Color.white.opacity(0.55)
+        colorScheme = ThemeManager.scheme(for: Color(hex: bgHex) ?? Color(hex: "#1a0d2e")!)
     }
 
     func applyTheme(named name: String) {
@@ -41,6 +43,7 @@ final class ThemeManager: ObservableObject {
         backgroundColor = preset.background
         sidebarColor = preset.sidebar
         cardColor = preset.card
+        colorScheme = ThemeManager.scheme(for: backgroundColor)
         persist()
     }
 
@@ -50,7 +53,16 @@ final class ThemeManager: ObservableObject {
         backgroundColor = background
         sidebarColor = sidebar
         cardColor = card
+        colorScheme = ThemeManager.scheme(for: backgroundColor)
         persist()
+    }
+
+    private static func scheme(for color: Color) -> ColorScheme {
+        let nsColor = NSColor(color).usingColorSpace(.sRGB) ?? .black
+        let luminance = (0.2126 * nsColor.redComponent) +
+            (0.7152 * nsColor.greenComponent) +
+            (0.0722 * nsColor.blueComponent)
+        return luminance > 0.55 ? .light : .dark
     }
 
     private func persist() {
@@ -91,6 +103,14 @@ enum ThemePresets {
             sidebar: Color(hex: "#060912")!,
             card: Color(hex: "#121828")!,
             swatchColors: [Color(hex: "#4a9eff")!, Color(hex: "#0a0e1a")!]
+        ),
+        "Brave": ThemePreset(
+            name: "Brave",
+            accent: Color(hex: "#FB542B")!,
+            background: Color(hex: "#17191F")!,
+            sidebar: Color(hex: "#101216")!,
+            card: Color(hex: "#242830")!,
+            swatchColors: [Color(hex: "#FB542B")!, Color(hex: "#17191F")!]
         ),
         "Forest": ThemePreset(
             name: "Forest",
