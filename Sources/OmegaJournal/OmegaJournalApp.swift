@@ -372,6 +372,7 @@ struct ReadView: View {
     let entry: JournalEntry
     @ObservedObject var vm: JournalViewModel
     @ObservedObject private var theme = ThemeManager.shared
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         ScrollView {
@@ -418,15 +419,106 @@ struct ReadView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.backgroundColor)
+        .alert("Delete Entry", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) { vm.deleteEntry(entry) }
+        } message: {
+            Text("Are you sure you want to delete \"\(entry.title.isEmpty ? "Untitled" : entry.title)\"? This cannot be undone.")
+        }
     }
 
     private var actionButtons: some View {
         HStack(spacing: 4) {
-            ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: .orange, active: entry.isPinned) { vm.togglePin(entry) }
-            ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite) { vm.toggleFavorite(entry) }
-            ActionButton(icon: "pencil", color: theme.accentColor, active: false) { vm.startEditing(entry) }
-            ActionButton(icon: "trash", color: .red, active: false) { vm.deleteEntry(entry) }
+            ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: .orange, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin entry" : "Pin entry") { vm.togglePin(entry) }
+            ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite, tooltip: entry.isFavorite ? "Remove from favorites" : "Add to favorites") { vm.toggleFavorite(entry) }
+            ActionButton(icon: "pencil", color: theme.accentColor, active: false, tooltip: "Edit entry") { vm.startEditing(entry) }
+            ActionButton(icon: "trash", color: .red, active: false, tooltip: "Delete entry", isDestructive: true) { showDeleteConfirm = true }
         }
+    }
+}
+
+// MARK: - Custom Tooltip
+
+struct CustomTooltip: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(text)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(red: 0.12, green: 0.10, blue: 0.20))
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(color.opacity(0.6), lineWidth: 1)
+                    }
+                )
+                .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 4)
+                .shadow(color: color.opacity(0.3), radius: 6, x: 0, y: 2)
+
+            Triangle()
+                .fill(Color(red: 0.12, green: 0.10, blue: 0.20))
+                .frame(width: 8, height: 4)
+                .overlay(
+                    Triangle()
+                        .stroke(color.opacity(0.6), lineWidth: 1)
+                        .frame(width: 8, height: 4)
+                )
+                .offset(y: -1)
+        }
+        .compositingGroup()
+    }
+}
+
+struct TooltipContainer<Content: View>: View {
+    let tooltip: String
+    let color: Color
+    @ViewBuilder let content: () -> Content
+    @State private var isHovered = false
+    @State private var showTip = false
+
+    var body: some View {
+        content()
+            .onHover { hovering in
+                if hovering {
+                    isHovered = true
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        if isHovered { showTip = true }
+                    }
+                } else {
+                    isHovered = false
+                    showTip = false
+                }
+            }
+            .background(alignment: .top) {
+                if showTip {
+                    CustomTooltip(text: tooltip, color: color)
+                        .offset(y: -40)
+                        .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .bottom)))
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: showTip)
+            .zIndex(showTip ? 1000 : 0)
+    }
+}
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -434,17 +526,53 @@ struct ReadView: View {
 
 struct ActionButton: View {
     let icon: String, color: Color, active: Bool
+    let tooltip: String
+    let isDestructive: Bool
     let action: () -> Void
     @State private var hover = false
 
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: 14, weight: .medium))
-                .foregroundColor(active ? color : .secondary)
-                .frame(width: 36, height: 36)
-                .background(RoundedRectangle(cornerRadius: 8).fill(hover ? Color(nsColor: .controlBackgroundColor) : Color.clear))
+    init(icon: String, color: Color, active: Bool, tooltip: String = "", isDestructive: Bool = false, action: @escaping () -> Void) {
+        self.icon = icon
+        self.color = color
+        self.active = active
+        self.tooltip = tooltip
+        self.isDestructive = isDestructive
+        self.action = action
+    }
+
+    private var hoverBackground: Color {
+        if isDestructive && hover {
+            return Color.red.opacity(0.18)
         }
-        .buttonStyle(.plain).onHover { hover = $0 }
+        if active && hover {
+            return color.opacity(0.18)
+        }
+        return hover ? Color(nsColor: .controlBackgroundColor) : Color.clear
+    }
+
+    private var iconColor: Color {
+        if isDestructive && hover { return .red }
+        if active { return color }
+        return .secondary
+    }
+
+    var body: some View {
+        TooltipContainer(tooltip: tooltip, color: isDestructive ? .red : color) {
+            Button(action: action) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(iconColor)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(hoverBackground)
+                    )
+                    .scaleEffect(hover ? 1.08 : 1.0)
+            }
+            .buttonStyle(.plain)
+            .onHover { hover = $0 }
+            .animation(.easeInOut(duration: 0.15), value: hover)
+        }
     }
 }
 
