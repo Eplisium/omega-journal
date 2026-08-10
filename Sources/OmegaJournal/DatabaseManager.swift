@@ -21,7 +21,7 @@ final class DatabaseManager {
     private let attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    private static let currentSchemaVersion = 5
+    private static let currentSchemaVersion = 6
 
     /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
     static let trashRetentionDays = 30
@@ -73,6 +73,16 @@ final class DatabaseManager {
         sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
     }
 
+    /// Runs a one-shot statement with the given text parameters bound left-to-right
+    /// (1, 2, 3…). Silently logs failures — used for internal mutations where the
+    /// caller doesn't need the result.
+    private func execParameterized(_ sql: String, _ values: String...) {
+        guard let stmt = try? prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        for (i, v) in values.enumerated() { bindText(stmt, index: Int32(i + 1), value: v) }
+        sqlite3_step(stmt)
+    }
+
     // MARK: - Migrations
 
     private func runMigrations() {
@@ -103,6 +113,9 @@ final class DatabaseManager {
         }
         if current < 5 {
             migrateToV5()
+        }
+        if current < 6 {
+            migrateToV6()
         }
     }
 
@@ -169,8 +182,11 @@ final class DatabaseManager {
             let tagsStr = String(cString: sqlite3_column_text(stmt, 1))
             let tags = tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             for tag in tags {
-                exec("INSERT OR IGNORE INTO tags (name) VALUES ('\(escapeSQL(tag)));")
-                exec("INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT '\(escapeSQL(entryId))', id FROM tags WHERE name = '\(escapeSQL(tag))';")
+                execParameterized("INSERT OR IGNORE INTO tags (name) VALUES (?);", tag)
+                execParameterized(
+                    "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT ?, id FROM tags WHERE name = ?;",
+                    entryId, tag
+                )
             }
         }
         setSchemaVersion(2)
@@ -229,6 +245,26 @@ final class DatabaseManager {
         """)
         seedDefaultTemplates()
         setSchemaVersion(5)
+    }
+
+    /// V6: `word_count` column so goals and sort-by-words don't need to load bodies.
+    /// Backfills every existing row from its body text.
+    private func migrateToV6() {
+        exec("ALTER TABLE entries ADD COLUMN word_count INTEGER NOT NULL DEFAULT 0;")
+        // Backfill: split body on whitespace and count tokens, matching JournalEntry.wordCount.
+        guard let stmt = try? prepare("SELECT id, body FROM entries;") else {
+            setSchemaVersion(6); return
+        }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(stmt, 0))
+            let body = String(cString: sqlite3_column_text(stmt, 1))
+            let count = body.isEmpty ? 0 : body.split(whereSeparator: { $0.isWhitespace }).count
+            execParameterized("UPDATE entries SET word_count = ? WHERE id = ?;",
+                              String(count), id)
+        }
+        exec("CREATE INDEX IF NOT EXISTS idx_entries_word_count ON entries(word_count DESC);")
+        setSchemaVersion(6)
     }
 
     // MARK: - Trash
@@ -311,7 +347,7 @@ final class DatabaseManager {
     }
 
     private static let entryColumns =
-        "e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived"
+        "e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count"
 
     private func scopeClause(_ scope: EntryScope) -> String {
         switch scope {
@@ -329,7 +365,7 @@ final class DatabaseManager {
         case .titleAsc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE ASC"
         case .titleDesc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE DESC"
         case .updatedDesc: return "ORDER BY e.is_pinned DESC, e.updated_at DESC"
-        case .wordsDesc: return "ORDER BY e.is_pinned DESC, LENGTH(e.body) DESC"
+        case .wordsDesc: return "ORDER BY e.is_pinned DESC, e.word_count DESC"
         case .moodDesc: return "ORDER BY e.is_pinned DESC, e.mood DESC, e.created_at DESC"
         }
     }
@@ -402,6 +438,9 @@ final class DatabaseManager {
         if sqlite3_step(stmt) == SQLITE_ROW {
             var entry = rowToEntry(stmt)
             entry.attachments = fetchAttachments(entryId: entry.id)
+            // Populate tags from the junction table (the text-column fallback in
+            // rowToEntry only covers the no-junction-rows case).
+            if let tags = fetchTagsForEntry(entry.id) { entry.tags = tags }
             return entry
         }
         return nil
@@ -414,9 +453,15 @@ final class DatabaseManager {
             entries.append(rowToEntry(stmt))
         }
         // Attach attachments in one pass rather than N queries.
-        let byEntry = allAttachmentsByEntry()
+        let attachmentsByEntry = allAttachmentsByEntry()
+        // Attach tags in one pass too — rowToEntry falls back to the text column,
+        // so this batched lookup replaces it with the junction-table source of truth.
+        let tagsByEntry = allTagsByEntry()
         for i in entries.indices {
-            entries[i].attachments = byEntry[entries[i].id] ?? []
+            entries[i].attachments = attachmentsByEntry[entries[i].id] ?? []
+            if let tags = tagsByEntry[entries[i].id], !tags.isEmpty {
+                entries[i].tags = tags
+            }
         }
         return entries
     }
@@ -436,8 +481,11 @@ final class DatabaseManager {
             : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9))
         let isArchived = sqlite3_column_int(stmt, 10) != 0
 
-        // Prefer tags from junction table if available
-        let tags = fetchTagsForEntry(id) ?? tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // In list context `collectEntries` overwrites this with the junction-table
+        // result from `allTagsByEntry()`. For single-entry fetches (`fetchEntry`),
+        // `fetchTagsForEntry` is called explicitly below. This text-column fallback
+        // covers the rare case where the junction table has no rows yet.
+        let tags = tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 
         return JournalEntry(
             id: id, title: title, body: body,
@@ -452,14 +500,16 @@ final class DatabaseManager {
     }
 
     func saveEntry(_ entry: JournalEntry) {
+        let wordCount = entry.body.isEmpty ? 0 : entry.body.split(whereSeparator: { $0.isWhitespace }).count
         let sql = """
-        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, body=excluded.body, mood=excluded.mood,
             tags=excluded.tags, updated_at=excluded.updated_at,
             is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
-            is_archived=excluded.is_archived, deleted_at=excluded.deleted_at;
+            is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
+            word_count=excluded.word_count;
         """
         guard let stmt = try? prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -478,6 +528,7 @@ final class DatabaseManager {
         } else {
             sqlite3_bind_null(stmt, 11)
         }
+        sqlite3_bind_int(stmt, 12, Int32(wordCount))
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
             print("Save failed: \(msg)")
@@ -545,6 +596,29 @@ final class DatabaseManager {
         return 0
     }
 
+    /// Entry count since a timestamp — used by goal tracking.
+    func entryCount(since: Date) -> Int {
+        let sql = "SELECT COUNT(*) FROM entries WHERE deleted_at IS NULL AND is_archived = 0 AND created_at >= ?;"
+        guard let stmt = try? prepare(sql) else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+        if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int(stmt, 0)) }
+        return 0
+    }
+
+    /// Sum of word counts since a timestamp — used by goal tracking.
+    /// Reads the stored `word_count` column so no body text is loaded.
+    func wordCountSum(since: Date) -> Int {
+        let sql = "SELECT COALESCE(SUM(word_count), 0) FROM entries WHERE deleted_at IS NULL AND is_archived = 0 AND created_at >= ?;"
+        guard let stmt = try? prepare(sql) else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
+    }
+
     // MARK: - FTS Sync
 
     private func updateFTS(_ entry: JournalEntry) {
@@ -568,14 +642,17 @@ final class DatabaseManager {
 
     private func syncTagsForEntry(_ entryId: String, tags: [String]) {
         // Remove old associations
-        exec("DELETE FROM entry_tags WHERE entry_id = '\(escapeSQL(entryId))';")
+        execParameterized("DELETE FROM entry_tags WHERE entry_id = ?;", entryId)
 
         // Add new associations
         for tag in tags {
             let trimmed = tag.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
-            exec("INSERT OR IGNORE INTO tags (name) VALUES ('\(escapeSQL(trimmed))');")
-            exec("INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT '\(escapeSQL(entryId))', id FROM tags WHERE name = '\(escapeSQL(trimmed))';")
+            execParameterized("INSERT OR IGNORE INTO tags (name) VALUES (?);", trimmed)
+            execParameterized(
+                "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT ?, id FROM tags WHERE name = ?;",
+                entryId, trimmed
+            )
         }
     }
 
@@ -596,6 +673,26 @@ final class DatabaseManager {
         return tags.isEmpty ? nil : tags
     }
 
+    /// One query for every entry's tags, grouped by entry id — avoids N+1 when
+    /// listing entries. Mirrors `allAttachmentsByEntry()`.
+    func allTagsByEntry() -> [String: [String]] {
+        let sql = """
+            SELECT et.entry_id, t.name
+            FROM entry_tags et
+            INNER JOIN tags t ON t.id = et.tag_id
+            ORDER BY t.name;
+        """
+        guard let stmt = try? prepare(sql) else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        var map: [String: [String]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let entryId = String(cString: sqlite3_column_text(stmt, 0))
+            let name = String(cString: sqlite3_column_text(stmt, 1))
+            map[entryId, default: []].append(name)
+        }
+        return map
+    }
+
     func allTags() -> [String] {
         let sql = "SELECT name FROM tags ORDER BY name;"
         guard let stmt = try? prepare(sql) else { return [] }
@@ -608,10 +705,15 @@ final class DatabaseManager {
     }
 
     func tagsWithCounts() -> [(tag: String, count: Int)] {
+        // Count only active (non-trashed, non-archived) entries so the sidebar
+        // tag list matches what the entry list actually shows. Archived entries
+        // are excluded because they don't appear in `vm.entries` (scope .active).
         let sql = """
             SELECT t.name, COUNT(et.entry_id) as cnt
             FROM tags t
             INNER JOIN entry_tags et ON t.id = et.tag_id
+            INNER JOIN entries e ON et.entry_id = e.id
+            WHERE e.deleted_at IS NULL AND e.is_archived = 0
             GROUP BY t.id
             ORDER BY cnt DESC, t.name;
         """
@@ -628,7 +730,9 @@ final class DatabaseManager {
     }
 
     func renameTag(from oldName: String, to newName: String) {
-        exec("INSERT OR IGNORE INTO tags (name) VALUES ('\(escapeSQL(newName))');")
+        // Ensure the new tag row exists (parameterized — no string interpolation).
+        execParameterized("INSERT OR IGNORE INTO tags (name) VALUES (?);", newName)
+
         guard let oldIdStmt = try? prepare("SELECT id FROM tags WHERE name = ?;") else { return }
         defer { sqlite3_finalize(oldIdStmt) }
         bindText(oldIdStmt, index: 1, value: oldName)
@@ -641,15 +745,33 @@ final class DatabaseManager {
         guard sqlite3_step(newIdStmt) == SQLITE_ROW else { return }
         let newTagId = sqlite3_column_int(newIdStmt, 0)
 
-        // Update junction table
+        // Re-point the junction table. `oldTagId`/`newTagId` are ints from SQLite
+        // itself, so interpolation here is safe; everything user-supplied is bound.
         exec("UPDATE OR IGNORE entry_tags SET tag_id = \(newTagId) WHERE tag_id = \(oldTagId);")
         exec("DELETE FROM entry_tags WHERE tag_id = \(oldTagId);")
         exec("DELETE FROM tags WHERE id = \(oldTagId);")
 
-        // Update entries.tags column for compatibility
-        exec("UPDATE entries SET tags = REPLACE(tags, '\(escapeSQL(oldName))', '\(escapeSQL(newName))');")
+        // Fix the legacy `entries.tags` text column per-entry. SQL REPLACE() does a
+        // blind substring replace, so renaming "art"→"artwork" would corrupt "smart".
+        // Instead, fetch each affected entry, swap the exact tag token in Swift, and
+        // write it back with a parameterized UPDATE.
+        guard let affectedStmt = try? prepare("SELECT entry_id FROM entry_tags WHERE tag_id = ?;") else {
+            rebuildFTS(); return
+        }
+        defer { sqlite3_finalize(affectedStmt) }
+        sqlite3_bind_int(affectedStmt, 1, newTagId)
+        var affectedIds: [String] = []
+        while sqlite3_step(affectedStmt) == SQLITE_ROW {
+            affectedIds.append(String(cString: sqlite3_column_text(affectedStmt, 0)))
+        }
+        for eid in affectedIds {
+            guard let e = fetchEntry(id: eid) else { continue }
+            let rewritten = e.tags.map { $0 == oldName ? newName : $0 }
+            execParameterized("UPDATE entries SET tags = ? WHERE id = ?;",
+                              rewritten.joined(separator: ","), eid)
+        }
 
-        // Rebuild FTS
+        // Rebuild FTS to reflect the renamed tag.
         rebuildFTS()
     }
 
@@ -660,7 +782,8 @@ final class DatabaseManager {
         guard sqlite3_step(stmt) == SQLITE_ROW else { return }
         let tagId = sqlite3_column_int(stmt, 0)
 
-        // Get affected entries to update their tags column
+        // Collect affected entries before we sever the junction rows, so we can
+        // rewrite their `entries.tags` text column afterward.
         guard let entryStmt = try? prepare("SELECT entry_id FROM entry_tags WHERE tag_id = ?;") else { return }
         defer { sqlite3_finalize(entryStmt) }
         sqlite3_bind_int(entryStmt, 1, tagId)
@@ -672,13 +795,13 @@ final class DatabaseManager {
         exec("DELETE FROM entry_tags WHERE tag_id = \(tagId);")
         exec("DELETE FROM tags WHERE id = \(tagId);")
 
-        // Update entries.tags column
+        // Rewrite the text column per-entry with a parameterized UPDATE.
         for eid in entryIds {
-            if let e = fetchEntry(id: eid) {
-                let newTags = e.tags.filter { $0 != name }
-                exec("UPDATE entries SET tags = '\(escapeSQL(newTags.joined(separator: ",")))' WHERE id = '\(escapeSQL(eid))';")
-                if let e2 = fetchEntry(id: eid) { updateFTS(e2) }
-            }
+            guard let e = fetchEntry(id: eid) else { continue }
+            let newTags = e.tags.filter { $0 != name }
+            execParameterized("UPDATE entries SET tags = ? WHERE id = ?;",
+                              newTags.joined(separator: ","), eid)
+            if let e2 = fetchEntry(id: eid) { updateFTS(e2) }
         }
     }
 
@@ -849,7 +972,6 @@ final class DatabaseManager {
         fetchAllEntries(sort: .dateDesc)
     }
 
-    private func escapeSQL(_ s: String) -> String { s.replacingOccurrences(of: "'", with: "''") }
     var databasePath: String { dbPath }
 
     deinit { sqlite3_close(db) }

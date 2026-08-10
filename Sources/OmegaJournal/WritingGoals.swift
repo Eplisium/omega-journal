@@ -78,20 +78,14 @@ final class GoalManager: ObservableObject {
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        let todayEnd = cal.date(byAdding: .day, value: 1, to: today)!
         let weekStart = cal.dateInterval(of: .weekOfYear, for: today)?.start ?? today
 
-        let entries = db.fetchAllEntries()
-
-        // Daily stats
-        let todayEntries = entries.filter { $0.createdAt >= today && $0.createdAt < todayEnd }
-        let dailyWords = todayEntries.reduce(0) { $0 + $1.wordCount }
-        let dailyEntryCount = todayEntries.count
-
-        // Weekly stats
-        let weekEntries = entries.filter { $0.createdAt >= weekStart }
-        let weeklyWords = weekEntries.reduce(0) { $0 + $1.wordCount }
-        let weeklyEntryCount = weekEntries.count
+        // SQL-side computation — avoids loading every entry into memory just to
+        // count four numbers.
+        let dailyWords = db.wordCountSum(since: today)
+        let dailyEntryCount = db.entryCount(since: today)
+        let weeklyWords = db.wordCountSum(since: weekStart)
+        let weeklyEntryCount = db.entryCount(since: weekStart)
 
         goals = [
             .goal(for: .dailyWords, target: dailyWordsTarget, current: dailyWords),

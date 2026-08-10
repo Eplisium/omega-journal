@@ -332,6 +332,7 @@ final class JournalViewModel: ObservableObject {
         if editingEntryId == entry.id { editingEntryId = nil }
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
         undoStack.append(.restoreTrashed(ids: [entry.id]))
+        allTags = db.tagsWithCounts()
         showToast("Moved to Trash", actionLabel: "Undo")
         GoalManager.shared.loadGoals()
     }
@@ -346,6 +347,7 @@ final class JournalViewModel: ObservableObject {
     func deleteForever(_ entry: JournalEntry) {
         db.hardDeleteEntry(id: entry.id)
         trashedEntries.removeAll { $0.id == entry.id }
+        allTags = db.tagsWithCounts()
         showToast("Deleted permanently", isError: true)
     }
 
@@ -353,6 +355,7 @@ final class JournalViewModel: ObservableObject {
         let count = trashedEntries.count
         db.emptyTrash()
         trashedEntries = []
+        allTags = db.tagsWithCounts()
         showToast("Emptied Trash (\(count) \(count == 1 ? "entry" : "entries"))", isError: true)
     }
 
@@ -384,6 +387,7 @@ final class JournalViewModel: ObservableObject {
         if let sel = selectedEntryId, ids.contains(sel) { selectedEntryId = nil }
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
         undoStack.append(.restoreTrashed(ids: ids))
+        allTags = db.tagsWithCounts()
         clearBulkSelection()
         showToast("Moved \(ids.count) entries to Trash", actionLabel: "Undo")
     }
@@ -685,7 +689,9 @@ final class JournalViewModel: ObservableObject {
                     mood: Mood(rawValue: je.mood) ?? .neutral,
                     tags: je.tags, createdAt: je.createdAt, updatedAt: je.updatedAt,
                     isPinned: je.isPinned, isFavorite: je.isFavorite,
-                    isArchived: false, deletedAt: nil, attachments: []
+                    isArchived: je.isArchived ?? false,
+                    deletedAt: je.deletedAt,
+                    attachments: []
                 )
                 db.saveEntry(entry)
                 added += 1

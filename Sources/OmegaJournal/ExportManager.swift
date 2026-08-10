@@ -36,6 +36,10 @@ enum ExportManager {
         let isPinned: Bool
         let isFavorite: Bool
         let wordCount: Int
+        // Added in v2 of the export format. Older files omit these, so they decode
+        // as nil/false and the importer treats them as active (the old behaviour).
+        let isArchived: Bool?
+        let deletedAt: Date?
     }
 
     struct JSONExport: Codable {
@@ -52,7 +56,9 @@ enum ExportManager {
                 mood: e.mood.rawValue, moodLabel: e.mood.label,
                 tags: e.tags, createdAt: e.createdAt, updatedAt: e.updatedAt,
                 isPinned: e.isPinned, isFavorite: e.isFavorite,
-                wordCount: e.wordCount
+                wordCount: e.wordCount,
+                isArchived: e.isArchived,
+                deletedAt: e.deletedAt
             )
         }
         let export = JSONExport(
