@@ -1,207 +1,4 @@
 import SwiftUI
-import Charts
-
-// MARK: - Insights Dashboard
-
-struct InsightsView: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
-
-    private let columns = [GridItem(.adaptive(minimum: 160), spacing: 14)]
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                statGrid
-                trendSection
-                distributionSection
-                heatmapSection
-            }
-            .padding(32)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(theme.backgroundColor)
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Insights")
-                .font(OmegaTheme.titleFont)
-            Text("Your journaling, visualized")
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var statGrid: some View {
-        LazyVGrid(columns: columns, spacing: 14) {
-            InsightStat(value: "\(vm.entryCount)", label: "Total entries", icon: "books.vertical.fill", color: .accentColor)
-            InsightStat(value: "\(vm.entriesThisMonth)", label: "This month", icon: "calendar", color: .blue)
-            InsightStat(value: "\(vm.writingStreak)", label: "Day streak", icon: "flame.fill", color: .orange)
-            InsightStat(value: "\(vm.longestStreak)", label: "Best streak", icon: "trophy.fill", color: .yellow)
-            InsightStat(value: String(format: "%.1f", vm.averageMood), label: "Avg mood", icon: "face.smiling", color: .green)
-            InsightStat(value: vm.totalWordCount.formatted(), label: "Total words", icon: "text.word.spacing", color: .purple)
-            InsightStat(value: vm.totalReadingTime, label: "Reading time", icon: "clock.fill", color: .teal)
-        }
-    }
-
-    private var trendSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Mood trend", subtitle: "Last 30 days · dashed line = neutral")
-            MetricCard {
-                MoodTrendChartView(data: vm.moodTrend(days: 30))
-            }
-        }
-    }
-
-    private var distributionSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Mood distribution", subtitle: "How often each mood appears")
-            MetricCard {
-                MoodDistributionView(data: vm.moodDistribution)
-            }
-        }
-    }
-
-    private var heatmapSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Writing activity", subtitle: "Last 26 weeks · hover a day for details")
-            MetricCard {
-                HeatmapView(info: vm.dailyInfo(daysBack: 26 * 7))
-            }
-        }
-    }
-
-    private func sectionTitle(_ title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 15, weight: .semibold))
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-        }
-    }
-}
-
-// MARK: - Insight Stat Card
-
-struct InsightStat: View {
-    let value: String, label: String, icon: String, color: Color
-    @ObservedObject private var theme = ThemeManager.shared
-
-    private var isDark: Bool { theme.colorScheme == .dark }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundColor(color)
-                .font(.system(size: 20, weight: .medium))
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                Text(label)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
-                .fill(theme.cardColor.opacity(isDark ? 0.5 : 0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
-                .strokeBorder(
-                    isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.06),
-                    lineWidth: 1
-                )
-        )
-    }
-}
-
-// MARK: - Metric Card Container
-
-struct MetricCard<Content: View>: View {
-    @ViewBuilder let content: Content
-    @ObservedObject private var theme = ThemeManager.shared
-
-    private var isDark: Bool { theme.colorScheme == .dark }
-
-    var body: some View {
-        content
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
-                    .fill(theme.cardColor.opacity(isDark ? 0.4 : 0.6))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
-                    .strokeBorder(
-                        isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.08),
-                        lineWidth: 1
-                    )
-            )
-    }
-}
-
-// MARK: - Mood Trend Chart
-
-struct MoodTrendChartView: View {
-    let data: [MoodPoint]
-    var body: some View {
-        if data.isEmpty {
-            emptyChart("No mood data yet — start writing!")
-        } else {
-            Chart(data) { point in
-                LineMark(x: .value("Date", point.date), y: .value("Mood", point.avg))
-                    .interpolationMethod(.catmullRom)
-                    .foregroundStyle(Color.accentColor.gradient)
-                    .symbol(Circle().strokeBorder(lineWidth: 1))
-                    .symbolSize(24)
-                RuleMark(y: .value("Neutral", 3.0))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(Color.secondary.opacity(0.35))
-            }
-            .chartYScale(domain: 1...5)
-            .chartYAxis {
-                AxisMarks(values: [1, 2, 3, 4, 5]) { v in
-                    AxisGridLine().foregroundStyle(Color.secondary.opacity(0.1))
-                    AxisValueLabel {
-                        let label = [1: "😞", 2: "😕", 3: "😐", 4: "🙂", 5: "😄"][v.as(Int.self) ?? 3] ?? ""
-                        Text(label).font(.system(size: 10))
-                    }
-                }
-            }
-            .frame(height: 180)
-        }
-    }
-}
-
-// MARK: - Mood Distribution Chart
-
-struct MoodDistributionView: View {
-    let data: [MoodCount]
-    var body: some View {
-        Chart(data) { item in
-            BarMark(x: .value("Mood", item.mood.label), y: .value("Count", item.count))
-                .foregroundStyle(item.mood.color.gradient)
-                .cornerRadius(4)
-            if item.count > 0 {
-                RuleMark(y: .value("Count", item.count))
-                    .foregroundStyle(.clear)
-                    .annotation(position: .top) {
-                        Text("\(item.count)").font(.system(size: 10, weight: .medium)).foregroundColor(.secondary)
-                    }
-            }
-        }
-        .frame(height: 150)
-        .chartYAxis { AxisMarks(position: .leading) }
-    }
-}
 
 // MARK: - Writing Heatmap (Contribution Graph)
 
@@ -279,7 +76,6 @@ struct HeatmapView: View {
         var lastMonth = -1
         var lastYear = -1
         for (i, week) in weeks.enumerated() {
-            // Prefer first real day in the week for month naming (handles week starts near month edges)
             let anchor = week.days.compactMap { $0 }.first ?? week.startDate
             let comp = cal.dateComponents([.year, .month], from: anchor)
             let m = comp.month ?? 0
@@ -328,11 +124,8 @@ struct HeatmapView: View {
     }
 
     private var dayLabels: [String] {
-        // Align labels with the calendar's firstWeekday
         let symbols = Calendar.current.veryShortWeekdaySymbols
-        // Heatmap weeks start on the calendar's week start (dateInterval of weekOfYear)
-        // Our columns use offset 0..6 from weekStart, so labels should follow that order.
-        let first = Calendar.current.firstWeekday // 1=Sun ... 7=Sat
+        let first = Calendar.current.firstWeekday
         return (0..<7).map { offset in
             let idx = (first - 1 + offset) % 7
             return symbols[idx]
@@ -556,7 +349,6 @@ struct HeatmapView: View {
             Spacer().frame(width: dayLabelWidth + 8)
 
             ZStack(alignment: .topLeading) {
-                // Keep width so offsets land correctly
                 Color.clear
                     .frame(
                         width: CGFloat(weeks.count) * (cellSize + cellSpacing) - cellSpacing + 16,
@@ -587,7 +379,6 @@ struct HeatmapView: View {
     private var dayLabelsColumn: some View {
         VStack(spacing: cellSpacing) {
             ForEach(0..<7, id: \.self) { di in
-                // Show every other label for density, but keep Mon-style cadence based on index
                 Text(di % 2 == 1 ? dayLabels[di] : "")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundColor(.secondary.opacity(0.7))
@@ -595,7 +386,7 @@ struct HeatmapView: View {
                     .padding(.trailing, 8)
             }
         }
-        .padding(.top, 8) // align with grid's inner padding
+        .padding(.top, 8)
     }
 
     // MARK: Cells
@@ -680,38 +471,5 @@ struct HeatmapView: View {
                 Capsule().fill(accent.opacity(isDark ? 0.10 : 0.08))
             )
         }
-    }
-}
-
-// MARK: - Empty Chart Placeholder
-
-func emptyChart(_ message: String) -> some View {
-    HStack {
-        Spacer()
-        VStack(spacing: 8) {
-            Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 28)).foregroundColor(.secondary.opacity(0.5))
-            Text(message).font(.system(size: 13)).foregroundColor(.secondary)
-        }
-        .padding(.vertical, 30)
-        Spacer()
-    }
-}
-
-// MARK: - Markdown Exporter
-
-enum MDExporter {
-    static func export(_ entries: [JournalEntry], to url: URL) throws {
-        var md = "# Omega Journal Export\n\n"
-        md += "_Generated \(Date().formatted(date: .long, time: .shortened)) — \(entries.count) entries_\n\n"
-        for e in entries {
-            md += "## \(e.title.isEmpty ? "Untitled" : e.title)\n\n"
-            md += "- **Date:** \(e.createdAt.formatted(date: .long, time: .shortened))\n"
-            md += "- **Mood:** \(e.mood.label) \(e.mood.emoji)\n"
-            if !e.tags.isEmpty {
-                md += "- **Tags:** \(e.tags.map { "#\($0)" }.joined(separator: " "))\n"
-            }
-            md += "\n\(e.body.isEmpty ? "_No content_" : e.body)\n\n---\n\n"
-        }
-        try md.write(to: url, atomically: true, encoding: .utf8)
     }
 }
