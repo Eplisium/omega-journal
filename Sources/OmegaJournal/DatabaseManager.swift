@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import OmegaJournalCore
 
 // MARK: - SQLite Error
 
@@ -336,11 +337,7 @@ final class DatabaseManager {
     /// FTS5 treats many punctuation characters as query syntax. Anything the user types
     /// is wrapped as a quoted prefix term so `foo("bar` can't blow up the parser.
     private func sanitizeFTSQuery(_ raw: String) -> String? {
-        let tokens = raw
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-        guard !tokens.isEmpty else { return nil }
-        return tokens.map { "\"\($0)\"*" }.joined(separator: " ")
+        OmegaCore.sanitizeFTSQuery(raw)
     }
 
     func fetchAllEntries(search: String = "", sort: SortOrder = .dateDesc, scope: EntryScope = .active) -> [JournalEntry] {

@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Command Palette (⌘K)
 //
@@ -118,24 +119,7 @@ struct CommandPaletteView: View {
 
     /// Subsequence fuzzy match — "nte" matches "New Template".
     private func fuzzyScore(_ needle: String, _ haystack: String) -> Int? {
-        if needle.isEmpty { return 0 }
-        let n = Array(needle.lowercased())
-        let h = Array(haystack.lowercased())
-        var ni = 0, score = 0, lastMatch = -1
-        for (hi, ch) in h.enumerated() {
-            guard ni < n.count else { break }
-            if ch == n[ni] {
-                // Consecutive and word-start matches rank higher.
-                if lastMatch == hi - 1 { score += 5 }
-                if hi == 0 || h[hi - 1] == " " { score += 8 }
-                score += 1
-                lastMatch = hi
-                ni += 1
-            }
-        }
-        guard ni == n.count else { return nil }
-        // Shorter targets are better matches.
-        return score * 100 - h.count
+        OmegaCore.fuzzyScore(needle, haystack)
     }
 
     private var results: [Command] {

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OmegaJournalCore
 
 // MARK: - Markdown Text Editor
 //
@@ -350,16 +351,16 @@ extension NSTextView {
         // Inline wrapping: **bold**, *italic*, `code`, ~~strike~~
         if let (open, close) = command.wrap {
             let selected = ns.substring(with: selection)
-            // Toggle off when the selection is already wrapped.
-            if selected.hasPrefix(open) && selected.hasSuffix(close) && selected.count >= open.count + close.count {
-                let inner = String(selected.dropFirst(open.count).dropLast(close.count))
-                replaceAndSelect(inner, in: selection, selectLength: (inner as NSString).length)
+            let result = OmegaCore.toggleWrap(selected, open: open, close: close)
+            // Unwrapping shortens the text; wrapping lengthens it.
+            if result.count < selected.count {
+                replaceAndSelect(result, in: selection, selectLength: (result as NSString).length)
+            } else if selection.length == 0 {
+                // Empty selection: drop the caret between the new markers.
+                replaceAndSelect(result, in: selection, selectLength: 0,
+                                 caretOverride: selection.location + (open as NSString).length)
             } else {
-                let wrapped = open + selected + close
-                let caretOffset = selection.length == 0 ? (open as NSString).length : (wrapped as NSString).length
-                replaceAndSelect(wrapped, in: selection,
-                                 selectLength: selection.length == 0 ? 0 : (selected as NSString).length,
-                                 caretOverride: selection.length == 0 ? selection.location + caretOffset : nil)
+                replaceAndSelect(result, in: selection, selectLength: (result as NSString).length)
             }
             didChangeText()
             return
@@ -368,24 +369,7 @@ extension NSTextView {
         // Line prefixes: headings, lists, quotes
         if let prefix = command.linePrefix {
             let lineRange = ns.lineRange(for: selection)
-            let block = ns.substring(with: lineRange)
-            let hadTrailingNewline = block.hasSuffix("\n")
-            var lines = block.components(separatedBy: "\n")
-            if hadTrailingNewline { lines.removeLast() }
-
-            // Toggle off if every line already carries the prefix.
-            let allPrefixed = lines.allSatisfy { $0.hasPrefix(prefix) }
-            lines = lines.map { line in
-                if allPrefixed { return String(line.dropFirst(prefix.count)) }
-                // Strip a competing block marker before applying the new one.
-                let stripped = line.replacingOccurrences(
-                    of: #"^(#{1,6}\s|[-*+]\s(\[[ xX]\]\s)?|\d+\.\s|>\s)"#,
-                    with: "", options: .regularExpression
-                )
-                return prefix + stripped
-            }
-            var replacement = lines.joined(separator: "\n")
-            if hadTrailingNewline { replacement += "\n" }
+            let replacement = OmegaCore.applyLinePrefix(prefix, to: ns.substring(with: lineRange))
             replaceAndSelect(replacement, in: lineRange, selectLength: (replacement as NSString).length)
             didChangeText()
             return

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Journal View Model
 
@@ -698,22 +699,26 @@ final class JournalViewModel: ObservableObject {
         }
     }
 
+    /// Splits raw markdown into a title and body: a leading `# Heading` wins,
+    /// otherwise the filename is the title. Pure, so it can be tested directly.
+    static func parseMarkdownImport(text: String, fallbackTitle: String) -> (title: String, body: String) {
+        OmegaCore.parseMarkdownImport(text: text, fallbackTitle: fallbackTitle)
+    }
+
     /// Imports a folder of markdown files, one entry per file.
     @discardableResult
     func importMarkdown(from urls: [URL]) -> Int {
         var added = 0
         for url in urls {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            var lines = text.components(separatedBy: "\n")
-            var title = url.deletingPathExtension().lastPathComponent
-            if let first = lines.first, first.hasPrefix("# ") {
-                title = String(first.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                lines.removeFirst()
-            }
+            let parsed = Self.parseMarkdownImport(
+                text: text,
+                fallbackTitle: url.deletingPathExtension().lastPathComponent
+            )
             let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
             var entry = JournalEntry.new()
-            entry.title = title
-            entry.body = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            entry.title = parsed.title
+            entry.body = parsed.body
             entry.tags = ["imported"]
             entry.createdAt = created
             entry.updatedAt = created
