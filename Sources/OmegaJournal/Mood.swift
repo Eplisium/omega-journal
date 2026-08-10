@@ -19,6 +19,12 @@ enum Mood: Int, CaseIterable, Identifiable, Codable {
         case .good: "🙂"; case .great: "😄"
         }
     }
+    var icon: String {
+        switch self {
+        case .awful: "cloud.heavyrain"; case .bad: "cloud.drizzle"; case .neutral: "cloud"
+        case .good: "sun.max"; case .great: "sparkles"
+        }
+    }
     var color: Color {
         switch self {
         case .awful: Color(red: 0.85, green: 0.35, blue: 0.35)
@@ -42,4 +48,17 @@ struct MoodCount: Identifiable {
     let mood: Mood
     let count: Int
     var id: Int { mood.rawValue }
+}
+
+struct WordPoint: Identifiable {
+    let date: Date
+    let words: Int
+    var id: Date { date }
+}
+
+struct WeekdayCount: Identifiable {
+    let weekday: Int
+    let symbol: String
+    let count: Int
+    var id: Int { weekday }
 }

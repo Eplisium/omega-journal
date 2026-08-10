@@ -20,7 +20,10 @@ final class DatabaseManager {
     private let attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    private static let currentSchemaVersion = 4
+    private static let currentSchemaVersion = 5
+
+    /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
+    static let trashRetentionDays = 30
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -31,6 +34,7 @@ final class DatabaseManager {
         try? FileManager.default.createDirectory(atPath: attachmentsDir, withIntermediateDirectories: true)
         openDatabase()
         runMigrations()
+        purgeExpiredTrash()
         autoBackup()
     }
 
@@ -95,6 +99,9 @@ final class DatabaseManager {
         }
         if current < 4 {
             migrateToV4()
+        }
+        if current < 5 {
+            migrateToV5()
         }
     }
 
@@ -200,6 +207,44 @@ final class DatabaseManager {
         setSchemaVersion(4)
     }
 
+    /// V5: Soft-delete (trash) + archive flags, entry templates, and performance indexes.
+    private func migrateToV5() {
+        // `ALTER TABLE ... ADD COLUMN` fails if the column already exists; exec() logs and
+        // continues, which is the behaviour we want for an idempotent migration.
+        exec("ALTER TABLE entries ADD COLUMN deleted_at REAL;")
+        exec("ALTER TABLE entries ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;")
+        exec("""
+            CREATE TABLE IF NOT EXISTS templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '',
+                icon TEXT NOT NULL DEFAULT 'doc.text',
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_entries_deleted ON entries(deleted_at);
+            CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag_id);
+        """)
+        seedDefaultTemplates()
+        setSchemaVersion(5)
+    }
+
+    // MARK: - Trash
+
+    /// Permanently removes trashed entries older than `trashRetentionDays`.
+    func purgeExpiredTrash() {
+        let cutoff = Date().addingTimeInterval(-Double(Self.trashRetentionDays) * 86_400).timeIntervalSince1970
+        guard let stmt = try? prepare("SELECT id FROM entries WHERE deleted_at IS NOT NULL AND deleted_at < ?;") else { return }
+        var ids: [String] = []
+        sqlite3_bind_double(stmt, 1, cutoff)
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            ids.append(String(cString: sqlite3_column_text(stmt, 0)))
+        }
+        sqlite3_finalize(stmt)
+        for id in ids { hardDeleteEntry(id: id) }
+    }
+
     // MARK: - Auto Backup
 
     private func autoBackup() {
@@ -256,66 +301,104 @@ final class DatabaseManager {
 
     // MARK: - CRUD (parameterized queries throughout)
 
-    func fetchAllEntries(search: String = "", sort: SortOrder = .dateDesc) -> [JournalEntry] {
-        let orderBy: String
-        switch sort {
-        case .dateDesc: orderBy = "ORDER BY e.is_pinned DESC, e.created_at DESC"
-        case .dateAsc: orderBy = "ORDER BY e.is_pinned DESC, e.created_at ASC"
-        case .titleAsc: orderBy = "ORDER BY e.is_pinned DESC, e.title ASC COLLATE NOCASE"
-        case .titleDesc: orderBy = "ORDER BY e.is_pinned DESC, e.title DESC COLLATE NOCASE"
-        }
+    /// Which slice of the library a fetch should look at.
+    enum EntryScope {
+        case active     // not trashed, not archived
+        case archived
+        case trashed
+        case all        // everything except the trash
+    }
 
-        let sql: String
-        if search.isEmpty {
-            sql = "SELECT e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite FROM entries e \(orderBy);"
-            guard let stmt = try? prepare(sql) else { return [] }
-            return collectEntries(stmt)
-        } else {
-            // Use FTS for search with fallback to LIKE
-            let ftsSQL = """
-                SELECT e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite
-                FROM entries e
-                INNER JOIN entries_fts f ON e.id = f.entry_id
-                WHERE entries_fts MATCH ?
-                \(orderBy.replacingOccurrences(of: "e.", with: "e."));
-            """
-            if let stmt = try? prepare(ftsSQL) {
-                bindText(stmt, index: 1, value: search + "*")
-                let results = collectEntries(stmt)
-                if !results.isEmpty { return results }
-            }
+    private static let entryColumns =
+        "e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived"
 
-            // Fallback to LIKE with parameterized query
-            let likeSQL = """
-                SELECT e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite
-                FROM entries e
-                WHERE e.title LIKE ? OR e.body LIKE ? OR e.tags LIKE ?
-                \(orderBy);
-            """
-            guard let stmt = try? prepare(likeSQL) else { return [] }
-            let pattern = "%\(search)%"
-            bindText(stmt, index: 1, value: pattern)
-            bindText(stmt, index: 2, value: pattern)
-            bindText(stmt, index: 3, value: pattern)
-            return collectEntries(stmt)
+    private func scopeClause(_ scope: EntryScope) -> String {
+        switch scope {
+        case .active: return "e.deleted_at IS NULL AND e.is_archived = 0"
+        case .archived: return "e.deleted_at IS NULL AND e.is_archived = 1"
+        case .trashed: return "e.deleted_at IS NOT NULL"
+        case .all: return "e.deleted_at IS NULL"
         }
     }
 
-    func fullTextSearch(_ query: String) -> [JournalEntry] {
+    private func orderClause(_ sort: SortOrder) -> String {
+        switch sort {
+        case .dateDesc: return "ORDER BY e.is_pinned DESC, e.created_at DESC"
+        case .dateAsc: return "ORDER BY e.is_pinned DESC, e.created_at ASC"
+        case .titleAsc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE ASC"
+        case .titleDesc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE DESC"
+        case .updatedDesc: return "ORDER BY e.is_pinned DESC, e.updated_at DESC"
+        case .wordsDesc: return "ORDER BY e.is_pinned DESC, LENGTH(e.body) DESC"
+        case .moodDesc: return "ORDER BY e.is_pinned DESC, e.mood DESC, e.created_at DESC"
+        }
+    }
+
+    /// FTS5 treats many punctuation characters as query syntax. Anything the user types
+    /// is wrapped as a quoted prefix term so `foo("bar` can't blow up the parser.
+    private func sanitizeFTSQuery(_ raw: String) -> String? {
+        let tokens = raw
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+        return tokens.map { "\"\($0)\"*" }.joined(separator: " ")
+    }
+
+    func fetchAllEntries(search: String = "", sort: SortOrder = .dateDesc, scope: EntryScope = .active) -> [JournalEntry] {
+        let orderBy = orderClause(sort)
+        let scopeSQL = scopeClause(scope)
+
+        if search.trimmingCharacters(in: .whitespaces).isEmpty {
+            let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeSQL) \(orderBy);"
+            guard let stmt = try? prepare(sql) else { return [] }
+            return collectEntries(stmt)
+        }
+
+        // Prefer FTS, fall back to LIKE when the query yields nothing (or can't be tokenized).
+        if let ftsQuery = sanitizeFTSQuery(search) {
+            let ftsSQL = """
+                SELECT \(Self.entryColumns)
+                FROM entries e
+                INNER JOIN entries_fts f ON e.id = f.entry_id
+                WHERE entries_fts MATCH ? AND \(scopeSQL)
+                \(orderBy);
+            """
+            if let stmt = try? prepare(ftsSQL) {
+                bindText(stmt, index: 1, value: ftsQuery)
+                let results = collectEntries(stmt)
+                if !results.isEmpty { return results }
+            }
+        }
+
+        let likeSQL = """
+            SELECT \(Self.entryColumns)
+            FROM entries e
+            WHERE (e.title LIKE ? OR e.body LIKE ? OR e.tags LIKE ?) AND \(scopeSQL)
+            \(orderBy);
+        """
+        guard let stmt = try? prepare(likeSQL) else { return [] }
+        let pattern = "%\(search)%"
+        bindText(stmt, index: 1, value: pattern)
+        bindText(stmt, index: 2, value: pattern)
+        bindText(stmt, index: 3, value: pattern)
+        return collectEntries(stmt)
+    }
+
+    func fullTextSearch(_ query: String, scope: EntryScope = .active) -> [JournalEntry] {
+        guard let ftsQuery = sanitizeFTSQuery(query) else { return [] }
         let sql = """
-            SELECT e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite
+            SELECT \(Self.entryColumns)
             FROM entries e
             INNER JOIN entries_fts f ON e.id = f.entry_id
-            WHERE entries_fts MATCH ?
+            WHERE entries_fts MATCH ? AND \(scopeClause(scope))
             ORDER BY rank;
         """
         guard let stmt = try? prepare(sql) else { return [] }
-        bindText(stmt, index: 1, value: query + "*")
+        bindText(stmt, index: 1, value: ftsQuery)
         return collectEntries(stmt)
     }
 
     func fetchEntry(id: String) -> JournalEntry? {
-        let sql = "SELECT id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite FROM entries WHERE id = ?;"
+        let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE e.id = ?;"
         guard let stmt = try? prepare(sql) else { return nil }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
@@ -333,6 +416,11 @@ final class DatabaseManager {
         while sqlite3_step(stmt) == SQLITE_ROW {
             entries.append(rowToEntry(stmt))
         }
+        // Attach attachments in one pass rather than N queries.
+        let byEntry = allAttachmentsByEntry()
+        for i in entries.indices {
+            entries[i].attachments = byEntry[entries[i].id] ?? []
+        }
         return entries
     }
 
@@ -346,6 +434,10 @@ final class DatabaseManager {
         let updatedAt = sqlite3_column_double(stmt, 6)
         let isPinned = sqlite3_column_int(stmt, 7) != 0
         let isFavorite = sqlite3_column_int(stmt, 8) != 0
+        let deletedAt: Date? = sqlite3_column_type(stmt, 9) == SQLITE_NULL
+            ? nil
+            : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9))
+        let isArchived = sqlite3_column_int(stmt, 10) != 0
 
         // Prefer tags from junction table if available
         let tags = fetchTagsForEntry(id) ?? tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
@@ -357,19 +449,20 @@ final class DatabaseManager {
             createdAt: Date(timeIntervalSince1970: createdAt),
             updatedAt: Date(timeIntervalSince1970: updatedAt),
             isPinned: isPinned, isFavorite: isFavorite,
+            isArchived: isArchived, deletedAt: deletedAt,
             attachments: []
         )
     }
 
     func saveEntry(_ entry: JournalEntry) {
-        // Save the entry itself
         let sql = """
-        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, body=excluded.body, mood=excluded.mood,
             tags=excluded.tags, updated_at=excluded.updated_at,
-            is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite;
+            is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
+            is_archived=excluded.is_archived, deleted_at=excluded.deleted_at;
         """
         guard let stmt = try? prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -382,26 +475,56 @@ final class DatabaseManager {
         sqlite3_bind_double(stmt, 7, entry.updatedAt.timeIntervalSince1970)
         sqlite3_bind_int(stmt, 8, entry.isPinned ? 1 : 0)
         sqlite3_bind_int(stmt, 9, entry.isFavorite ? 1 : 0)
+        sqlite3_bind_int(stmt, 10, entry.isArchived ? 1 : 0)
+        if let deletedAt = entry.deletedAt {
+            sqlite3_bind_double(stmt, 11, deletedAt.timeIntervalSince1970)
+        } else {
+            sqlite3_bind_null(stmt, 11)
+        }
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
             print("Save failed: \(msg)")
         }
 
-        // Sync tags junction table
         syncTagsForEntry(entry.id, tags: entry.tags)
-
-        // Update FTS index
         updateFTS(entry)
     }
 
-    func deleteEntry(id: String) {
-        let sql = "DELETE FROM entries WHERE id = ?;"
-        guard let stmt = try? prepare(sql) else { return }
+    /// Moves an entry to the trash. Recoverable for `trashRetentionDays`.
+    func trashEntry(id: String) {
+        guard let stmt = try? prepare("UPDATE entries SET deleted_at = ? WHERE id = ?;") else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        bindText(stmt, index: 2, value: id)
+        sqlite3_step(stmt)
+    }
+
+    /// Pulls an entry back out of the trash.
+    func restoreEntry(id: String) {
+        guard let stmt = try? prepare("UPDATE entries SET deleted_at = NULL WHERE id = ?;") else { return }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
         sqlite3_step(stmt)
+    }
 
-        // Clean up FTS
+    func setArchived(id: String, archived: Bool) {
+        guard let stmt = try? prepare("UPDATE entries SET is_archived = ? WHERE id = ?;") else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, archived ? 1 : 0)
+        bindText(stmt, index: 2, value: id)
+        sqlite3_step(stmt)
+    }
+
+    /// Irreversibly removes an entry, its attachments and its search index rows.
+    func hardDeleteEntry(id: String) {
+        for attachment in fetchAttachments(entryId: id) {
+            deleteAttachment(id: attachment.id)
+        }
+        if let stmt = try? prepare("DELETE FROM entries WHERE id = ?;") {
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, index: 1, value: id)
+            sqlite3_step(stmt)
+        }
         if let ftsStmt = try? prepare("DELETE FROM entries_fts WHERE entry_id = ?;") {
             defer { sqlite3_finalize(ftsStmt) }
             bindText(ftsStmt, index: 1, value: id)
@@ -409,8 +532,16 @@ final class DatabaseManager {
         }
     }
 
-    func entryCount() -> Int {
-        let sql = "SELECT COUNT(*) FROM entries;"
+    /// Legacy name — now a soft delete so nothing is lost by accident.
+    func deleteEntry(id: String) { trashEntry(id: id) }
+
+    func emptyTrash() {
+        let ids = fetchAllEntries(scope: .trashed).map(\.id)
+        for id in ids { hardDeleteEntry(id: id) }
+    }
+
+    func entryCount(scope: EntryScope = .active) -> Int {
+        let sql = "SELECT COUNT(*) FROM entries e WHERE \(scopeClause(scope));"
         guard let stmt = try? prepare(sql) else { return 0 }
         defer { sqlite3_finalize(stmt) }
         if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int(stmt, 0)) }
@@ -615,6 +746,81 @@ final class DatabaseManager {
         // Delete record
         let sql = "DELETE FROM attachments WHERE id = ?;"
         guard let stmt = try? prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, index: 1, value: id)
+        sqlite3_step(stmt)
+    }
+
+    /// One query for every attachment, grouped by entry — avoids N+1 when listing entries.
+    func allAttachmentsByEntry() -> [String: [Attachment]] {
+        let sql = "SELECT id, entry_id, filename, mime_type, created_at FROM attachments ORDER BY created_at;"
+        guard let stmt = try? prepare(sql) else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        var map: [String: [Attachment]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let a = Attachment(
+                id: String(cString: sqlite3_column_text(stmt, 0)),
+                entryId: String(cString: sqlite3_column_text(stmt, 1)),
+                filename: String(cString: sqlite3_column_text(stmt, 2)),
+                mimeType: String(cString: sqlite3_column_text(stmt, 3)),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+            )
+            map[a.entryId, default: []].append(a)
+        }
+        return map
+    }
+
+    // MARK: - Templates
+
+    private func seedDefaultTemplates() {
+        guard templates().isEmpty else { return }
+        for (i, t) in EntryTemplate.builtIns.enumerated() {
+            var copy = t
+            copy.sortOrder = i
+            saveTemplate(copy)
+        }
+    }
+
+    func templates() -> [EntryTemplate] {
+        let sql = "SELECT id, name, body, tags, icon, sort_order FROM templates ORDER BY sort_order, name;"
+        guard let stmt = try? prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var result: [EntryTemplate] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let tagsStr = String(cString: sqlite3_column_text(stmt, 3))
+            result.append(EntryTemplate(
+                id: String(cString: sqlite3_column_text(stmt, 0)),
+                name: String(cString: sqlite3_column_text(stmt, 1)),
+                body: String(cString: sqlite3_column_text(stmt, 2)),
+                tags: tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
+                icon: String(cString: sqlite3_column_text(stmt, 4)),
+                sortOrder: Int(sqlite3_column_int(stmt, 5))
+            ))
+        }
+        return result
+    }
+
+    func saveTemplate(_ template: EntryTemplate) {
+        let sql = """
+            INSERT INTO templates (id, name, body, tags, icon, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, body=excluded.body, tags=excluded.tags,
+                icon=excluded.icon, sort_order=excluded.sort_order;
+        """
+        guard let stmt = try? prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, index: 1, value: template.id)
+        bindText(stmt, index: 2, value: template.name)
+        bindText(stmt, index: 3, value: template.body)
+        bindText(stmt, index: 4, value: template.tags.joined(separator: ","))
+        bindText(stmt, index: 5, value: template.icon)
+        sqlite3_bind_int(stmt, 6, Int32(template.sortOrder))
+        sqlite3_step(stmt)
+    }
+
+    func deleteTemplate(id: String) {
+        guard let stmt = try? prepare("DELETE FROM templates WHERE id = ?;") else { return }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
         sqlite3_step(stmt)
