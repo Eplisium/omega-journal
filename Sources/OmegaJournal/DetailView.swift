@@ -46,10 +46,12 @@ struct DetailView: View {
         }
     }
 
-    /// Trash and archive entries live outside `vm.entries`, so resolve them separately.
+    /// Trash, archive, and hidden entries live outside `vm.entries`, so resolve them separately.
     private var trashOrArchiveSelection: JournalEntry? {
         guard let id = vm.selectedEntryId else { return nil }
-        return vm.trashedEntries.first { $0.id == id } ?? vm.archivedEntries.first { $0.id == id }
+        return vm.trashedEntries.first { $0.id == id }
+            ?? vm.archivedEntries.first { $0.id == id }
+            ?? vm.hiddenEntries.first { $0.id == id }
     }
 
     // MARK: Welcome

@@ -39,7 +39,7 @@ struct CommandPaletteView: View {
         ]
 
         // Navigation
-        let destinations: [SidebarItem] = [.all, .favorites, .thisWeek, .calendar, .insights, .onThisDay, .archive, .trash]
+        let destinations: [SidebarItem] = [.all, .favorites, .thisWeek, .calendar, .insights, .onThisDay, .archive, .hidden, .trash]
         for dest in destinations {
             list.append(Command(title: "Go to \(dest.title)", subtitle: "Navigate", icon: dest.icon, group: "Navigate") {
                 selection = dest

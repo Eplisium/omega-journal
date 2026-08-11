@@ -6,11 +6,14 @@ struct EntryListView: View {
     @ObservedObject var vm: JournalViewModel
     @Binding var selection: SidebarItem?
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
 
     @FocusState private var searchFocused: Bool
     @State private var showFilters = false
     @State private var bulkTagText = ""
     @State private var showBulkTagField = false
+
+    private var isHiddenSection: Bool { selection == .hidden }
 
     /// Entries for the currently selected sidebar item, after the filter bar is applied.
     private var displayed: [JournalEntry] {
@@ -24,6 +27,7 @@ struct EntryListView: View {
         case .tag(let t): base = vm.entries.filter { $0.tags.contains(t) }
         case .onThisDay: base = vm.onThisDay
         case .archive: return vm.archivedEntries
+        case .hidden: return vm.hiddenEntries
         case .trash: return vm.trashedEntries
         default: base = vm.entries
         }
@@ -45,19 +49,87 @@ struct EntryListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchBar
-            if showFilters { FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity)) }
-            if vm.isBulkSelecting { bulkActionBar.transition(.move(edge: .top).combined(with: .opacity)) }
-            if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
-            Divider().opacity(0.25)
-            listBody
+            if isHiddenSection && !biometricAuth.isAuthenticated {
+                hiddenLockScreen
+            } else {
+                searchBar
+                if showFilters { FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity)) }
+                if vm.isBulkSelecting { bulkActionBar.transition(.move(edge: .top).combined(with: .opacity)) }
+                if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
+                Divider().opacity(0.25)
+                listBody
+            }
         }
         .background(theme.backgroundColor)
         .animation(.easeInOut(duration: 0.18), value: showFilters)
         .animation(.easeInOut(duration: 0.18), value: vm.isBulkSelecting)
+        .animation(.easeInOut(duration: 0.2), value: biometricAuth.isAuthenticated)
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             searchFocused = true
         }
+        .onChange(of: selection) { _, newValue in
+            // Lock hidden entries when navigating away
+            if newValue != .hidden {
+                biometricAuth.lock()
+            }
+        }
+    }
+
+    // MARK: Hidden Lock Screen
+
+    private var hiddenLockScreen: some View {
+        VStack(spacing: 18) {
+            Spacer()
+
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [theme.accentColor.opacity(0.3), theme.accentColor.opacity(0.08)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 80, height: 80)
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundColor(theme.accentColor)
+            }
+
+            VStack(spacing: 6) {
+                Text("Hidden Entries")
+                    .font(.system(size: 18, weight: .semibold, design: .serif))
+                    .foregroundColor(theme.titleTextColor)
+
+                Text("\(vm.hiddenCount) entries are hidden")
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.secondaryTextColor)
+
+                Text("Authenticate with \(biometricAuth.biometricType) to view.")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryTextColor.opacity(0.7))
+            }
+
+            Button {
+                Task {
+                    _ = await biometricAuth.authenticate()
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
+                        .font(.system(size: 13))
+                    Text("Unlock")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(theme.accentColor))
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: Search bar
@@ -347,6 +419,7 @@ struct EntryListView: View {
         switch selection {
         case .trash: return "Trash is empty"
         case .archive: return "Nothing archived"
+        case .hidden: return "No hidden entries"
         case .favorites: return "No favorites yet"
         case .onThisDay: return "Nothing from this day"
         default: return "No entries yet"
@@ -359,6 +432,7 @@ struct EntryListView: View {
         switch selection {
         case .trash: return "Deleted entries appear here for \(DatabaseManager.trashRetentionDays) days."
         case .archive: return "Archived entries are hidden from your main list."
+        case .hidden: return "Hide entries from the context menu or read view toolbar."
         case .favorites: return "Star an entry to keep it close."
         default: return "Start writing — your thoughts belong somewhere."
         }
@@ -508,6 +582,9 @@ private struct EntryRow: View {
                 vm.showToast("Copied as Markdown")
             } label: { Label("Copy as Markdown", systemImage: "doc.on.clipboard") }
             Divider()
+            Button { vm.toggleHidden(entry) } label: {
+                Label(entry.isHidden ? "Unhide" : "Hide", systemImage: entry.isHidden ? "lock.open" : "lock")
+            }
             Button { vm.toggleArchive(entry) } label: {
                 Label(entry.isArchived ? "Unarchive" : "Archive", systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
             }

@@ -84,6 +84,7 @@ enum SidebarItem: Hashable {
     case calendar
     case onThisDay
     case archive
+    case hidden
     case trash
     case tag(String)
 
@@ -97,6 +98,7 @@ enum SidebarItem: Hashable {
         case .calendar: "Calendar"
         case .onThisDay: "On This Day"
         case .archive: "Archive"
+        case .hidden: "Hidden"
         case .trash: "Trash"
         case .tag(let t): "#\(t)"
         }
@@ -112,6 +114,7 @@ enum SidebarItem: Hashable {
         case .calendar: "calendar"
         case .onThisDay: "clock.arrow.circlepath"
         case .archive: "archivebox"
+        case .hidden: "lock.fill"
         case .trash: "trash"
         case .tag: "number"
         }

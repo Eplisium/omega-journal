@@ -115,6 +115,9 @@ struct ReadView: View {
                 ActionButton(icon: entry.isArchived ? "tray.and.arrow.up" : "archivebox", color: theme.accentColor, active: entry.isArchived, tooltip: entry.isArchived ? "Unarchive" : "Archive") {
                     vm.toggleArchive(entry)
                 }
+                ActionButton(icon: entry.isHidden ? "lock.open" : "lock", color: theme.accentColor, active: entry.isHidden, tooltip: entry.isHidden ? "Unhide" : "Hide") {
+                    vm.toggleHidden(entry)
+                }
                 ActionButton(icon: "trash", color: .red, active: false, tooltip: "Move to Trash", isDestructive: true) {
                     vm.deleteEntry(entry)
                 }

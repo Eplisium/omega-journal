@@ -39,13 +39,15 @@ struct JournalEntry: Identifiable, Hashable {
     var isArchived: Bool
     /// Non-nil when the entry is in the trash.
     var deletedAt: Date?
+    /// Whether the entry is hidden (requires biometric/password to view).
+    var isHidden: Bool
     var attachments: [Attachment]
 
     static func new() -> JournalEntry {
         JournalEntry(id: UUID().uuidString, title: "", body: "", mood: .neutral,
                      tags: [], createdAt: Date(), updatedAt: Date(),
                      isPinned: false, isFavorite: false, isArchived: false,
-                     deletedAt: nil, attachments: [])
+                     deletedAt: nil, isHidden: false, attachments: [])
     }
 
     var isTrashed: Bool { deletedAt != nil }

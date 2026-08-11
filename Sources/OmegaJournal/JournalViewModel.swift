@@ -10,6 +10,7 @@ final class JournalViewModel: ObservableObject {
     @Published var entries: [JournalEntry] = []
     @Published var trashedEntries: [JournalEntry] = []
     @Published var archivedEntries: [JournalEntry] = []
+    @Published var hiddenEntries: [JournalEntry] = []
     @Published var templates: [EntryTemplate] = []
     @Published var allTags: [(tag: String, count: Int)] = []
 
@@ -78,6 +79,7 @@ final class JournalViewModel: ObservableObject {
         entries = db.fetchAllEntries(search: "", sort: sortOrder, scope: .active)
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
         archivedEntries = db.fetchAllEntries(sort: sortOrder, scope: .archived)
+        hiddenEntries = db.fetchAllEntries(sort: .dateDesc, scope: .hidden)
         allTags = db.tagsWithCounts()
         GoalManager.shared.loadGoals()
     }
@@ -368,6 +370,15 @@ final class JournalViewModel: ObservableObject {
         showToast(newValue ? "Archived" : "Unarchived", actionLabel: newValue ? "Undo" : nil)
     }
 
+    func toggleHidden(_ entry: JournalEntry) {
+        let newValue = !entry.isHidden
+        db.setHidden(id: entry.id, hidden: newValue)
+        if selectedEntryId == entry.id { selectedEntryId = nil }
+        if editingEntryId == entry.id { editingEntryId = nil }
+        reload()
+        showToast(newValue ? "Hidden" : "Unhidden")
+    }
+
     // MARK: - Bulk actions
 
     func toggleBulkSelection(_ id: String) {
@@ -471,6 +482,7 @@ final class JournalViewModel: ObservableObject {
     var averageMood: Double { entries.isEmpty ? 0 : Double(entries.reduce(0) { $0 + $1.mood.rawValue }) / Double(entries.count) }
     var entriesThisWeek: Int { entries.filter { $0.createdAt >= Date().addingTimeInterval(-7 * 24 * 3600) }.count }
     var favoriteCount: Int { entries.filter(\.isFavorite).count }
+    var hiddenCount: Int { hiddenEntries.count }
 
     var writingStreak: Int {
         let cal = Calendar.current
@@ -691,6 +703,7 @@ final class JournalViewModel: ObservableObject {
                     isPinned: je.isPinned, isFavorite: je.isFavorite,
                     isArchived: je.isArchived ?? false,
                     deletedAt: je.deletedAt,
+                    isHidden: false,
                     attachments: []
                 )
                 db.saveEntry(entry)

@@ -117,6 +117,9 @@ final class DatabaseManager {
         if current < 6 {
             migrateToV6()
         }
+        if current < 7 {
+            migrateToV7()
+        }
     }
 
     private func getSchemaVersion() -> Int {
@@ -267,6 +270,13 @@ final class DatabaseManager {
         setSchemaVersion(6)
     }
 
+    /// V7: Hidden entries — `is_hidden` flag, hidden entries excluded from normal queries.
+    private func migrateToV7() {
+        exec("ALTER TABLE entries ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;")
+        exec("CREATE INDEX IF NOT EXISTS idx_entries_hidden ON entries(is_hidden);")
+        setSchemaVersion(7)
+    }
+
     // MARK: - Trash
 
     /// Permanently removes trashed entries older than `trashRetentionDays`.
@@ -340,21 +350,23 @@ final class DatabaseManager {
 
     /// Which slice of the library a fetch should look at.
     enum EntryScope {
-        case active     // not trashed, not archived
+        case active     // not trashed, not archived, not hidden
         case archived
         case trashed
-        case all        // everything except the trash
+        case all        // everything except the trash (and hidden)
+        case hidden     // hidden entries only
     }
 
     private static let entryColumns =
-        "e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count"
+        "e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden"
 
     private func scopeClause(_ scope: EntryScope) -> String {
         switch scope {
-        case .active: return "e.deleted_at IS NULL AND e.is_archived = 0"
-        case .archived: return "e.deleted_at IS NULL AND e.is_archived = 1"
+        case .active: return "e.deleted_at IS NULL AND e.is_archived = 0 AND e.is_hidden = 0"
+        case .archived: return "e.deleted_at IS NULL AND e.is_archived = 1 AND e.is_hidden = 0"
         case .trashed: return "e.deleted_at IS NOT NULL"
-        case .all: return "e.deleted_at IS NULL"
+        case .all: return "e.deleted_at IS NULL AND e.is_hidden = 0"
+        case .hidden: return "e.deleted_at IS NULL AND e.is_hidden = 1"
         }
     }
 
@@ -487,6 +499,8 @@ final class DatabaseManager {
         // covers the rare case where the junction table has no rows yet.
         let tags = tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 
+        let isHidden = sqlite3_column_int(stmt, 12) != 0
+
         return JournalEntry(
             id: id, title: title, body: body,
             mood: Mood(rawValue: Int(mood)) ?? .neutral,
@@ -495,6 +509,7 @@ final class DatabaseManager {
             updatedAt: Date(timeIntervalSince1970: updatedAt),
             isPinned: isPinned, isFavorite: isFavorite,
             isArchived: isArchived, deletedAt: deletedAt,
+            isHidden: isHidden,
             attachments: []
         )
     }
@@ -502,14 +517,14 @@ final class DatabaseManager {
     func saveEntry(_ entry: JournalEntry) {
         let wordCount = entry.body.isEmpty ? 0 : entry.body.split(whereSeparator: { $0.isWhitespace }).count
         let sql = """
-        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, body=excluded.body, mood=excluded.mood,
             tags=excluded.tags, updated_at=excluded.updated_at,
             is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
             is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
-            word_count=excluded.word_count;
+            word_count=excluded.word_count, is_hidden=excluded.is_hidden;
         """
         guard let stmt = try? prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -529,6 +544,7 @@ final class DatabaseManager {
             sqlite3_bind_null(stmt, 11)
         }
         sqlite3_bind_int(stmt, 12, Int32(wordCount))
+        sqlite3_bind_int(stmt, 13, entry.isHidden ? 1 : 0)
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
             print("Save failed: \(msg)")
@@ -559,6 +575,14 @@ final class DatabaseManager {
         guard let stmt = try? prepare("UPDATE entries SET is_archived = ? WHERE id = ?;") else { return }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, archived ? 1 : 0)
+        bindText(stmt, index: 2, value: id)
+        sqlite3_step(stmt)
+    }
+
+    func setHidden(id: String, hidden: Bool) {
+        guard let stmt = try? prepare("UPDATE entries SET is_hidden = ? WHERE id = ?;") else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, hidden ? 1 : 0)
         bindText(stmt, index: 2, value: id)
         sqlite3_step(stmt)
     }
@@ -713,7 +737,7 @@ final class DatabaseManager {
             FROM tags t
             INNER JOIN entry_tags et ON t.id = et.tag_id
             INNER JOIN entries e ON et.entry_id = e.id
-            WHERE e.deleted_at IS NULL AND e.is_archived = 0
+            WHERE e.deleted_at IS NULL AND e.is_archived = 0 AND e.is_hidden = 0
             GROUP BY t.id
             ORDER BY cnt DESC, t.name;
         """

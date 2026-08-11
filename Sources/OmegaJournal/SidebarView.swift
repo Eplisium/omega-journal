@@ -52,6 +52,7 @@ struct SidebarView: View {
 
                     section("STORAGE") {
                         row(.archive, badge: vm.archivedEntries.count)
+                        row(.hidden, badge: vm.hiddenCount)
                         row(.trash, badge: vm.trashedEntries.count)
                     }
 
