@@ -9,6 +9,8 @@ final class BiometricAuth: ObservableObject {
 
     /// Whether the user has successfully authenticated in this session.
     @Published private(set) var isAuthenticated = false
+    /// True while the system auth dialog is on screen (the app resigns active then).
+    @Published private(set) var isAuthenticating = false
 
     private init() {}
 
@@ -39,6 +41,9 @@ final class BiometricAuth: ObservableObject {
     func authenticate() async -> Bool {
         // Already authenticated this session
         if isAuthenticated { return true }
+
+        isAuthenticating = true
+        defer { isAuthenticating = false }
 
         let context = LAContext()
         context.localizedReason = "Unlock hidden journal entries"

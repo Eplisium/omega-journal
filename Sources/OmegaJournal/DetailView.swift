@@ -46,7 +46,8 @@ struct DetailView: View {
         }
     }
 
-    /// Trash, archive, and hidden entries live outside `vm.entries`, so resolve them separately.
+    /// Trash and archive entries live outside `vm.entries` (scope `.active`), so resolve them separately.
+    /// Hidden entries are included in `.active` / `.archived`, but this fallback still covers the Hidden sidebar.
     private var trashOrArchiveSelection: JournalEntry? {
         guard let id = vm.selectedEntryId else { return nil }
         return vm.trashedEntries.first { $0.id == id }

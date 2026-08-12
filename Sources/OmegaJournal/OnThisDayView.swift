@@ -5,6 +5,7 @@ import SwiftUI
 struct OnThisDayView: View {
     @ObservedObject var vm: JournalViewModel
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
 
     private var thisDay: [JournalEntry] { vm.onThisDay }
 
@@ -107,7 +108,7 @@ struct OnThisDayView: View {
                 Spacer()
             }
 
-            if !entry.tags.isEmpty {
+            if !entry.tags.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
                 HStack(spacing: 4) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Text("#\(tag)")
@@ -121,7 +122,7 @@ struct OnThisDayView: View {
                 }
             }
 
-            Text(entry.preview)
+            Text(entry.isHidden && !biometricAuth.isAuthenticated ? "Hidden · unlock to read" : entry.preview)
                 .font(.system(size: 14))
                 .foregroundColor(.secondary)
                 .lineLimit(4)

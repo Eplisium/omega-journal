@@ -9,6 +9,7 @@ struct ReadView: View {
     var isTrash: Bool = false
 
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +20,9 @@ struct ReadView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     header
 
-                    if entry.body.isEmpty {
+                    if entry.isHidden && !biometricAuth.isAuthenticated {
+                        hiddenContentOverlay
+                    } else if entry.body.isEmpty {
                         Text("This entry has no content yet.")
                             .font(.system(size: 13))
                             .foregroundColor(theme.secondaryTextColor)
@@ -32,7 +35,9 @@ struct ReadView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    if !entry.attachments.isEmpty { attachmentsSection }
+                    if !entry.attachments.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
+                        attachmentsSection
+                    }
                 }
                 .padding(.horizontal, 30)
                 .padding(.vertical, 26)
@@ -84,9 +89,7 @@ struct ReadView: View {
                     vm.duplicate(entry)
                 }
                 ActionButton(icon: "doc.on.clipboard", color: theme.accentColor, active: false, tooltip: "Copy as Markdown") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("# \(entry.displayTitle)\n\n\(entry.body)", forType: .string)
-                    vm.showToast("Copied as Markdown")
+                    vm.copyAsMarkdown(entry)
                 }
 
                 Spacer()
@@ -110,13 +113,21 @@ struct ReadView: View {
                 .fixedSize()
 
                 ActionButton(icon: "square.and.arrow.up", color: theme.accentColor, active: false, tooltip: "Export this entry") {
-                    ImportExportPanels.exportCurrentEntry(vm: vm)
+                    Task {
+                        guard await vm.revealIfNeeded(entry) else { return }
+                        ImportExportPanels.exportCurrentEntry(vm: vm)
+                    }
                 }
                 ActionButton(icon: entry.isArchived ? "tray.and.arrow.up" : "archivebox", color: theme.accentColor, active: entry.isArchived, tooltip: entry.isArchived ? "Unarchive" : "Archive") {
                     vm.toggleArchive(entry)
                 }
                 ActionButton(icon: entry.isHidden ? "lock.open" : "lock", color: theme.accentColor, active: entry.isHidden, tooltip: entry.isHidden ? "Unhide" : "Hide") {
                     vm.toggleHidden(entry)
+                }
+                if entry.isHidden && biometricAuth.isAuthenticated {
+                    ActionButton(icon: "lock.fill", color: theme.accentColor, active: true, tooltip: "Lock hidden entries (⌘L)") {
+                        vm.lockHiddenEntries()
+                    }
                 }
                 ActionButton(icon: "trash", color: .red, active: false, tooltip: "Move to Trash", isDestructive: true) {
                     vm.deleteEntry(entry)
@@ -143,7 +154,7 @@ struct ReadView: View {
                 metaChip(entry.readingTime)
             }
 
-            if !entry.tags.isEmpty {
+            if !entry.tags.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
                 HStack(spacing: 5) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Text("#\(tag)")
@@ -164,6 +175,56 @@ struct ReadView: View {
 
             Divider().opacity(0.2).padding(.top, 2)
         }
+    }
+
+    // MARK: Hidden Content Overlay
+
+    private var hiddenContentOverlay: some View {
+        VStack(spacing: 14) {
+            Divider().opacity(0.2)
+
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [theme.accentColor.opacity(0.25), theme.accentColor.opacity(0.06)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 64, height: 64)
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundColor(theme.accentColor)
+            }
+
+            VStack(spacing: 5) {
+                Text("Content Hidden")
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
+                    .foregroundColor(theme.titleTextColor)
+
+                Text("Authenticate with \(biometricAuth.biometricType) to view this entry.")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryTextColor)
+            }
+
+            Button {
+                Task { _ = await biometricAuth.authenticate() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
+                        .font(.system(size: 12))
+                    Text("Unlock")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(theme.accentColor))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 
     private func metaChip(_ text: String, color: Color? = nil) -> some View {

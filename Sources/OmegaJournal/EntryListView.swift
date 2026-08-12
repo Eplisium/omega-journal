@@ -49,16 +49,15 @@ struct EntryListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isHiddenSection && !biometricAuth.isAuthenticated {
-                hiddenLockScreen
-            } else {
-                searchBar
-                if showFilters { FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity)) }
-                if vm.isBulkSelecting { bulkActionBar.transition(.move(edge: .top).combined(with: .opacity)) }
-                if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
-                Divider().opacity(0.25)
-                listBody
+            if isHiddenSection {
+                hiddenBanner
             }
+            searchBar
+            if showFilters { FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity)) }
+            if vm.isBulkSelecting { bulkActionBar.transition(.move(edge: .top).combined(with: .opacity)) }
+            if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
+            Divider().opacity(0.25)
+            listBody
         }
         .background(theme.backgroundColor)
         .animation(.easeInOut(duration: 0.18), value: showFilters)
@@ -67,69 +66,60 @@ struct EntryListView: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             searchFocused = true
         }
-        .onChange(of: selection) { _, newValue in
-            // Lock hidden entries when navigating away
-            if newValue != .hidden {
-                biometricAuth.lock()
-            }
-        }
     }
 
-    // MARK: Hidden Lock Screen
+    // MARK: Hidden Banner
 
-    private var hiddenLockScreen: some View {
-        VStack(spacing: 18) {
+    private var hiddenBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: biometricAuth.isAuthenticated ? "lock.open.fill" : "lock.fill")
+                .font(.system(size: 10))
+                .foregroundColor(theme.accentColor)
+            Text(biometricAuth.isAuthenticated
+                 ? "Hidden content is visible — lock if someone walks by."
+                 : "Content is hidden — authenticate to reveal.")
+                .font(.system(size: 10))
+                .foregroundColor(theme.secondaryTextColor)
             Spacer()
-
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [theme.accentColor.opacity(0.3), theme.accentColor.opacity(0.08)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundColor(theme.accentColor)
-            }
-
-            VStack(spacing: 6) {
-                Text("Hidden Entries")
-                    .font(.system(size: 18, weight: .semibold, design: .serif))
-                    .foregroundColor(theme.titleTextColor)
-
-                Text("\(vm.hiddenCount) entries are hidden")
-                    .font(.system(size: 12))
-                    .foregroundColor(theme.secondaryTextColor)
-
-                Text("Authenticate with \(biometricAuth.biometricType) to view.")
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.secondaryTextColor.opacity(0.7))
-            }
-
-            Button {
-                Task {
-                    _ = await biometricAuth.authenticate()
+            if biometricAuth.isAuthenticated {
+                Button {
+                    vm.lockHiddenEntries()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10))
+                        Text("Lock")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(theme.accentColor))
                 }
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
-                        .font(.system(size: 13))
-                    Text("Unlock")
-                        .font(.system(size: 13, weight: .semibold))
+                .buttonStyle(.plain)
+                .help("Lock hidden entries (⌘L)")
+            } else {
+                Button {
+                    Task { _ = await biometricAuth.authenticate() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
+                            .font(.system(size: 10))
+                        Text("Unlock")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(theme.accentColor))
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 10)
-                .background(Capsule().fill(theme.accentColor))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-
-            Spacer()
         }
-        .frame(maxWidth: .infinity)
+        .foregroundColor(theme.secondaryTextColor)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(theme.accentColor.opacity(0.08))
     }
 
     // MARK: Search bar
@@ -222,6 +212,18 @@ struct EntryListView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Select multiple")
+
+                if biometricAuth.isAuthenticated && vm.hiddenCount > 0 {
+                    Button {
+                        vm.lockHiddenEntries()
+                    } label: {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Lock hidden entries (⌘L)")
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -450,6 +452,7 @@ private struct EntryRow: View {
     let isTrash: Bool
 
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
     @State private var hover = false
 
     var body: some View {
@@ -463,16 +466,21 @@ private struct EntryRow: View {
             RoundedRectangle(cornerRadius: 2)
                 .fill(entry.mood.color)
                 .frame(width: 3)
-                .opacity(0.85)
+                .opacity(isContentLocked ? 0.35 : 0.85)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     if entry.isPinned {
                         Image(systemName: "pin.fill").font(.system(size: 8)).foregroundColor(theme.accentColor)
                     }
+                    if entry.isHidden {
+                        Image(systemName: isContentLocked ? "lock.fill" : "lock.open")
+                            .font(.system(size: 8))
+                            .foregroundColor(theme.accentColor.opacity(isContentLocked ? 0.9 : 0.7))
+                    }
                     Text(entry.displayTitle)
                         .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundColor(theme.titleTextColor)
+                        .foregroundColor(theme.titleTextColor.opacity(isContentLocked ? 0.72 : 1))
                         .lineLimit(1)
                     Spacer(minLength: 2)
                     if entry.isFavorite {
@@ -483,11 +491,18 @@ private struct EntryRow: View {
                     }
                 }
 
-                Text(entry.preview)
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.secondaryTextColor)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                if isContentLocked {
+                    Text("Hidden · unlock to read")
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.secondaryTextColor.opacity(0.55))
+                        .lineLimit(1)
+                } else {
+                    Text(entry.preview)
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.secondaryTextColor)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
 
                 HStack(spacing: 6) {
                     Text(entry.mood.emoji).font(.system(size: 9))
@@ -500,18 +515,20 @@ private struct EntryRow: View {
                             .foregroundColor(theme.secondaryTextColor.opacity(0.6))
                     }
                     Spacer(minLength: 2)
-                    ForEach(entry.tags.prefix(2), id: \.self) { tag in
-                        Text("#\(tag)")
-                            .font(.system(size: 8.5, weight: .medium))
-                            .foregroundColor(theme.accentColor.opacity(0.9))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(theme.accentColor.opacity(0.12)))
-                    }
-                    if entry.tags.count > 2 {
-                        Text("+\(entry.tags.count - 2)")
-                            .font(.system(size: 8.5))
-                            .foregroundColor(theme.secondaryTextColor.opacity(0.7))
+                    if !isContentLocked {
+                        ForEach(entry.tags.prefix(2), id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.system(size: 8.5, weight: .medium))
+                                .foregroundColor(theme.accentColor.opacity(0.9))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+                        }
+                        if entry.tags.count > 2 {
+                            Text("+\(entry.tags.count - 2)")
+                                .font(.system(size: 8.5))
+                                .foregroundColor(theme.secondaryTextColor.opacity(0.7))
+                        }
                     }
                 }
             }
@@ -524,8 +541,9 @@ private struct EntryRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(isSelected ? theme.accentColor.opacity(0.45) : .clear, lineWidth: 1)
+                .strokeBorder(rowBorder, lineWidth: 1)
         )
+        .opacity(isContentLocked ? 0.82 : 1)
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture(count: 2) {
@@ -544,11 +562,22 @@ private struct EntryRow: View {
         return remaining <= 0 ? "Deleting soon" : "\(remaining)d left"
     }
 
+    private var isContentLocked: Bool {
+        entry.isHidden && !biometricAuth.isAuthenticated
+    }
+
     private var rowBackground: Color {
         if isBulkSelected { return theme.accentColor.opacity(0.14) }
         if isSelected { return theme.accentColor.opacity(0.12) }
+        if isContentLocked { return theme.cardColor.opacity(hover ? 0.28 : 0.18) }
         if hover { return theme.cardColor.opacity(0.75) }
         return theme.cardColor.opacity(0.4)
+    }
+
+    private var rowBorder: Color {
+        if isSelected { return theme.accentColor.opacity(0.45) }
+        if isContentLocked { return theme.accentColor.opacity(0.22) }
+        return .clear
     }
 
     @ViewBuilder
@@ -576,11 +605,7 @@ private struct EntryRow: View {
                     }
                 }
             }
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString("# \(entry.displayTitle)\n\n\(entry.body)", forType: .string)
-                vm.showToast("Copied as Markdown")
-            } label: { Label("Copy as Markdown", systemImage: "doc.on.clipboard") }
+            Button { vm.copyAsMarkdown(entry) } label: { Label("Copy as Markdown", systemImage: "doc.on.clipboard") }
             Divider()
             Button { vm.toggleHidden(entry) } label: {
                 Label(entry.isHidden ? "Unhide" : "Hide", systemImage: entry.isHidden ? "lock.open" : "lock")

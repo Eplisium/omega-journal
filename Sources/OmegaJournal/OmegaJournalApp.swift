@@ -70,6 +70,9 @@ struct OmegaJournalApp: App {
                 .keyboardShortcut("2", modifiers: .command)
             Button("Insights") { post(.showInsights) }
                 .keyboardShortcut("3", modifiers: .command)
+            Divider()
+            Button("Lock Hidden Entries") { post(.lockHiddenEntries) }
+                .keyboardShortcut("l", modifiers: .command)
         }
 
         CommandGroup(replacing: .help) {
@@ -97,6 +100,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        // Touch ID / password dialogs resign the app — don't lock mid-prompt.
+        guard !BiometricAuth.shared.isAuthenticating else { return }
+        NotificationCenter.default.post(name: .lockHiddenEntries, object: nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

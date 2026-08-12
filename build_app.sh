@@ -6,7 +6,10 @@ BUILD_DIR="$PROJECT_DIR/.build"
 APP_NAME="OmegaJournal"
 APP_BUNDLE="$PROJECT_DIR/Omega Journal.app"
 
-BINARY=$(find "$BUILD_DIR" -name "$APP_NAME" -type f -not -path "*/dSYM/*" -not -path "*/DWARF/*" | head -1)
+# Prefer the newest binary. A plain `find | head -1` can pick a stale
+# release build over a just-compiled debug binary and ship old SQL.
+BINARY=$(find "$BUILD_DIR" -name "$APP_NAME" -type f -not -path "*/dSYM/*" -not -path "*/DWARF/*" -print0 \
+    | xargs -0 ls -t 2>/dev/null | head -1)
 if [ -z "$BINARY" ]; then echo "Error: Binary not found. Run 'swift build' first."; exit 1; fi
 echo "Found binary: $BINARY"
 

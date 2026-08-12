@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 import OmegaJournalCore
 
 // MARK: - Journal View Model
@@ -98,8 +99,19 @@ final class JournalViewModel: ObservableObject {
             if results.isEmpty {
                 results = db.fetchAllEntries(search: q, sort: sortOrder, scope: .active)
             }
+            // Locked hidden entries stay in the list, but body text must not
+            // be searchable until the session is unlocked.
+            if !BiometricAuth.shared.isAuthenticated {
+                results = results.filter { entry in
+                    !entry.isHidden || Self.matchesVisibleFields(entry, query: q)
+                }
+            }
             entries = results
         }
+    }
+
+    private static func matchesVisibleFields(_ entry: JournalEntry, query: String) -> Bool {
+        entry.title.localizedCaseInsensitiveContains(query)
     }
 
     /// Debounced search — called on every keystroke, hits the DB at most every 250ms.
@@ -246,8 +258,40 @@ final class JournalViewModel: ObservableObject {
 
     /// Duplicates an entry as a fresh draft.
     func duplicate(_ entry: JournalEntry) {
-        createEntry(title: entry.title.isEmpty ? "" : "\(entry.title) (copy)", body: entry.body, tags: entry.tags)
-        showToast("Duplicated entry")
+        Task {
+            guard await revealIfNeeded(entry) else { return }
+            createEntry(title: entry.title.isEmpty ? "" : "\(entry.title) (copy)", body: entry.body, tags: entry.tags)
+            showToast("Duplicated entry")
+        }
+    }
+
+    func copyAsMarkdown(_ entry: JournalEntry) {
+        Task {
+            guard await revealIfNeeded(entry) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("# \(entry.displayTitle)\n\n\(entry.body)", forType: .string)
+            showToast("Copied as Markdown")
+        }
+    }
+
+    /// Prompts for biometrics when a hidden entry's content would otherwise leak.
+    @discardableResult
+    func revealIfNeeded(_ entry: JournalEntry) async -> Bool {
+        if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
+            return await BiometricAuth.shared.authenticate()
+        }
+        return true
+    }
+
+    /// Re-masks every hidden entry. Safe to call from a walk-by — no auth required.
+    func lockHiddenEntries() {
+        guard BiometricAuth.shared.isAuthenticated else { return }
+        flushPendingSave()
+        if let editing = editingEntry, editing.isHidden {
+            stopEditing()
+        }
+        BiometricAuth.shared.lock()
+        showToast("Hidden entries locked")
     }
 
     // MARK: - Selection & editing
@@ -260,6 +304,13 @@ final class JournalViewModel: ObservableObject {
 
     func startEditing(_ entry: JournalEntry) {
         selectedEntryId = entry.id
+        if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
+            Task {
+                guard await BiometricAuth.shared.authenticate() else { return }
+                editingEntryId = entry.id
+            }
+            return
+        }
         editingEntryId = entry.id
     }
 
@@ -372,11 +423,24 @@ final class JournalViewModel: ObservableObject {
 
     func toggleHidden(_ entry: JournalEntry) {
         let newValue = !entry.isHidden
-        db.setHidden(id: entry.id, hidden: newValue)
-        if selectedEntryId == entry.id { selectedEntryId = nil }
-        if editingEntryId == entry.id { editingEntryId = nil }
+        // Unhiding reveals that the entry exists as a normal card — require auth.
+        if !newValue && !BiometricAuth.shared.isAuthenticated {
+            Task {
+                guard await BiometricAuth.shared.authenticate() else { return }
+                applyHidden(entry, hidden: false)
+            }
+            return
+        }
+        applyHidden(entry, hidden: newValue)
+    }
+
+    private func applyHidden(_ entry: JournalEntry, hidden: Bool) {
+        db.setHidden(id: entry.id, hidden: hidden)
+        // Close editor if hiding, but keep the entry selected so the card
+        // stays visible (masked) in the list.
+        if hidden && editingEntryId == entry.id { editingEntryId = nil }
         reload()
-        showToast(newValue ? "Hidden" : "Unhidden")
+        showToast(hidden ? "Hidden" : "Unhidden")
     }
 
     // MARK: - Bulk actions

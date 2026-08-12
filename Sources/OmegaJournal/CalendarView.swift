@@ -8,6 +8,7 @@ import SwiftUI
 struct CalendarView: View {
     @ObservedObject var vm: JournalViewModel
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
 
     @State private var anchorMonth = Date()
     @State private var selectedDay: Date?
@@ -261,11 +262,18 @@ struct CalendarView: View {
                         HStack(spacing: 8) {
                             Text(entry.mood.emoji).font(.system(size: 13))
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(entry.displayTitle)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(theme.titleTextColor)
-                                    .lineLimit(1)
-                                Text(entry.preview)
+                                HStack(spacing: 4) {
+                                    if entry.isHidden {
+                                        Image(systemName: (entry.isHidden && !biometricAuth.isAuthenticated) ? "lock.fill" : "lock.open")
+                                            .font(.system(size: 8))
+                                            .foregroundColor(theme.accentColor)
+                                    }
+                                    Text(entry.displayTitle)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(theme.titleTextColor)
+                                        .lineLimit(1)
+                                }
+                                Text(entry.isHidden && !biometricAuth.isAuthenticated ? "Hidden · unlock to read" : entry.preview)
                                     .font(.system(size: 10))
                                     .foregroundColor(theme.secondaryTextColor)
                                     .lineLimit(1)

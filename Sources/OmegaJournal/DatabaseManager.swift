@@ -270,7 +270,7 @@ final class DatabaseManager {
         setSchemaVersion(6)
     }
 
-    /// V7: Hidden entries — `is_hidden` flag, hidden entries excluded from normal queries.
+    /// V7: Hidden entries — `is_hidden` flag. Content is gated in the UI; main scopes still include them.
     private func migrateToV7() {
         exec("ALTER TABLE entries ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;")
         exec("CREATE INDEX IF NOT EXISTS idx_entries_hidden ON entries(is_hidden);")
@@ -350,11 +350,11 @@ final class DatabaseManager {
 
     /// Which slice of the library a fetch should look at.
     enum EntryScope {
-        case active     // not trashed, not archived, not hidden
-        case archived
+        case active     // not trashed, not archived (includes hidden)
+        case archived   // not trashed, archived (includes hidden)
         case trashed
-        case all        // everything except the trash (and hidden)
-        case hidden     // hidden entries only
+        case all        // everything except the trash (includes hidden)
+        case hidden     // hidden entries only (sidebar filter)
     }
 
     private static let entryColumns =
@@ -362,10 +362,10 @@ final class DatabaseManager {
 
     private func scopeClause(_ scope: EntryScope) -> String {
         switch scope {
-        case .active: return "e.deleted_at IS NULL AND e.is_archived = 0 AND e.is_hidden = 0"
-        case .archived: return "e.deleted_at IS NULL AND e.is_archived = 1 AND e.is_hidden = 0"
+        case .active: return "e.deleted_at IS NULL AND e.is_archived = 0"
+        case .archived: return "e.deleted_at IS NULL AND e.is_archived = 1"
         case .trashed: return "e.deleted_at IS NOT NULL"
-        case .all: return "e.deleted_at IS NULL AND e.is_hidden = 0"
+        case .all: return "e.deleted_at IS NULL"
         case .hidden: return "e.deleted_at IS NULL AND e.is_hidden = 1"
         }
     }
@@ -737,7 +737,7 @@ final class DatabaseManager {
             FROM tags t
             INNER JOIN entry_tags et ON t.id = et.tag_id
             INNER JOIN entries e ON et.entry_id = e.id
-            WHERE e.deleted_at IS NULL AND e.is_archived = 0 AND e.is_hidden = 0
+            WHERE e.deleted_at IS NULL AND e.is_archived = 0
             GROUP BY t.id
             ORDER BY cnt DESC, t.name;
         """

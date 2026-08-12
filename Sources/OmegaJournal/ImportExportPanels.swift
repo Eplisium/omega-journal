@@ -14,22 +14,43 @@ enum ImportExportPanels {
     // MARK: Export
 
     static func exportMarkdown(vm: JournalViewModel) {
-        save(vm: vm, suggested: "OmegaJournal-\(stamp()).md", type: .plainText) { url in
-            try ExportManager.exportMarkdown(vm.entries, to: url)
+        Task {
+            let entries = await entriesForExport(vm: vm)
+            save(vm: vm, suggested: "OmegaJournal-\(stamp()).md", type: .plainText) { url in
+                try ExportManager.exportMarkdown(entries, to: url)
+            }
         }
     }
 
     static func exportJSON(vm: JournalViewModel) {
-        save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json) { url in
-            try ExportManager.exportJSON(vm.entries, to: url)
+        Task {
+            let entries = await entriesForExport(vm: vm)
+            save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json) { url in
+                try ExportManager.exportJSON(entries, to: url)
+            }
         }
     }
 
     @MainActor
     static func exportPDF(vm: JournalViewModel) {
-        save(vm: vm, suggested: "OmegaJournal-\(stamp()).pdf", type: .pdf) { url in
-            try ExportManager.exportPDF(vm.entries, to: url)
+        Task {
+            let entries = await entriesForExport(vm: vm)
+            save(vm: vm, suggested: "OmegaJournal-\(stamp()).pdf", type: .pdf) { url in
+                try ExportManager.exportPDF(entries, to: url)
+            }
         }
+    }
+
+    /// Unlocks hidden entries for a full export; if auth is cancelled, hidden entries are omitted.
+    private static func entriesForExport(vm: JournalViewModel) async -> [JournalEntry] {
+        let hasHidden = vm.entries.contains(where: \.isHidden)
+        if hasHidden && !BiometricAuth.shared.isAuthenticated {
+            if await BiometricAuth.shared.authenticate() {
+                return vm.entries
+            }
+            return vm.entries.filter { !$0.isHidden }
+        }
+        return vm.entries
     }
 
     /// Exports only the currently selected entry.

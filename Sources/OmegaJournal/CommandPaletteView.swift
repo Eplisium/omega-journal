@@ -101,6 +101,12 @@ struct CommandPaletteView: View {
             },
         ])
 
+        if BiometricAuth.shared.isAuthenticated {
+            list.append(Command(title: "Lock Hidden Entries", subtitle: "Re-mask hidden content (⌘L)", icon: "lock.fill", group: "View") {
+                vm.lockHiddenEntries()
+            })
+        }
+
         // Jump-to-entry
         for entry in vm.entries.prefix(200) {
             list.append(Command(

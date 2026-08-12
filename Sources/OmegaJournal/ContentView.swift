@@ -57,6 +57,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .importEntries)) { _ in
             ImportExportPanels.showImportPanel(vm: vm)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lockHiddenEntries)) { _ in
+            vm.lockHiddenEntries()
+        }
     }
 
     private var mainSplitView: some View {
@@ -133,4 +136,5 @@ extension Notification.Name {
     static let showCalendar = Notification.Name("OmegaJournal.showCalendar")
     static let importEntries = Notification.Name("OmegaJournal.importEntries")
     static let focusSearch = Notification.Name("OmegaJournal.focusSearch")
+    static let lockHiddenEntries = Notification.Name("OmegaJournal.lockHiddenEntries")
 }
