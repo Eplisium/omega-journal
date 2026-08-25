@@ -24,21 +24,28 @@ final class ThemeManager: ObservableObject {
         let bgHex = db.getSetting("backgroundColor", defaultValue: "#1a0d2e")
         let sidebarHex = db.getSetting("sidebarColor", defaultValue: "#140823")
         let cardHex = db.getSetting("cardColor", defaultValue: "#241245")
+        let initialAccent = Color(hex: accentHex) ?? Color(hex: "#9d6bff")!
+        let initialBackground = Color(hex: bgHex) ?? Color(hex: "#1a0d2e")!
+        let initialSidebar = Color(hex: sidebarHex) ?? Color(hex: "#140823")!
+        let initialCard = Color(hex: cardHex) ?? Color(hex: "#241245")!
+        let initialScheme = ThemeManager.scheme(for: initialBackground)
+        let textColors = ThemeManager.textColors(for: initialScheme)
         themeName = name
-        accentColor = Color(hex: accentHex) ?? Color(hex: "#9d6bff")!
-        backgroundColor = Color(hex: bgHex) ?? Color(hex: "#1a0d2e")!
-        sidebarColor = Color(hex: sidebarHex) ?? Color(hex: "#140823")!
-        cardColor = Color(hex: cardHex) ?? Color(hex: "#241245")!
-        titleTextColor = .white
-        bodyTextColor = Color.white.opacity(0.9)
-        secondaryTextColor = Color.white.opacity(0.55)
-        colorScheme = ThemeManager.scheme(for: Color(hex: bgHex) ?? Color(hex: "#1a0d2e")!)
+        accentColor = initialAccent
+        backgroundColor = initialBackground
+        sidebarColor = initialSidebar
+        cardColor = initialCard
+        colorScheme = initialScheme
+        titleTextColor = textColors.title
+        bodyTextColor = textColors.body
+        secondaryTextColor = textColors.secondary
 
         // Auto-switch when system appearance changes
         NSApp.publisher(for: \.effectiveAppearance)
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.colorScheme = ThemeManager.scheme(for: self.backgroundColor)
+                self.applyTextColors()
             }
             .store(in: &cancellables)
     }
@@ -53,6 +60,7 @@ final class ThemeManager: ObservableObject {
         sidebarColor = preset.sidebar
         cardColor = preset.card
         colorScheme = ThemeManager.scheme(for: backgroundColor)
+        applyTextColors()
         persist()
     }
 
@@ -63,11 +71,13 @@ final class ThemeManager: ObservableObject {
         sidebarColor = sidebar
         cardColor = card
         colorScheme = ThemeManager.scheme(for: backgroundColor)
+        applyTextColors()
         persist()
     }
 
     func refreshScheme() {
         colorScheme = ThemeManager.scheme(for: backgroundColor)
+        applyTextColors()
     }
 
     private static func scheme(for color: Color) -> ColorScheme {
@@ -76,6 +86,24 @@ final class ThemeManager: ObservableObject {
             (0.7152 * nsColor.greenComponent) +
             (0.0722 * nsColor.blueComponent)
         return luminance > 0.55 ? .light : .dark
+    }
+
+    private static func textColors(for scheme: ColorScheme) -> (title: Color, body: Color, secondary: Color) {
+        switch scheme {
+        case .dark:
+            (.white, Color.white.opacity(0.9), Color.white.opacity(0.55))
+        case .light:
+            (Color.black.opacity(0.9), Color.black.opacity(0.78), Color.black.opacity(0.52))
+        @unknown default:
+            (.white, Color.white.opacity(0.9), Color.white.opacity(0.55))
+        }
+    }
+
+    private func applyTextColors() {
+        let textColors = Self.textColors(for: colorScheme)
+        titleTextColor = textColors.title
+        bodyTextColor = textColors.body
+        secondaryTextColor = textColors.secondary
     }
 
     private func persist() {

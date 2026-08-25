@@ -19,7 +19,7 @@
 
 ---
 
-Omega Journal is a three-column native app for people who want a real writing space — not a website with a login. Entries live in a SQLite database on your machine. There is no account, no sync, and no one else in the room unless you unlock them.
+Omega Journal is a native writing space for people who want a real journal — not a website with a login. Entries live in a SQLite database on your machine. There is no account, no sync, and no one else in the room unless you unlock them.
 
 ## Why it feels like yours
 
@@ -33,7 +33,8 @@ Omega Journal is a three-column native app for people who want a real writing sp
 
 ## What you can do
 
-- **Three-column layout** — library sidebar, entry cards, and a reader / editor that stays out of the way
+- **Dedicated workspaces** — Today, a focused Journal library, full-width Calendar, Insights, and On This Day
+- **Journal workspace** — library sidebar, entry cards, and a reader / editor that stays out of the way
 - **Markdown editor** — live preview, split view, formatting shortcuts, attachments
 - **Moods** — 😞 😕 😐 🙂 😄, color-coded in the list and charted in Insights
 - **Tags, pins, favorites** — keep the important pages close
@@ -43,7 +44,7 @@ Omega Journal is a three-column native app for people who want a real writing sp
 - **Command palette** — ⌘K to jump, create, theme, export
 - **Templates & prompts** — start structured, or answer today's question
 - **Import / export** — Markdown, JSON backup, and printable PDF
-- **Themes** — dark, light, and custom palettes
+- **Themes** — dark and custom palettes with adaptive text contrast
 - **Daily backups** — automatic SQLite snapshots, last 7 kept
 
 ## Quick start
@@ -69,6 +70,7 @@ open "Omega Journal.app"
 | ⌥⌘N | New from today's prompt |
 | ⌘K | Command palette |
 | ⌘F | Search |
+| ⌘1 / ⌘2 / ⌘3 / ⌘4 | Today / Journal / Calendar / Insights |
 | ⌘E | Edit selected entry |
 | ⌘L | Lock hidden entries |
 | ⌃⌘F | Zen mode |
@@ -112,7 +114,7 @@ No third-party packages. SwiftUI for the chrome, the system SQLite library for t
 
 ## Privacy, plainly
 
-Hidden is a content gate, not a disappearing act. Locked cards stay in All Entries, Calendar, and search (title only) so the library still makes sense. Bodies, tags, attachments, copy, duplicate, and export wait for authentication. Leave the app, or hit ⌘L, and they go quiet again.
+Hidden is a content gate, not a disappearing act. Locked cards stay in All Entries so the library still makes sense, while reflective views exclude private entries until you unlock and explicitly include them. Bodies, tags, attachments, copy, duplicate, and export wait for authentication. Leave the app, or hit ⌘L, and they go quiet again.
 
 ## License
 

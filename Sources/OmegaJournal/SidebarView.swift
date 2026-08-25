@@ -21,18 +21,20 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     streakCard
 
+                    section("TODAY") {
+                        row(.today)
+                    }
+
                     section("LIBRARY") {
                         row(.all, badge: vm.entries.count)
                         row(.favorites, badge: vm.favoriteCount)
                         row(.thisWeek, badge: vm.entriesThisWeek)
-                        if !vm.onThisDay.isEmpty {
-                            row(.onThisDay, badge: vm.onThisDay.count)
-                        }
                     }
 
-                    section("BROWSE") {
+                    section("REFLECT") {
                         row(.calendar)
                         row(.insights)
+                        row(.onThisDay, badge: vm.reflectiveOnThisDay.count)
                     }
 
                     disclosureSection("MOODS", isExpanded: $moodsExpanded) {
@@ -186,6 +188,7 @@ struct SidebarView: View {
     private var footer: some View {
         HStack(spacing: 6) {
             Button {
+                selection = .all
                 vm.createEntry()
             } label: {
                 HStack(spacing: 5) {

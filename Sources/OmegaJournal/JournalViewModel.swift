@@ -14,6 +14,9 @@ final class JournalViewModel: ObservableObject {
     @Published var hiddenEntries: [JournalEntry] = []
     @Published var templates: [EntryTemplate] = []
     @Published var allTags: [(tag: String, count: Int)] = []
+    /// Search results are intentionally separate from the active-library snapshot so
+    /// Calendar, sidebar counts, goals, and Insights never become search-dependent.
+    @Published private(set) var searchResults: [JournalEntry]?
 
     // Selection & editing
     @Published var selectedEntryId: String?
@@ -23,6 +26,10 @@ final class JournalViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published var sortOrder: SortOrder = .dateDesc
     @Published var filter: EntryFilter = .empty
+
+    // Reflection scope
+    @Published var analyticsPeriod: AnalyticsPeriod = .thirtyDays
+    @Published var analyticsVisibility: AnalyticsVisibility = .visibleOnly
 
     // UI state
     @Published var editorMode: EditorMode = .write
@@ -83,6 +90,7 @@ final class JournalViewModel: ObservableObject {
         hiddenEntries = db.fetchAllEntries(sort: .dateDesc, scope: .hidden)
         allTags = db.tagsWithCounts()
         GoalManager.shared.loadGoals()
+        refreshQuery()
     }
 
     func loadTemplates() {
@@ -93,7 +101,8 @@ final class JournalViewModel: ObservableObject {
     func refreshQuery() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
-            entries = db.fetchAllEntries(sort: sortOrder, scope: .active)
+            searchResults = nil
+            return
         } else {
             var results = db.fullTextSearch(q, scope: .active)
             if results.isEmpty {
@@ -106,12 +115,33 @@ final class JournalViewModel: ObservableObject {
                     !entry.isHidden || Self.matchesVisibleFields(entry, query: q)
                 }
             }
-            entries = results
+            searchResults = results
         }
     }
 
     private static func matchesVisibleFields(_ entry: JournalEntry, query: String) -> Bool {
         entry.title.localizedCaseInsensitiveContains(query)
+    }
+
+    /// Applies the current query to a non-active storage collection. Active
+    /// Journal search stays FTS-backed in `refreshQuery`; Archive, Hidden, and
+    /// Trash use this in-memory pass so their search field never lies. Locked
+    /// hidden entries intentionally match titles only.
+    func entriesMatchingCurrentSearch(in source: [JournalEntry]) -> [JournalEntry] {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return source }
+        return source.filter { entry in
+            if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
+                return Self.matchesVisibleFields(entry, query: query)
+            }
+            return Self.matchesSearchableFields(entry, query: query)
+        }
+    }
+
+    private static func matchesSearchableFields(_ entry: JournalEntry, query: String) -> Bool {
+        entry.title.localizedCaseInsensitiveContains(query)
+            || entry.body.localizedCaseInsensitiveContains(query)
+            || entry.tags.contains { $0.localizedCaseInsensitiveContains(query) }
     }
 
     /// Debounced search — called on every keystroke, hits the DB at most every 250ms.
@@ -124,17 +154,43 @@ final class JournalViewModel: ObservableObject {
         }
     }
 
-    /// Targeted update — refresh a single entry in place without a full reload.
-    private func updateEntry(_ entry: JournalEntry) {
-        if let idx = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[idx] = entry
+    private func replaceEntry(_ entry: JournalEntry, in collection: inout [JournalEntry]) {
+        if let idx = collection.firstIndex(where: { $0.id == entry.id }) {
+            collection[idx] = entry
         }
-        sortInPlace()
+    }
+
+    /// Targeted update — refresh a single entry in every lifecycle collection
+    /// that can display it, without paying for a full SQLite reload.
+    private func updateEntry(_ entry: JournalEntry, refreshSearch: Bool = true) {
+        replaceEntry(entry, in: &entries)
+        replaceEntry(entry, in: &archivedEntries)
+        replaceEntry(entry, in: &trashedEntries)
+        replaceEntry(entry, in: &hiddenEntries)
+        if var results = searchResults {
+            replaceEntry(entry, in: &results)
+            searchResults = results
+        }
+        sort(&entries)
+        sort(&archivedEntries)
+        if var results = searchResults {
+            sort(&results)
+            searchResults = results
+        }
+        if refreshSearch, searchResults != nil { refreshQuery() }
     }
 
     private func sortInPlace() {
+        sort(&entries)
+        if var results = searchResults {
+            sort(&results)
+            searchResults = results
+        }
+    }
+
+    private func sort(_ collection: inout [JournalEntry]) {
         let order = sortOrder
-        entries.sort { a, b in
+        collection.sort { a, b in
             if a.isPinned != b.isPinned { return a.isPinned }
             switch order {
             case .dateDesc: return a.createdAt > b.createdAt
@@ -157,14 +213,28 @@ final class JournalViewModel: ObservableObject {
 
     // MARK: - Derived collections
 
-    var selectedEntry: JournalEntry? { entries.first { $0.id == selectedEntryId } }
-    var editingEntry: JournalEntry? { entries.first { $0.id == editingEntryId } }
+    /// Resolves an entry across every lifecycle collection so Archive, Hidden,
+    /// and Trash readers/editors never depend on the active list being present.
+    func entry(id: String?) -> JournalEntry? {
+        guard let id else { return nil }
+        return entries.first { $0.id == id }
+            ?? archivedEntries.first { $0.id == id }
+            ?? trashedEntries.first { $0.id == id }
+            ?? hiddenEntries.first { $0.id == id }
+    }
+
+    var selectedEntry: JournalEntry? { entry(id: selectedEntryId) }
+    var editingEntry: JournalEntry? { entry(id: editingEntryId) }
     var isEditing: Bool { editingEntryId != nil }
     var entryCount: Int { entries.count }
+    /// The Journal workspace's transient query result. Never use this for
+    /// global counts, Calendar, goals, or reflective analytics.
+    var libraryEntries: [JournalEntry] { searchResults ?? entries }
+    var isSearchingLibrary: Bool { searchResults != nil }
 
     /// Entries after the advanced filter is applied — what the list actually shows.
     var filteredEntries: [JournalEntry] {
-        filter.isActive ? entries.filter(filter.matches) : entries
+        filter.isActive ? libraryEntries.filter(filter.matches) : libraryEntries
     }
 
     /// Filtered entries bucketed into date sections for the grouped list UI.
@@ -224,6 +294,7 @@ final class JournalViewModel: ObservableObject {
         db.saveEntry(entry)
         entries.insert(entry, at: 0)
         sortInPlace()
+        if searchResults != nil { refreshQuery() }
         selectedEntryId = entry.id
         editingEntryId = entry.id
         allTags = db.tagsWithCounts()
@@ -252,6 +323,7 @@ final class JournalViewModel: ObservableObject {
         db.saveEntry(entry)
         entries.append(entry)
         sortInPlace()
+        if searchResults != nil { refreshQuery() }
         selectedEntryId = entry.id
         editingEntryId = entry.id
     }
@@ -319,6 +391,10 @@ final class JournalViewModel: ObservableObject {
         if let e = editingEntry, e.title.isEmpty && e.body.isEmpty {
             db.hardDeleteEntry(id: e.id)
             entries.removeAll { $0.id == e.id }
+            searchResults?.removeAll { $0.id == e.id }
+            archivedEntries.removeAll { $0.id == e.id }
+            trashedEntries.removeAll { $0.id == e.id }
+            hiddenEntries.removeAll { $0.id == e.id }
             if selectedEntryId == e.id { selectedEntryId = nil }
         }
         editingEntryId = nil
@@ -331,15 +407,14 @@ final class JournalViewModel: ObservableObject {
         // Update in-memory immediately so the UI stays responsive; persist on a debounce.
         var updated = entry
         updated.updatedAt = Date()
-        if let idx = entries.firstIndex(where: { $0.id == updated.id }) {
-            entries[idx] = updated
-        }
+        updateEntry(updated, refreshSearch: false)
         saveDebounce?.cancel()
         saveDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 self.db.saveEntry(updated)
+                if self.searchResults != nil { self.refreshQuery() }
                 self.allTags = self.db.tagsWithCounts()
                 GoalManager.shared.loadGoals()
             }
@@ -380,7 +455,9 @@ final class JournalViewModel: ObservableObject {
     func deleteEntry(_ entry: JournalEntry) {
         db.trashEntry(id: entry.id)
         entries.removeAll { $0.id == entry.id }
+        searchResults?.removeAll { $0.id == entry.id }
         archivedEntries.removeAll { $0.id == entry.id }
+        hiddenEntries.removeAll { $0.id == entry.id }
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
@@ -392,14 +469,21 @@ final class JournalViewModel: ObservableObject {
 
     func restoreFromTrash(_ entry: JournalEntry) {
         db.restoreEntry(id: entry.id)
-        trashedEntries.removeAll { $0.id == entry.id }
+        if selectedEntryId == entry.id { selectedEntryId = nil }
+        if editingEntryId == entry.id { editingEntryId = nil }
         reload()
         showToast("Restored “\(entry.displayTitle)”")
     }
 
     func deleteForever(_ entry: JournalEntry) {
         db.hardDeleteEntry(id: entry.id)
+        entries.removeAll { $0.id == entry.id }
+        searchResults?.removeAll { $0.id == entry.id }
+        archivedEntries.removeAll { $0.id == entry.id }
         trashedEntries.removeAll { $0.id == entry.id }
+        hiddenEntries.removeAll { $0.id == entry.id }
+        if selectedEntryId == entry.id { selectedEntryId = nil }
+        if editingEntryId == entry.id { editingEntryId = nil }
         allTags = db.tagsWithCounts()
         showToast("Deleted permanently", isError: true)
     }
@@ -408,6 +492,9 @@ final class JournalViewModel: ObservableObject {
         let count = trashedEntries.count
         db.emptyTrash()
         trashedEntries = []
+        if let selected = selectedEntryId, !entries.contains(where: { $0.id == selected }) {
+            selectedEntryId = nil
+        }
         allTags = db.tagsWithCounts()
         showToast("Emptied Trash (\(count) \(count == 1 ? "entry" : "entries"))", isError: true)
     }
@@ -454,58 +541,138 @@ final class JournalViewModel: ObservableObject {
         isBulkSelecting = false
     }
 
-    func bulkDelete() {
-        let ids = Array(bulkSelection)
-        guard !ids.isEmpty else { return }
+    /// Keeps batch operations bounded to the rows currently visible in the
+    /// Journal list whenever search or advanced filters change.
+    func retainBulkSelection(in visibleIDs: [String]) {
+        bulkSelection.formIntersection(Set(visibleIDs))
+    }
+
+    /// Restricts a bulk command to entries actually present in the intended
+    /// lifecycle collection, so stale or missing IDs are never acted on.
+    private func selectedIDs(in source: [JournalEntry]) -> [String] {
+        let available = Set(source.map(\.id))
+        return bulkSelection.filter(available.contains).sorted()
+    }
+
+    private var nonTrashedEntries: [JournalEntry] {
+        entries + archivedEntries
+    }
+
+    /// Soft-deletes the selected active or archived entries. The operation is
+    /// intentionally reversible via the toast's Undo action.
+    func bulkMoveToTrash() {
+        let ids = selectedIDs(in: nonTrashedEntries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
         for id in ids { db.trashEntry(id: id) }
-        entries.removeAll { ids.contains($0.id) }
-        if let sel = selectedEntryId, ids.contains(sel) { selectedEntryId = nil }
-        trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
+        if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
+        if let editing = editingEntryId, ids.contains(editing) { editingEntryId = nil }
         undoStack.append(.restoreTrashed(ids: ids))
-        allTags = db.tagsWithCounts()
         clearBulkSelection()
-        showToast("Moved \(ids.count) entries to Trash", actionLabel: "Undo")
+        reload()
+        showToast("Moved \(ids.count) \(ids.count == 1 ? "entry" : "entries") to Trash", actionLabel: "Undo")
+    }
+
+    /// Legacy name retained for existing callers. All bulk "Delete" actions
+    /// outside Trash are recoverable moves to Trash.
+    func bulkDelete() {
+        bulkMoveToTrash()
     }
 
     func bulkArchive() {
-        let ids = Array(bulkSelection)
-        guard !ids.isEmpty else { return }
+        let ids = selectedIDs(in: entries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
         for id in ids { db.setArchived(id: id, archived: true) }
         undoStack.append(.unarchive(ids: ids))
         clearBulkSelection()
         reload()
-        showToast("Archived \(ids.count) entries", actionLabel: "Undo")
+        showToast("Archived \(ids.count) \(ids.count == 1 ? "entry" : "entries")", actionLabel: "Undo")
+    }
+
+    func bulkUnarchive() {
+        let ids = selectedIDs(in: archivedEntries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
+        for id in ids { db.setArchived(id: id, archived: false) }
+        if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
+        clearBulkSelection()
+        reload()
+        showToast("Unarchived \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
+    }
+
+    func bulkRestoreFromTrash() {
+        let ids = selectedIDs(in: trashedEntries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
+        for id in ids { db.restoreEntry(id: id) }
+        if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
+        clearBulkSelection()
+        reload()
+        showToast("Restored \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
+    }
+
+    /// Irreversibly removes only selected entries that are already in Trash.
+    /// The UI must obtain explicit confirmation before invoking this method.
+    func bulkDeleteForever() {
+        let ids = selectedIDs(in: trashedEntries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
+        for id in ids { db.hardDeleteEntry(id: id) }
+        if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
+        if let editing = editingEntryId, ids.contains(editing) { editingEntryId = nil }
+        clearBulkSelection()
+        reload()
+        showToast("Deleted \(ids.count) \(ids.count == 1 ? "entry" : "entries") permanently", isError: true)
     }
 
     func bulkFavorite() {
-        let ids = bulkSelection
-        guard !ids.isEmpty else { return }
+        let ids = selectedIDs(in: nonTrashedEntries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
+        var changed = 0
         for id in ids {
-            guard var e = entries.first(where: { $0.id == id }) else { continue }
+            guard var e = db.fetchEntry(id: id), !e.isFavorite else { continue }
             e.isFavorite = true
             db.saveEntry(e)
-            updateEntry(e)
+            changed += 1
         }
-        let n = ids.count
         clearBulkSelection()
-        showToast("Favorited \(n) entries")
+        reload()
+        showToast(changed == 0 ? "Selected entries were already favorites" : "Favorited \(changed) \(changed == 1 ? "entry" : "entries")")
     }
 
     func bulkAddTag(_ tag: String) {
         let trimmed = tag.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !bulkSelection.isEmpty else { return }
-        let ids = bulkSelection
+        let ids = selectedIDs(in: nonTrashedEntries)
+        guard !ids.isEmpty else {
+            clearBulkSelection()
+            return
+        }
+        var changed = 0
         for id in ids {
-            guard var e = entries.first(where: { $0.id == id }), !e.tags.contains(trimmed) else { continue }
+            guard var e = db.fetchEntry(id: id), !e.tags.contains(trimmed) else { continue }
             e.tags.append(trimmed)
             e.updatedAt = Date()
             db.saveEntry(e)
-            updateEntry(e)
+            changed += 1
         }
-        let n = ids.count
-        allTags = db.tagsWithCounts()
         clearBulkSelection()
-        showToast("Tagged \(n) entries with #\(trimmed)")
+        reload()
+        showToast(changed == 0 ? "Selected entries already have #\(trimmed)" : "Tagged \(changed) \(changed == 1 ? "entry" : "entries") with #\(trimmed)")
     }
 
     // MARK: - Undo & toasts
@@ -532,6 +699,49 @@ final class JournalViewModel: ObservableObject {
             showToast("Unarchived \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
         }
         reload()
+    }
+
+    // MARK: - Reflection scope
+
+    /// Private entries contribute to reflective views only after an explicit
+    /// inclusion choice and an active biometric session.
+    var effectiveAnalyticsVisibility: AnalyticsVisibility {
+        analyticsVisibility == .includePrivate && BiometricAuth.shared.isAuthenticated
+            ? .includePrivate
+            : .visibleOnly
+    }
+
+    var analyticsVisibilityLabel: String { effectiveAnalyticsVisibility.label }
+
+    /// Calendar always shows the full active journal, subject to the clearly
+    /// communicated privacy choice. It is never narrowed by library search.
+    var calendarEntries: [JournalEntry] {
+        reflectionEntries(period: .allTime)
+    }
+
+    /// Insights uses its own selected period and privacy scope, independently
+    /// from Journal search and filters.
+    var scopedAnalyticsEntries: [JournalEntry] {
+        reflectionEntries(period: analyticsPeriod)
+    }
+
+    func reflectionEntries(
+        period: AnalyticsPeriod,
+        relativeTo reference: Date = Date()
+    ) -> [JournalEntry] {
+        let records = entries.map {
+            AnalyticsRecord(id: $0.id, date: $0.createdAt, isPrivate: $0.isHidden)
+        }
+        let includedIds = Set(
+            OmegaAnalytics.filteredRecords(
+                records,
+                period: period,
+                visibility: effectiveAnalyticsVisibility,
+                relativeTo: reference
+            )
+            .map(\.id)
+        )
+        return entries.filter { includedIds.contains($0.id) }
     }
 
     // MARK: - Stats
@@ -642,6 +852,82 @@ final class JournalViewModel: ObservableObject {
 
     // MARK: - Insights
 
+    var analyticsEntryCount: Int { scopedAnalyticsEntries.count }
+    var analyticsWordCount: Int { scopedAnalyticsEntries.reduce(0) { $0 + $1.wordCount } }
+    var analyticsWritingDays: Int {
+        Set(scopedAnalyticsEntries.map { Calendar.current.startOfDay(for: $0.createdAt) }).count
+    }
+    var analyticsAverageMood: Double? {
+        guard !scopedAnalyticsEntries.isEmpty else { return nil }
+        return Double(scopedAnalyticsEntries.reduce(0) { $0 + $1.mood.rawValue }) / Double(scopedAnalyticsEntries.count)
+    }
+
+    func wordsPerDay(for source: [JournalEntry], period: AnalyticsPeriod) -> [WordPoint] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let start = period.startDate(relativeTo: today, calendar: cal)
+            ?? source.map(\.createdAt).min().map(cal.startOfDay(for:))
+            ?? today
+        var map: [Date: Int] = [:]
+        for entry in source {
+            map[cal.startOfDay(for: entry.createdAt), default: 0] += entry.wordCount
+        }
+        var points: [WordPoint] = []
+        var cursor = start
+        while cursor <= today {
+            points.append(WordPoint(date: cursor, words: map[cursor] ?? 0))
+            guard let next = cal.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return points
+    }
+
+    func moodTrend(for source: [JournalEntry]) -> [MoodPoint] {
+        let cal = Calendar.current
+        var grouped: [Date: [JournalEntry]] = [:]
+        for entry in source {
+            grouped[cal.startOfDay(for: entry.createdAt), default: []].append(entry)
+        }
+        return grouped
+            .map { day, entries in
+                MoodPoint(
+                    date: day,
+                    avg: Double(entries.reduce(0) { $0 + $1.mood.rawValue }) / Double(entries.count)
+                )
+            }
+            .sorted { $0.date < $1.date }
+    }
+
+    func moodDistribution(for source: [JournalEntry]) -> [MoodCount] {
+        Mood.allCases
+            .map { mood in MoodCount(mood: mood, count: source.filter { $0.mood == mood }.count) }
+            .sorted { $0.mood.rawValue < $1.mood.rawValue }
+    }
+
+    func entriesByDay(for source: [JournalEntry]) -> [Date: [JournalEntry]] {
+        let cal = Calendar.current
+        var map: [Date: [JournalEntry]] = [:]
+        for entry in source {
+            map[cal.startOfDay(for: entry.createdAt), default: []].append(entry)
+        }
+        return map
+    }
+
+    func dailyInfo(for source: [JournalEntry]) -> [Date: DayInfo] {
+        let grouped = entriesByDay(for: source)
+        var result: [Date: DayInfo] = [:]
+        for (date, entries) in grouped {
+            let sortedEntries = entries.sorted { $0.createdAt > $1.createdAt }
+            result[date] = DayInfo(
+                date: date,
+                count: sortedEntries.count,
+                moods: sortedEntries.map(\.mood),
+                titles: sortedEntries.prefix(3).map(\.displayTitle)
+            )
+        }
+        return result
+    }
+
     func moodTrend(days: Int = 30) -> [MoodPoint] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -713,12 +999,21 @@ final class JournalViewModel: ObservableObject {
 
     /// Entries written on this month/day in any previous year.
     var onThisDay: [JournalEntry] {
+        onThisDay(in: entries)
+    }
+
+    /// The privacy-aware memory surface used by Today and reflection pages.
+    var reflectiveOnThisDay: [JournalEntry] {
+        onThisDay(in: calendarEntries)
+    }
+
+    func onThisDay(in source: [JournalEntry]) -> [JournalEntry] {
         let cal = Calendar.current
         let today = Date()
         let month = cal.component(.month, from: today)
         let day = cal.component(.day, from: today)
         let thisYear = cal.component(.year, from: today)
-        return entries.filter { e in
+        return source.filter { e in
             let eYear = cal.component(.year, from: e.createdAt)
             return eYear != thisYear &&
                 cal.component(.month, from: e.createdAt) == month &&

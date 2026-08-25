@@ -21,17 +21,29 @@ final class DatabaseManager {
     private let attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    private static let currentSchemaVersion = 6
+    private static let currentSchemaVersion = 7
 
     /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
     static let trashRetentionDays = 30
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
-        try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
-        dbPath = appDir.appendingPathComponent("omega_journal.sqlite3").path
-        attachmentsDir = appDir.appendingPathComponent("attachments", isDirectory: true).path
+        let fileManager = FileManager.default
+        if let testPath = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"], !testPath.isEmpty {
+            // An explicit, test-only override keeps lifecycle integration tests
+            // completely isolated from a person's real journal database.
+            let databaseURL = URL(fileURLWithPath: testPath)
+            let testRoot = databaseURL.deletingLastPathComponent()
+            try? fileManager.createDirectory(at: testRoot, withIntermediateDirectories: true)
+            dbPath = databaseURL.path
+            attachmentsDir = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH"]
+                ?? testRoot.appendingPathComponent("attachments", isDirectory: true).path
+        } else {
+            let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let appDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
+            try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
+            dbPath = appDir.appendingPathComponent("omega_journal.sqlite3").path
+            attachmentsDir = appDir.appendingPathComponent("attachments", isDirectory: true).path
+        }
         try? FileManager.default.createDirectory(atPath: attachmentsDir, withIntermediateDirectories: true)
         openDatabase()
         runMigrations()

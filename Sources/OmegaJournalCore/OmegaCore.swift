@@ -104,4 +104,169 @@ public enum OmegaCore {
         }
         return open + selected + close
     }
+
+    /// Empty drafts should not add fictional minutes to journal-wide reading
+    /// totals. Non-empty writing is rounded up at a calm 220 words per minute.
+    public static func readingMinutes(forWordCount wordCount: Int) -> Int {
+        guard wordCount > 0 else { return 0 }
+        return Int(ceil(Double(wordCount) / 220.0))
+    }
+}
+
+// MARK: - Workspace presentation
+
+/// The app's top-level spaces. Only the Journal workspace owns a collection
+/// column; reflective spaces deliberately use the full content area.
+public enum JournalWorkspace: String, CaseIterable, Hashable, Sendable {
+    case today
+    case journal
+    case calendar
+    case insights
+    case onThisDay
+
+    public var usesEntryCollection: Bool { self == .journal }
+
+    public var isReflective: Bool {
+        switch self {
+        case .calendar, .insights, .onThisDay: true
+        case .today, .journal: false
+        }
+    }
+}
+
+// MARK: - Bulk storage actions
+
+/// The storage collection currently being acted on. This is deliberately
+/// separate from UI routing so destructive semantics remain testable.
+public enum BulkEntryStorage: Hashable, Sendable {
+    case library
+    case archive
+    /// Hidden is a privacy view that may contain both active and archived
+    /// entries, so it deliberately exposes both lifecycle transitions.
+    case hidden
+    case trash
+}
+
+/// A batch operation the Journal can meaningfully offer for a storage context.
+/// Moving to Trash is reversible; deleting forever is not.
+public enum BulkEntryAction: Hashable, Sendable {
+    case favorite
+    case tag
+    case archive
+    case unarchive
+    case moveToTrash
+    case restoreFromTrash
+    case deleteForever
+
+    public var isIrreversible: Bool { self == .deleteForever }
+}
+
+public enum BulkEntryActions {
+    public static func available(in storage: BulkEntryStorage) -> [BulkEntryAction] {
+        switch storage {
+        case .library:
+            [.favorite, .tag, .archive, .moveToTrash]
+        case .archive:
+            [.unarchive, .moveToTrash]
+        case .hidden:
+            [.favorite, .tag, .archive, .unarchive, .moveToTrash]
+        case .trash:
+            [.restoreFromTrash, .deleteForever]
+        }
+    }
+}
+
+// MARK: - Analytics presentation
+
+/// A user-facing period used consistently across reflective surfaces.
+public enum AnalyticsPeriod: String, CaseIterable, Hashable, Sendable, Identifiable {
+    case sevenDays
+    case thirtyDays
+    case threeMonths
+    case year
+    case allTime
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .sevenDays: "7 days"
+        case .thirtyDays: "30 days"
+        case .threeMonths: "3 months"
+        case .year: "Year"
+        case .allTime: "All time"
+        }
+    }
+
+    /// Inclusive lower boundary for a period, normalized to the user's calendar day.
+    /// `nil` means the query intentionally has no lower bound.
+    public func startDate(relativeTo reference: Date, calendar: Calendar = .current) -> Date? {
+        let day = calendar.startOfDay(for: reference)
+        switch self {
+        case .sevenDays:
+            return calendar.date(byAdding: .day, value: -6, to: day)
+        case .thirtyDays:
+            return calendar.date(byAdding: .day, value: -29, to: day)
+        case .threeMonths:
+            return calendar.date(byAdding: .month, value: -3, to: day)
+        case .year:
+            return calendar.dateInterval(of: .year, for: day)?.start
+        case .allTime:
+            return nil
+        }
+    }
+}
+
+/// Makes private-entry inclusion an explicit, explainable choice in analytics.
+public enum AnalyticsVisibility: String, CaseIterable, Hashable, Sendable, Identifiable {
+    case visibleOnly
+    case includePrivate
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .visibleOnly: "Private entries excluded"
+        case .includePrivate: "Private entries included"
+        }
+    }
+}
+
+/// The minimal, privacy-safe data shape needed to decide whether an entry
+/// contributes to a reflective view. The app maps its richer entry model into
+/// this type so the scope rule remains independently testable.
+public struct AnalyticsRecord: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let date: Date
+    public let isPrivate: Bool
+
+    public init(id: String, date: Date, isPrivate: Bool) {
+        self.id = id
+        self.date = date
+        self.isPrivate = isPrivate
+    }
+}
+
+public enum OmegaAnalytics {
+    /// Filters records by the exact period and private-entry choice a reflective
+    /// surface communicates to the user. Every period ends at the close of the
+    /// reference day, so future-dated writing never appears in "through today"
+    /// reflection—even when Calendar permits planning a future entry.
+    public static func filteredRecords(
+        _ records: [AnalyticsRecord],
+        period: AnalyticsPeriod,
+        visibility: AnalyticsVisibility,
+        relativeTo reference: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [AnalyticsRecord] {
+        let start = period.startDate(relativeTo: reference, calendar: calendar)
+        let referenceDay = calendar.startOfDay(for: reference)
+        let end = calendar.date(byAdding: .day, value: 1, to: referenceDay) ?? reference
+        return records.filter { record in
+            let isInPeriod = start.map { record.date >= $0 } ?? true
+            let isBeforeEnd = record.date < end
+            let isVisible = visibility == .includePrivate || !record.isPrivate
+            return isInPeriod && isBeforeEnd && isVisible
+        }
+    }
 }

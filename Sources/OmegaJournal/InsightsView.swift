@@ -10,19 +10,7 @@ struct InsightsView: View {
     private let columns = [GridItem(.adaptive(minimum: 160), spacing: 14)]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                statGrid
-                goalSection
-                trendSection
-                distributionSection
-                heatmapSection
-            }
-            .padding(32)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(theme.backgroundColor)
+        InsightsWorkspaceView(vm: vm)
     }
 
     private var header: some View {

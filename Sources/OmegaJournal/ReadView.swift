@@ -10,6 +10,7 @@ struct ReadView: View {
 
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
+    @State private var showPermanentDeleteConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +48,18 @@ struct ReadView: View {
             .scrollContentBackground(.hidden)
         }
         .background(theme.backgroundColor)
+        .confirmationDialog(
+            "Delete this entry forever?",
+            isPresented: $showPermanentDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Forever", role: .destructive) {
+                vm.deleteForever(entry)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. The entry and its attachments will be permanently removed.")
+        }
     }
 
     // MARK: Toolbar
@@ -73,7 +86,7 @@ struct ReadView: View {
                     .foregroundColor(theme.secondaryTextColor)
 
                 ActionButton(icon: "trash.slash", color: .red, active: true, tooltip: "Delete Forever", isDestructive: true) {
-                    vm.deleteForever(entry)
+                    showPermanentDeleteConfirmation = true
                 }
             } else {
                 ActionButton(icon: "pencil", color: theme.accentColor, active: true, tooltip: "Edit (⌘E)") {

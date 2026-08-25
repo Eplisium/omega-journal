@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Entry List
 
@@ -12,6 +13,8 @@ struct EntryListView: View {
     @State private var showFilters = false
     @State private var bulkTagText = ""
     @State private var showBulkTagField = false
+    @State private var showBulkPermanentDeleteConfirmation = false
+    @State private var showEmptyTrashConfirmation = false
 
     private var isHiddenSection: Bool { selection == .hidden }
 
@@ -19,22 +22,41 @@ struct EntryListView: View {
     private var displayed: [JournalEntry] {
         let base: [JournalEntry]
         switch selection {
-        case .favorites: base = vm.entries.filter(\.isFavorite)
+        case .favorites: base = vm.libraryEntries.filter(\.isFavorite)
         case .thisWeek:
             let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
-            base = vm.entries.filter { $0.createdAt >= cutoff }
-        case .mood(let m): base = vm.entries.filter { $0.mood == m }
-        case .tag(let t): base = vm.entries.filter { $0.tags.contains(t) }
+            base = vm.libraryEntries.filter { $0.createdAt >= cutoff }
+        case .mood(let m): base = vm.libraryEntries.filter { $0.mood == m }
+        case .tag(let t): base = vm.libraryEntries.filter { $0.tags.contains(t) }
         case .onThisDay: base = vm.onThisDay
-        case .archive: return vm.archivedEntries
-        case .hidden: return vm.hiddenEntries
-        case .trash: return vm.trashedEntries
-        default: base = vm.entries
+        case .archive: base = vm.entriesMatchingCurrentSearch(in: vm.archivedEntries)
+        case .hidden: base = vm.entriesMatchingCurrentSearch(in: vm.hiddenEntries)
+        case .trash: base = vm.entriesMatchingCurrentSearch(in: vm.trashedEntries)
+        default: base = vm.libraryEntries
         }
         return vm.filter.isActive ? base.filter(vm.filter.matches) : base
     }
 
+    private var displayedIDs: [String] { displayed.map(\.id) }
+
+    private var isSearchingCurrentCollection: Bool {
+        !vm.searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     private var isTrash: Bool { selection == .trash }
+
+    private var bulkStorage: BulkEntryStorage {
+        switch selection {
+        case .archive: .archive
+        case .hidden: .hidden
+        case .trash: .trash
+        default: .library
+        }
+    }
+
+    private var bulkActions: [BulkEntryAction] {
+        BulkEntryActions.available(in: bulkStorage)
+    }
 
     /// Grouped sections for the currently displayed set.
     private var sections: [JournalViewModel.EntrySection] {
@@ -49,6 +71,7 @@ struct EntryListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            collectionHeader
             if isHiddenSection {
                 hiddenBanner
             }
@@ -66,6 +89,61 @@ struct EntryListView: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             searchFocused = true
         }
+        .onChange(of: displayedIDs) { _, ids in
+            vm.retainBulkSelection(in: ids)
+        }
+        .confirmationDialog(
+            "Delete \(vm.bulkSelection.count) \(vm.bulkSelection.count == 1 ? "entry" : "entries") forever?",
+            isPresented: $showBulkPermanentDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Forever", role: .destructive) {
+                vm.bulkDeleteForever()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. The selected entries and their attachments will be permanently removed.")
+        }
+        .confirmationDialog(
+            "Empty Trash?",
+            isPresented: $showEmptyTrashConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(vm.trashedEntries.count) \(vm.trashedEntries.count == 1 ? "entry" : "entries") Forever", role: .destructive) {
+                vm.emptyTrash()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes every entry currently in Trash, including attachments.")
+        }
+    }
+
+    // MARK: Collection header
+
+    private var collectionHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(selection?.title ?? "All Entries")
+                    .font(.system(size: 17, weight: .semibold, design: .serif))
+                    .foregroundColor(theme.titleTextColor)
+                Text(isSearchingCurrentCollection
+                     ? "Search results in \(selection?.title ?? "your Journal")"
+                     : "Your private writing library")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(theme.secondaryTextColor)
+            }
+            Spacer(minLength: 8)
+            Text("\(displayed.count)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(theme.accentColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+                .accessibilityLabel("\(displayed.count) entries")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
     }
 
     // MARK: Hidden Banner
@@ -254,10 +332,9 @@ struct EntryListView: View {
 
                 Spacer()
 
-                bulkButton("star", "Favorite") { vm.bulkFavorite() }
-                bulkButton("number", "Tag") { withAnimation { showBulkTagField.toggle() } }
-                bulkButton("archivebox", "Archive") { vm.bulkArchive() }
-                bulkButton("trash", "Delete", destructive: true) { vm.bulkDelete() }
+                ForEach(bulkActions, id: \.self) { action in
+                    bulkActionButton(action)
+                }
             }
 
             if showBulkTagField {
@@ -290,6 +367,28 @@ struct EntryListView: View {
         .background(theme.accentColor.opacity(0.1))
     }
 
+    @ViewBuilder
+    private func bulkActionButton(_ action: BulkEntryAction) -> some View {
+        switch action {
+        case .favorite:
+            bulkButton("star", "Favorite") { vm.bulkFavorite() }
+        case .tag:
+            bulkButton("number", "Tag") { withAnimation { showBulkTagField.toggle() } }
+        case .archive:
+            bulkButton("archivebox", "Archive") { vm.bulkArchive() }
+        case .unarchive:
+            bulkButton("tray.and.arrow.up", "Unarchive") { vm.bulkUnarchive() }
+        case .moveToTrash:
+            bulkButton("trash", "Move to Trash", destructive: true) { vm.bulkMoveToTrash() }
+        case .restoreFromTrash:
+            bulkButton("arrow.uturn.backward", "Restore") { vm.bulkRestoreFromTrash() }
+        case .deleteForever:
+            bulkButton("trash.slash", "Delete Forever", destructive: true) {
+                showBulkPermanentDeleteConfirmation = true
+            }
+        }
+    }
+
     private func bulkButton(_ icon: String, _ help: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
@@ -309,7 +408,7 @@ struct EntryListView: View {
             Text("Entries are deleted forever after \(DatabaseManager.trashRetentionDays) days.")
                 .font(.system(size: 10))
             Spacer()
-            Button("Empty Trash") { vm.emptyTrash() }
+            Button("Empty Trash") { showEmptyTrashConfirmation = true }
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.red)
@@ -454,6 +553,7 @@ private struct EntryRow: View {
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
     @State private var hover = false
+    @State private var showPermanentDeleteConfirmation = false
 
     var body: some View {
         HStack(spacing: 9) {
@@ -545,6 +645,10 @@ private struct EntryRow: View {
         )
         .opacity(isContentLocked ? 0.82 : 1)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(isBulkSelecting ? "Double tap to change its bulk selection" : "Double tap to open this entry")
         .onHover { hover = $0 }
         .onTapGesture(count: 2) {
             if !isTrash && !isBulkSelecting { vm.startEditing(entry) }
@@ -553,6 +657,18 @@ private struct EntryRow: View {
             if isBulkSelecting { vm.toggleBulkSelection(entry.id) } else { vm.select(entry) }
         }
         .contextMenu { contextMenu }
+        .confirmationDialog(
+            "Delete this entry forever?",
+            isPresented: $showPermanentDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Forever", role: .destructive) {
+                vm.deleteForever(entry)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone. The entry and its attachments will be permanently removed.")
+        }
         .animation(.easeOut(duration: 0.12), value: hover)
         .animation(.easeOut(duration: 0.12), value: isSelected)
     }
@@ -564,6 +680,12 @@ private struct EntryRow: View {
 
     private var isContentLocked: Bool {
         entry.isHidden && !biometricAuth.isAuthenticated
+    }
+
+    private var accessibilityLabel: String {
+        let privacy = isContentLocked ? "Hidden entry" : entry.displayTitle
+        let metadata = "\(entry.mood.label), \(entry.createdAt.formatted(date: .abbreviated, time: .omitted))"
+        return "\(privacy), \(metadata)"
     }
 
     private var rowBackground: Color {
@@ -585,7 +707,7 @@ private struct EntryRow: View {
         if isTrash {
             Button { vm.restoreFromTrash(entry) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
             Divider()
-            Button(role: .destructive) { vm.deleteForever(entry) } label: {
+            Button(role: .destructive) { showPermanentDeleteConfirmation = true } label: {
                 Label("Delete Forever", systemImage: "trash.slash")
             }
         } else {

@@ -66,10 +66,14 @@ struct OmegaJournalApp: App {
             Button("Zen Mode") { post(.toggleZenMode) }
                 .keyboardShortcut("f", modifiers: [.command, .control])
             Divider()
-            Button("Calendar") { post(.showCalendar) }
+            Button("Today") { post(.showToday) }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("Journal") { post(.showJournal) }
                 .keyboardShortcut("2", modifiers: .command)
-            Button("Insights") { post(.showInsights) }
+            Button("Calendar") { post(.showCalendar) }
                 .keyboardShortcut("3", modifiers: .command)
+            Button("Insights") { post(.showInsights) }
+                .keyboardShortcut("4", modifiers: .command)
             Divider()
             Button("Lock Hidden Entries") { post(.lockHiddenEntries) }
                 .keyboardShortcut("l", modifiers: .command)

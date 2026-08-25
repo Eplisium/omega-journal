@@ -28,18 +28,21 @@ struct CommandPaletteView: View {
     private var commands: [Command] {
         var list: [Command] = [
             Command(title: "New Entry", subtitle: "Start writing", icon: "square.and.pencil", group: "Create") {
+                selection = .all
                 vm.createEntry()
             },
             Command(title: "New from Template", subtitle: "Pick a structure", icon: "doc.badge.plus", group: "Create") {
+                selection = .all
                 NotificationCenter.default.post(name: .newFromTemplate, object: nil)
             },
             Command(title: "New from Today's Prompt", subtitle: PromptGenerator.today(), icon: "sparkles", group: "Create") {
+                selection = .all
                 vm.createEntryFromPrompt()
             },
         ]
 
         // Navigation
-        let destinations: [SidebarItem] = [.all, .favorites, .thisWeek, .calendar, .insights, .onThisDay, .archive, .hidden, .trash]
+        let destinations: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .insights, .onThisDay, .archive, .hidden, .trash]
         for dest in destinations {
             list.append(Command(title: "Go to \(dest.title)", subtitle: "Navigate", icon: dest.icon, group: "Navigate") {
                 selection = dest

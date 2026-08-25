@@ -4,9 +4,19 @@ import SwiftUI
 
 struct HeatmapView: View {
     let info: [Date: JournalViewModel.DayInfo]
+    let onOpenDate: ((Date) -> Void)?
 
     @ObservedObject private var theme = ThemeManager.shared
     @State private var hoveredDate: Date?
+    @State private var selectedDate: Date?
+
+    init(
+        info: [Date: JournalViewModel.DayInfo],
+        onOpenDate: ((Date) -> Void)? = nil
+    ) {
+        self.info = info
+        self.onOpenDate = onOpenDate
+    }
 
     private static let cal = Calendar.current
     private static let fullDateFormatter: DateFormatter = {
@@ -182,7 +192,7 @@ struct HeatmapView: View {
     /// Fixed hover detail strip — same chrome as action-button tooltips, no clipping.
     @ViewBuilder
     private var dayDetailStrip: some View {
-        let date = hoveredDate
+        let date = hoveredDate ?? selectedDate
         let dayInfo = date.flatMap { info[$0] }
         let count = dayInfo?.count ?? 0
         let stripAccent: Color = {
@@ -209,7 +219,7 @@ struct HeatmapView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.easeInOut(duration: 0.15), value: hoveredDate)
+            .animation(.easeInOut(duration: 0.15), value: hoveredDate ?? selectedDate)
         }
     }
 
@@ -396,6 +406,7 @@ struct HeatmapView: View {
         let dayInfo = info[date]
         let count = dayInfo?.count ?? 0
         let hovered = hoveredDate == date
+        let selected = selectedDate == date
         let isToday = Self.cal.isDateInToday(date)
 
         RoundedRectangle(cornerRadius: cellCorner, style: .continuous)
@@ -403,21 +414,32 @@ struct HeatmapView: View {
             .frame(width: cellSize, height: cellSize)
             .overlay(
                 RoundedRectangle(cornerRadius: cellCorner, style: .continuous)
-                    .strokeBorder(border(for: count, isToday: isToday, hovered: hovered),
-                                  lineWidth: isToday || hovered ? 1.6 : 1)
+                    .strokeBorder(border(for: count, isToday: isToday, hovered: hovered || selected),
+                                  lineWidth: isToday || hovered || selected ? 1.6 : 1)
             )
-            .shadow(color: (hovered && count > 0) ? accent.opacity(0.35) : .clear, radius: 4, y: 1)
-            .scaleEffect(hovered ? 1.35 : 1.0)
-            .zIndex(hovered ? 20 : 0)
+            .shadow(color: ((hovered || selected) && count > 0) ? accent.opacity(0.35) : .clear, radius: 4, y: 1)
+            .scaleEffect(hovered ? 1.35 : (selected ? 1.15 : 1.0))
+            .zIndex(hovered || selected ? 20 : 0)
             .contentShape(Rectangle())
             .onHover { inside in
                 withAnimation(.easeInOut(duration: 0.12)) {
                     hoveredDate = inside ? date : nil
                 }
             }
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.12)) { selectedDate = date }
+                onOpenDate?(date)
+            }
             .animation(.spring(response: 0.22, dampingFraction: 0.82), value: hovered)
+            .animation(.spring(response: 0.22, dampingFraction: 0.82), value: selected)
             .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
             .accessibilityLabel(accessibilityLabel(date: date, count: count))
+            .accessibilityHint(onOpenDate == nil ? "Select this day for details" : "Open this day")
+            .accessibilityAction {
+                selectedDate = date
+                onOpenDate?(date)
+            }
     }
 
     private func accessibilityLabel(date: Date, count: Int) -> String {

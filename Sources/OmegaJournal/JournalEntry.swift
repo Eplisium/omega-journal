@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Attachment
 
@@ -55,9 +56,10 @@ struct JournalEntry: Identifiable, Hashable {
     var wordCount: Int { body.isEmpty ? 0 : body.split(whereSeparator: { $0.isWhitespace }).count }
     var characterCount: Int { body.count }
 
-    var readingMinutes: Int { max(1, Int(ceil(Double(wordCount) / 220.0))) }
+    var readingMinutes: Int { OmegaCore.readingMinutes(forWordCount: wordCount) }
     var readingTime: String {
         let minutes = readingMinutes
+        guard minutes > 0 else { return "No words yet" }
         return minutes == 1 ? "1 min read" : "\(minutes) min read"
     }
 

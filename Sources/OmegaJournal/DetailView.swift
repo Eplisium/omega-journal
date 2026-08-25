@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - Detail Pane
 //
-// Routes the right-hand column between: editor, entry reader, calendar, insights,
-// and the various empty states — plus the toast overlay.
+// The Journal workspace's right-hand column: editor, entry reader, and empty
+// states. Calendar and Insights live in their own full-width workspaces.
 
 struct DetailView: View {
     @ObservedObject var vm: JournalViewModel
@@ -34,11 +34,7 @@ struct DetailView: View {
         if let entry = vm.editingEntry {
             EditorView(vm: vm, entry: entry)
                 .id(entry.id)
-        } else if selection == .calendar {
-            CalendarView(vm: vm)
-        } else if selection == .insights {
-            InsightsView(vm: vm)
-        } else if let entry = vm.selectedEntry ?? trashOrArchiveSelection {
+        } else if let entry = vm.selectedEntry {
             ReadView(vm: vm, entry: entry, isTrash: selection == .trash)
                 .id(entry.id)
         } else {
@@ -46,14 +42,6 @@ struct DetailView: View {
         }
     }
 
-    /// Trash and archive entries live outside `vm.entries` (scope `.active`), so resolve them separately.
-    /// Hidden entries are included in `.active` / `.archived`, but this fallback still covers the Hidden sidebar.
-    private var trashOrArchiveSelection: JournalEntry? {
-        guard let id = vm.selectedEntryId else { return nil }
-        return vm.trashedEntries.first { $0.id == id }
-            ?? vm.archivedEntries.first { $0.id == id }
-            ?? vm.hiddenEntries.first { $0.id == id }
-    }
 
     // MARK: Welcome
 
@@ -129,11 +117,11 @@ struct DetailView: View {
                         NotificationCenter.default.post(name: .newFromTemplate, object: nil)
                     }
                     quickAction("command", "Commands", "⌘K") { vm.showCommandPalette = true }
-                    quickAction("calendar", "Calendar", "⌘2") { selection = .calendar }
+                    quickAction("calendar", "Calendar", "⌘3") { selection = .calendar }
                 }
 
                 // On this day
-                if !vm.onThisDay.isEmpty {
+                if !vm.reflectiveOnThisDay.isEmpty {
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 5) {
                             Image(systemName: "clock.arrow.circlepath")
@@ -144,7 +132,7 @@ struct DetailView: View {
                                 .tracking(0.7)
                                 .foregroundColor(theme.secondaryTextColor)
                         }
-                        ForEach(vm.onThisDay.prefix(3)) { entry in
+                        ForEach(vm.reflectiveOnThisDay.prefix(3)) { entry in
                             Button { vm.select(entry) } label: {
                                 HStack(spacing: 8) {
                                     Text(entry.mood.emoji).font(.system(size: 13))

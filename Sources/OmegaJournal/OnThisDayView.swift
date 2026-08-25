@@ -4,10 +4,11 @@ import SwiftUI
 
 struct OnThisDayView: View {
     @ObservedObject var vm: JournalViewModel
+    let onOpenEntry: (JournalEntry) -> Void
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
 
-    private var thisDay: [JournalEntry] { vm.onThisDay }
+    private var thisDay: [JournalEntry] { vm.reflectiveOnThisDay }
 
     var body: some View {
         ScrollView {
@@ -137,6 +138,10 @@ struct OnThisDayView: View {
             RoundedRectangle(cornerRadius: OmegaTheme.cardRadius)
                 .strokeBorder(Color.teal.opacity(0.2), lineWidth: 1)
         )
-        .onTapGesture { vm.selectedEntryId = entry.id }
+        .contentShape(RoundedRectangle(cornerRadius: OmegaTheme.cardRadius, style: .continuous))
+        .onTapGesture { onOpenEntry(entry) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Open memory: \(entry.displayTitle)")
     }
 }

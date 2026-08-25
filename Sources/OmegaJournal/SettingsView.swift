@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var customBackground = ThemeManager.shared.backgroundColor
     @State private var customSidebar = ThemeManager.shared.sidebarColor
     @State private var customCard = ThemeManager.shared.cardColor
+    @State private var showEmptyTrashConfirmation = false
 
     enum Tab: String, CaseIterable, Identifiable {
         case appearance = "Appearance"
@@ -75,6 +76,18 @@ struct SettingsView: View {
         }
         .frame(width: 540, height: 480)
         .background(theme.backgroundColor)
+        .confirmationDialog(
+            "Empty Trash?",
+            isPresented: $showEmptyTrashConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(vm.trashedEntries.count) \(vm.trashedEntries.count == 1 ? "entry" : "entries") Forever", role: .destructive) {
+                vm.emptyTrash()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes every entry currently in Trash, including attachments.")
+        }
     }
 
     // MARK: Appearance
@@ -228,7 +241,7 @@ struct SettingsView: View {
             if !vm.trashedEntries.isEmpty {
                 Divider().opacity(0.2)
                 Button(role: .destructive) {
-                    vm.emptyTrash()
+                    showEmptyTrashConfirmation = true
                 } label: {
                     Label("Empty Trash (\(vm.trashedEntries.count))", systemImage: "trash")
                         .font(.system(size: 11, weight: .medium))
@@ -289,7 +302,7 @@ struct SettingsView: View {
                 shortcut("⌘E", "Edit selected entry")
                 shortcut("⌃⌘F", "Zen mode")
                 shortcut("⌘B / ⌘I", "Bold / Italic")
-                shortcut("⌘1…⌘4", "All / Calendar / Insights / Favorites")
+                shortcut("⌘1…⌘4", "Today / Journal / Calendar / Insights")
                 shortcut("⌘⏎", "Finish editing")
                 shortcut("⎋", "Close editor or palette")
             }

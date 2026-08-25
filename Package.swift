@@ -20,7 +20,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OmegaJournalTests",
-            dependencies: ["OmegaJournalCore"],
+            dependencies: ["OmegaJournalCore", "OmegaJournal"],
             path: "Tests/OmegaJournalTests"
         )
     ]

@@ -1,11 +1,12 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Content View
 
 struct ContentView: View {
     @StateObject private var vm = JournalViewModel()
     @ObservedObject private var theme = ThemeManager.shared
-    @State private var sidebarSelection: SidebarItem? = .all
+    @State private var sidebarSelection: SidebarItem? = .today
     @State private var showTemplatePicker = false
 
     var body: some View {
@@ -33,13 +34,25 @@ struct ContentView: View {
         .sheet(isPresented: $showTemplatePicker) {
             TemplatePickerView(vm: vm)
         }
+        .onChange(of: sidebarSelection) { _, next in
+            // A bulk selection is meaningful only within the collection in
+            // which it was made. Never carry it into another library/storage
+            // destination or a reflective workspace.
+            vm.clearBulkSelection()
+            guard let next, !next.workspace.usesEntryCollection, vm.isEditing else { return }
+            vm.flushPendingSave()
+            vm.stopEditing()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .newEntry)) { _ in
+            sidebarSelection = .all
             vm.createEntry()
         }
         .onReceive(NotificationCenter.default.publisher(for: .newFromTemplate)) { _ in
+            sidebarSelection = .all
             showTemplatePicker = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .newFromPrompt)) { _ in
+            sidebarSelection = .all
             vm.createEntryFromPrompt()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
@@ -47,6 +60,12 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleZenMode)) { _ in
             if vm.editingEntryId != nil { vm.isZenMode.toggle() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showToday)) { _ in
+            sidebarSelection = .today
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showJournal)) { _ in
+            sidebarSelection = .all
         }
         .onReceive(NotificationCenter.default.publisher(for: .showInsights)) { _ in
             sidebarSelection = .insights
@@ -62,7 +81,16 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var mainSplitView: some View {
+        if (sidebarSelection?.workspace ?? .today).usesEntryCollection {
+            journalSplitView
+        } else {
+            reflectiveSplitView
+        }
+    }
+
+    private var journalSplitView: some View {
         NavigationSplitView {
             SidebarView(vm: vm, selection: $sidebarSelection)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
@@ -74,11 +102,22 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
     }
+
+    private var reflectiveSplitView: some View {
+        NavigationSplitView {
+            SidebarView(vm: vm, selection: $sidebarSelection)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
+        } detail: {
+            ReflectionWorkspaceView(vm: vm, selection: $sidebarSelection)
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
 }
 
 // MARK: - Sidebar Item
 
 enum SidebarItem: Hashable {
+    case today
     case all
     case favorites
     case thisWeek
@@ -93,6 +132,7 @@ enum SidebarItem: Hashable {
 
     var title: String {
         switch self {
+        case .today: "Today"
         case .all: "All Entries"
         case .favorites: "Favorites"
         case .thisWeek: "This Week"
@@ -109,6 +149,7 @@ enum SidebarItem: Hashable {
 
     var icon: String {
         switch self {
+        case .today: "sun.max"
         case .all: "tray.full"
         case .favorites: "star"
         case .thisWeek: "calendar.badge.clock"
@@ -122,6 +163,18 @@ enum SidebarItem: Hashable {
         case .tag: "number"
         }
     }
+
+    /// Collection filters stay inside the Journal workspace. Reflective pages
+    /// intentionally take over the content area instead of inheriting the list.
+    var workspace: JournalWorkspace {
+        switch self {
+        case .today: .today
+        case .calendar: .calendar
+        case .insights: .insights
+        case .onThisDay: .onThisDay
+        case .all, .favorites, .thisWeek, .mood, .archive, .hidden, .trash, .tag: .journal
+        }
+    }
 }
 
 // MARK: - Notification Names
@@ -132,6 +185,8 @@ extension Notification.Name {
     static let newFromPrompt = Notification.Name("OmegaJournal.newFromPrompt")
     static let toggleCommandPalette = Notification.Name("OmegaJournal.toggleCommandPalette")
     static let toggleZenMode = Notification.Name("OmegaJournal.toggleZenMode")
+    static let showToday = Notification.Name("OmegaJournal.showToday")
+    static let showJournal = Notification.Name("OmegaJournal.showJournal")
     static let showInsights = Notification.Name("OmegaJournal.showInsights")
     static let showCalendar = Notification.Name("OmegaJournal.showCalendar")
     static let importEntries = Notification.Name("OmegaJournal.importEntries")
