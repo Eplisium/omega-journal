@@ -389,6 +389,7 @@ final class JournalViewModel: ObservableObject {
     func stopEditing() {
         // Discard entries that were never given any content.
         if let e = editingEntry, e.title.isEmpty && e.body.isEmpty {
+            saveDebounce?.cancel()
             db.hardDeleteEntry(id: e.id)
             entries.removeAll { $0.id == e.id }
             searchResults?.removeAll { $0.id == e.id }
@@ -453,6 +454,9 @@ final class JournalViewModel: ObservableObject {
 
     /// Moves an entry to the trash (recoverable for 30 days).
     func deleteEntry(_ entry: JournalEntry) {
+        // A pending autosave captured the pre-trash snapshot (deletedAt == nil);
+        // letting it fire would overwrite deleted_at and resurrect the entry.
+        saveDebounce?.cancel()
         db.trashEntry(id: entry.id)
         entries.removeAll { $0.id == entry.id }
         searchResults?.removeAll { $0.id == entry.id }
@@ -476,6 +480,7 @@ final class JournalViewModel: ObservableObject {
     }
 
     func deleteForever(_ entry: JournalEntry) {
+        saveDebounce?.cancel()
         db.hardDeleteEntry(id: entry.id)
         entries.removeAll { $0.id == entry.id }
         searchResults?.removeAll { $0.id == entry.id }
@@ -489,17 +494,24 @@ final class JournalViewModel: ObservableObject {
     }
 
     func emptyTrash() {
+        saveDebounce?.cancel()
         let count = trashedEntries.count
         db.emptyTrash()
         trashedEntries = []
         if let selected = selectedEntryId, !entries.contains(where: { $0.id == selected }) {
             selectedEntryId = nil
         }
+        if let editing = editingEntryId, entry(id: editing) == nil {
+            editingEntryId = nil
+        }
         allTags = db.tagsWithCounts()
         showToast("Emptied Trash (\(count) \(count == 1 ? "entry" : "entries"))", isError: true)
     }
 
     func toggleArchive(_ entry: JournalEntry) {
+        // Archiving a trashed row would corrupt restore semantics (it would come
+        // back pre-archived) and pollute the undo stack — refuse instead.
+        guard !entry.isTrashed else { return }
         let newValue = !entry.isArchived
         db.setArchived(id: entry.id, archived: newValue)
         if selectedEntryId == entry.id { selectedEntryId = nil }
@@ -561,6 +573,7 @@ final class JournalViewModel: ObservableObject {
     /// Soft-deletes the selected active or archived entries. The operation is
     /// intentionally reversible via the toast's Undo action.
     func bulkMoveToTrash() {
+        saveDebounce?.cancel()
         let ids = selectedIDs(in: nonTrashedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()
@@ -623,6 +636,7 @@ final class JournalViewModel: ObservableObject {
     /// Irreversibly removes only selected entries that are already in Trash.
     /// The UI must obtain explicit confirmation before invoking this method.
     func bulkDeleteForever() {
+        saveDebounce?.cancel()
         let ids = selectedIDs(in: trashedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()

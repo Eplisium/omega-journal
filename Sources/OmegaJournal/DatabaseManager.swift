@@ -1004,8 +1004,12 @@ final class DatabaseManager {
 
     // MARK: - Export Helpers
 
+    /// Full export snapshot: every non-trashed entry (active + archived, hidden
+    /// included) plus everything currently in the trash, so backups round-trip
+    /// the complete lifecycle state.
     func fetchAllEntriesForExport() -> [JournalEntry] {
-        fetchAllEntries(sort: .dateDesc)
+        fetchAllEntries(sort: .dateDesc, scope: .all)
+            + fetchAllEntries(sort: .dateDesc, scope: .trashed)
     }
 
     var databasePath: String { dbPath }

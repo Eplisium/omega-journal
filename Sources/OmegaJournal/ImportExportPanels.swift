@@ -41,16 +41,21 @@ enum ImportExportPanels {
         }
     }
 
-    /// Unlocks hidden entries for a full export; if auth is cancelled, hidden entries are omitted.
+    /// Unlocks hidden entries for a full export; if auth is cancelled, hidden
+    /// entries are omitted. Includes archived and trashed entries so backups
+    /// capture the complete lifecycle state.
     private static func entriesForExport(vm: JournalViewModel) async -> [JournalEntry] {
-        let hasHidden = vm.entries.contains(where: \.isHidden)
+        var all = vm.entries + vm.archivedEntries + vm.trashedEntries
+        var seen = Set<String>()
+        all.removeAll { !seen.insert($0.id).inserted }
+        let hasHidden = all.contains(where: \.isHidden)
         if hasHidden && !BiometricAuth.shared.isAuthenticated {
             if await BiometricAuth.shared.authenticate() {
-                return vm.entries
+                return all
             }
-            return vm.entries.filter { !$0.isHidden }
+            return all.filter { !$0.isHidden }
         }
-        return vm.entries
+        return all
     }
 
     /// Exports only the currently selected entry.

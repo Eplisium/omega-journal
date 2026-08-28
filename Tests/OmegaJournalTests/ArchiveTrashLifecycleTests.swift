@@ -3,8 +3,60 @@ import Foundation
 import Testing
 @testable import OmegaJournal
 
-@Suite("Archive and trash lifecycle")
+@Suite("Archive and trash lifecycle", .serialized)
 struct ArchiveTrashLifecycleTests {
+    /// Points the process-global env vars at a unique temp database. The
+    /// DatabaseManager singleton binds to whichever path is set the first time
+    /// it is constructed, so tests must clean up anything they create.
+    private static func makeIsolatedDatabase() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("omega-journal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
+        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+    }
+
+    @MainActor
+    @Test("pending autosave cannot resurrect a trashed entry")
+    func pendingAutosaveCannotResurrectTrashedEntry() async throws {
+        try Self.makeIsolatedDatabase()
+        let vm = JournalViewModel()
+        let entry = vm.createEntry(title: "Autosave race entry", body: "Typed just before trashing.")
+
+        // Schedule the 700 ms debounced save, then trash the entry before it fires.
+        vm.autoSave(entry)
+        vm.deleteEntry(entry)
+
+        // Wait past the debounce window; the stale write must not un-trash the row.
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+
+        #expect(vm.db.fetchEntry(id: entry.id)?.isTrashed == true)
+        #expect(vm.trashedEntries.contains { $0.id == entry.id })
+
+        // Keep the shared singleton database empty for the other tests.
+        vm.db.hardDeleteEntry(id: entry.id)
+    }
+
+    @MainActor
+    @Test("export snapshot includes archived and trashed entries")
+    func exportSnapshotIncludesArchivedAndTrashedEntries() throws {
+        try Self.makeIsolatedDatabase()
+        let vm = JournalViewModel()
+        let active = vm.createEntry(title: "Export active", body: "x")
+        let archived = vm.createEntry(title: "Export archived", body: "x")
+        vm.toggleArchive(archived)
+        let trashed = vm.createEntry(title: "Export trashed", body: "x")
+        vm.deleteEntry(trashed)
+
+        let exportedIDs = Set(vm.db.fetchAllEntriesForExport().map(\.id))
+        #expect(exportedIDs.contains(active.id))
+        #expect(exportedIDs.contains(archived.id))
+        #expect(exportedIDs.contains(trashed.id))
+
+        // Keep the shared singleton database empty for the other tests.
+        for id in [active.id, archived.id, trashed.id] { vm.db.hardDeleteEntry(id: id) }
+    }
+
     @MainActor
     @Test("bulk storage operations keep every collection synchronized")
     func bulkStorageOperationsKeepCollectionsSynchronized() throws {
