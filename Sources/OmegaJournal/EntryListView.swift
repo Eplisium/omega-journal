@@ -175,7 +175,7 @@ struct EntryListView: View {
                     .background(Capsule().fill(theme.accentColor))
                 }
                 .buttonStyle(.plain)
-                .help("Lock hidden entries (⌘L)")
+                .omegaTooltip("Lock hidden entries (⌘L)")
             } else {
                 Button {
                     Task { _ = await biometricAuth.authenticate() }
@@ -258,7 +258,7 @@ struct EntryListView: View {
                     .foregroundColor(vm.filter.isActive ? theme.accentColor : theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
-                .help("Filters")
+                .omegaTooltip("Filters")
 
                 Menu {
                     ForEach(SortOrder.allCases) { order in
@@ -276,7 +276,7 @@ struct EntryListView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Sort: \(vm.sortOrder.rawValue)")
+                .omegaTooltip("Sort: \(vm.sortOrder.rawValue)")
 
                 Button {
                     withAnimation {
@@ -289,7 +289,7 @@ struct EntryListView: View {
                         .foregroundColor(vm.isBulkSelecting ? theme.accentColor : theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
-                .help("Select multiple")
+                .omegaTooltip("Select multiple")
 
                 if biometricAuth.isAuthenticated && vm.hiddenCount > 0 {
                     Button {
@@ -300,7 +300,7 @@ struct EntryListView: View {
                             .foregroundColor(theme.accentColor)
                     }
                     .buttonStyle(.plain)
-                    .help("Lock hidden entries (⌘L)")
+                    .omegaTooltip("Lock hidden entries (⌘L)")
                 }
             }
         }
@@ -399,7 +399,7 @@ struct EntryListView: View {
         .buttonStyle(.plain)
         .disabled(vm.bulkSelection.isEmpty)
         .opacity(vm.bulkSelection.isEmpty ? 0.4 : 1)
-        .help(help)
+        .omegaTooltip(help, accent: destructive ? .red : nil)
     }
 
     private var trashBanner: some View {
@@ -784,7 +784,7 @@ private struct FilterBar: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .help(mood.label)
+                    .omegaTooltip(mood.label)
                 }
 
                 Spacer()

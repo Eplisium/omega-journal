@@ -200,7 +200,7 @@ struct HeatmapView: View {
             return count == 0 ? Color.secondary : accent
         }()
 
-        OmegaHoverCard(accent: stripAccent, showsArrow: false) {
+        OmegaHoverCard(accent: stripAccent) {
             Group {
                 if let date {
                     dayDetailContent(date, info: dayInfo)

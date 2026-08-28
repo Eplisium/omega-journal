@@ -107,7 +107,7 @@ struct EditorView: View {
                             .scaleEffect(mood == m ? 1.05 : 1.0)
                     }
                     .buttonStyle(.plain)
-                    .help(m.label)
+                    .omegaTooltip(m.label)
                 }
             }
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: mood)
@@ -123,7 +123,7 @@ struct EditorView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 108)
-            .help("Write / Split / Preview")
+            .omegaTooltip("Write / Split / Preview")
 
             ActionButton(icon: "textformat.size", color: theme.accentColor, active: false, tooltip: "Text size") {}
                 .overlay {
@@ -222,7 +222,7 @@ struct EditorView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(cmd.label)
+            .omegaTooltip(cmd.label)
         }
     }
 
@@ -258,7 +258,7 @@ struct EditorView: View {
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.escape, modifiers: [])
-                    .help("Exit Zen Mode")
+                    .omegaTooltip("Exit Zen Mode")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 14)

@@ -204,7 +204,7 @@ struct SidebarView: View {
                 )
             }
             .buttonStyle(.plain)
-            .help("New Entry (⌘N)")
+            .omegaTooltip("New Entry (⌘N)")
 
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape")
@@ -217,7 +217,7 @@ struct SidebarView: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Settings (⌘,)")
+            .omegaTooltip("Settings (⌘,)")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)

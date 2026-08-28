@@ -184,7 +184,7 @@ struct CalendarView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(theme.accentColor)
-            .help("Previous month")
+            .omegaTooltip("Previous month")
             .accessibilityLabel("Previous month")
 
             Text(anchorMonth.formatted(.dateTime.month(.wide).year()))
@@ -199,7 +199,7 @@ struct CalendarView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(theme.accentColor)
-            .help("Next month")
+            .omegaTooltip("Next month")
             .accessibilityLabel("Next month")
 
             Button("Today", action: goToToday)
@@ -209,7 +209,7 @@ struct CalendarView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-                .help("Jump to today")
+                .omegaTooltip("Jump to today")
 
             DatePicker(
                 "Jump to date",
@@ -258,7 +258,7 @@ struct CalendarView: View {
                         .background(Capsule().fill(theme.accentColor.opacity(0.14)))
                 }
                 .buttonStyle(.plain)
-                .help("Authenticate before including private entries")
+                .omegaTooltip("Authenticate before including private entries")
                 .accessibilityHint("Authenticates before private entries can be included")
             }
         }
@@ -537,7 +537,7 @@ struct CalendarView: View {
                         .background(Capsule().fill(theme.accentColor))
                 }
                 .buttonStyle(.plain)
-                .help("Create an entry for \(selectedDay.formatted(date: .complete, time: .omitted))")
+                .omegaTooltip("Create an entry for \(selectedDay.formatted(date: .complete, time: .omitted))")
                 .accessibilityLabel("New entry for \(selectedDay.formatted(date: .complete, time: .omitted))")
             }
 
@@ -804,7 +804,7 @@ private struct CalendarDayCell: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(accessibilityDescription)
+        .omegaTooltip(accessibilityDescription)
         .accessibilityLabel(accessibilityDescription)
         .accessibilityHint("Select this day to inspect its entries")
         .accessibilityAddTraits(isSelected ? .isSelected : [])

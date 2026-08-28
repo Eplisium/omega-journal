@@ -294,7 +294,7 @@ struct ReadView: View {
                             .foregroundColor(theme.accentColor)
                     }
                     .buttonStyle(.plain)
-                    .help("Open")
+                    .omegaTooltip("Open")
 
                     Button {
                         vm.deleteAttachment(attachment)
@@ -304,7 +304,7 @@ struct ReadView: View {
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)
-                    .help("Remove")
+                    .omegaTooltip("Remove")
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor.opacity(0.4)))
