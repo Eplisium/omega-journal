@@ -90,6 +90,12 @@ struct CalendarView: View {
         )
     }
 
+    /// Live size of the calendar workspace. Sheets presented from here are
+    /// capped to a fraction of it — otherwise a sheet containing ReadView's
+    /// ScrollView reports the scroll content's full height as its ideal size
+    /// and grows past the bottom of the window on long entries.
+    @State private var workspaceSize: CGSize = .zero
+
     private var privacyInclusionBinding: Binding<Bool> {
         Binding(
             get: { vm.analyticsVisibility == .includePrivate },
@@ -125,8 +131,20 @@ struct CalendarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.backgroundColor)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { workspaceSize = geo.size }
+                    .onChange(of: geo.size) { _, newSize in workspaceSize = newSize }
+            }
+        )
         .sheet(item: $presentedEntry, onDismiss: finishPresentedEntry) { route in
             CalendarEntryContextSheet(vm: vm, entryID: route.entryID)
+                // Cap to the workspace so the sheet always fits on screen; the
+                // reader/editor inside scrolls. Floors match the sheet's own
+                // minWidth/minHeight so it never collapses.
+                .frame(maxWidth: max(760, workspaceSize.width * 0.94),
+                       maxHeight: max(560, workspaceSize.height * 0.92))
         }
     }
 
