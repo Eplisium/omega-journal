@@ -434,9 +434,6 @@ struct EntryListView: View {
                                 EntryRow(
                                     vm: vm,
                                     entry: entry,
-                                    isSelected: vm.selectedEntryId == entry.id,
-                                    isBulkSelected: vm.bulkSelection.contains(entry.id),
-                                    isBulkSelecting: vm.isBulkSelecting,
                                     isTrash: isTrash
                                 )
                             }
@@ -545,10 +542,16 @@ struct EntryListView: View {
 private struct EntryRow: View {
     @ObservedObject var vm: JournalViewModel
     let entry: JournalEntry
-    let isSelected: Bool
-    let isBulkSelected: Bool
-    let isBulkSelecting: Bool
     let isTrash: Bool
+
+    // Selection state is read straight from the view model instead of being
+    // passed in as values. Rows live inside a LazyVStack, where stale passed-in
+    // copies can survive a parent re-render — the reported symptom was the bulk
+    // toolbar active while rows still rendered (and tapped) as if it were off.
+    // @ObservedObject re-renders the row on every publish, so these stay live.
+    private var isSelected: Bool { vm.selectedEntryId == entry.id }
+    private var isBulkSelected: Bool { vm.bulkSelection.contains(entry.id) }
+    private var isBulkSelecting: Bool { vm.isBulkSelecting }
 
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
