@@ -47,6 +47,7 @@ final class DatabaseManager {
         try? FileManager.default.createDirectory(atPath: attachmentsDir, withIntermediateDirectories: true)
         openDatabase()
         runMigrations()
+        reconcileTagStorage()
         purgeExpiredTrash()
         autoBackup()
     }
@@ -87,8 +88,9 @@ final class DatabaseManager {
 
     /// Runs a one-shot statement with the given text parameters bound left-to-right
     /// (1, 2, 3…). Silently logs failures — used for internal mutations where the
-    /// caller doesn't need the result.
-    private func execParameterized(_ sql: String, _ values: String...) {
+    /// caller doesn't need the result. Internal (not private) so the tag-storage
+    /// reconciliation and its tests can simulate historical write patterns.
+    func execParameterized(_ sql: String, _ values: String...) {
         guard let stmt = try? prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
         for (i, v) in values.enumerated() { bindText(stmt, index: Int32(i + 1), value: v) }
@@ -287,6 +289,84 @@ final class DatabaseManager {
         exec("ALTER TABLE entries ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;")
         exec("CREATE INDEX IF NOT EXISTS idx_entries_hidden ON entries(is_hidden);")
         setSchemaVersion(7)
+    }
+
+    // MARK: - Tag storage reconciliation
+
+    /// Heals drift between the two tag storage systems: the legacy
+    /// `entries.tags` comma-separated text column and the normalized
+    /// `tags`/`entry_tags` junction tables (the sidebar's source of truth).
+    ///
+    /// The junction backfill in migrateToV2 and several historical write paths
+    /// used `execParameterized`, which swallows SQL failures silently — so an
+    /// entry could carry tags in its text column with no junction rows, making
+    /// the sidebar count them as 0 until the entry was next edited (every
+    /// saveEntry re-syncs both stores). This runs at every launch and takes the
+    /// UNION of both stores per entry so neither side can lose tags, rewrites
+    /// the text column from the junction table, and prunes orphaned tag rows.
+    /// Idempotent by construction — a second run is a no-op. Internal (not
+    /// private) so tests can drive reconciliation directly after simulating
+    /// historical drift patterns.
+    func reconcileTagStorage() {
+        // 1. Ensure every entry's tags exist as junction rows, from BOTH stores.
+        var entryRows: [(id: String, legacy: [String], junction: [String])] = []
+        guard let fetchStmt = try? prepare("""
+            SELECT e.id, IFNULL(e.tags, ''),
+                   IFNULL((SELECT GROUP_CONCAT(t.name, '\u{1F}')
+                           FROM entry_tags et JOIN tags t ON t.id = et.tag_id
+                           WHERE et.entry_id = e.id), '')
+            FROM entries e;
+            """) else { return }
+        defer { sqlite3_finalize(fetchStmt) }
+        while sqlite3_step(fetchStmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(fetchStmt, 0))
+            let legacyRaw = String(cString: sqlite3_column_text(fetchStmt, 1))
+            let junctionRaw = String(cString: sqlite3_column_text(fetchStmt, 2))
+            func parse(_ raw: String, separator: Character) -> [String] {
+                raw.split(separator: separator, omittingEmptySubsequences: true)
+                    .map { String($0).trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }
+            // The text column is comma-separated; the junction concat uses an
+            // unlikely control character so tag names may contain commas.
+            entryRows.append((id,
+                              parse(legacyRaw, separator: ","),
+                              parse(junctionRaw, separator: "\u{1F}")))
+        }
+
+        var changedCount = 0
+        for row in entryRows {
+            let merged = Array(Set(row.legacy).union(row.junction)).sorted()
+            // Only touch rows where at least one store disagrees with the union
+            // (covers text-column-only AND junction-only drift).
+            guard merged != row.junction.sorted() || merged != row.legacy.sorted() else { continue }
+
+            // Union of both stores must exist as tag rows…
+            for tag in merged {
+                execParameterized("INSERT OR IGNORE INTO tags (name) VALUES (?);", tag)
+            }
+            // …and the junction table must carry the full merged set.
+            execParameterized("DELETE FROM entry_tags WHERE entry_id = ?;", row.id)
+            for tag in merged {
+                execParameterized(
+                    "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT ?, id FROM tags WHERE name = ?;",
+                    row.id, tag
+                )
+            }
+            // The text column is rewritten to mirror the junction table exactly.
+            execParameterized("UPDATE entries SET tags = ? WHERE id = ?;",
+                              merged.joined(separator: ","), row.id)
+            changedCount += 1
+        }
+
+        // 2. Prune tag rows with no links at all (incl. ones left behind when a
+        //    junction write failed silently in the past).
+        exec("DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM entry_tags);")
+
+        if changedCount > 0 {
+            rebuildFTS()
+            print("OmegaJournal: reconciled tag storage for \(changedCount) entries")
+        }
     }
 
     // MARK: - Trash
