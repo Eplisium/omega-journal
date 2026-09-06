@@ -79,6 +79,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .lockHiddenEntries)) { _ in
             vm.lockHiddenEntries()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .quitTimeSave)) { _ in
+            // Quit is in progress and this call runs synchronously — flush
+            // regardless of the `isEditing` guard used for workspace switches,
+            // otherwise the final keystrokes of an edit session are lost.
+            vm.flushPendingSave()
+        }
     }
 
     @ViewBuilder
@@ -192,4 +198,5 @@ extension Notification.Name {
     static let importEntries = Notification.Name("OmegaJournal.importEntries")
     static let focusSearch = Notification.Name("OmegaJournal.focusSearch")
     static let lockHiddenEntries = Notification.Name("OmegaJournal.lockHiddenEntries")
+    static let quitTimeSave = Notification.Name("OmegaJournal.quitTimeSave")
 }

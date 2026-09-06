@@ -22,3 +22,6 @@ xcuserdata/
 # Generated icon artifacts
 AppIcon.iconset/
 icon_*.png
+
+# Terra edit-tool backups
+.windop-backups/

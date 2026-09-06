@@ -115,7 +115,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Make sure any debounced autosave has landed before the process goes away.
+        // Make sure any debounced autosave has landed before the process goes
+        // away. ContentView owns the one-and-only JournalViewModel (a
+        // @StateObject), so ask it to flush via notification — the delegate has
+        // no reference to the view-owned model. SwiftUI's onReceive handlers
+        // run synchronously, so the save completes before DatabaseManager.shared
+        // deinits and closes the database.
+        NotificationCenter.default.post(name: .quitTimeSave, object: nil)
         DatabaseManager.shared.purgeExpiredTrash()
     }
 }

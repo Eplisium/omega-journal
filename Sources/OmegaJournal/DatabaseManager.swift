@@ -311,15 +311,23 @@ final class DatabaseManager {
         let formatter = ISO8601DateFormatter()
         let today = formatter.string(from: Date())
 
-        // Backup once per day
-        guard lastBackup != today else { return }
-        _ = backupDatabase()
+        // Backup at most once per calendar day — and only stamp the setting when
+        // the backup actually succeeded, so a failed attempt (unwritable disk,
+        // I/O error) is retried on the next launch instead of being skipped
+        // until tomorrow.
+        guard lastBackup != today, backupDatabase() != nil else { return }
         setSetting("lastBackupDate", value: today)
     }
 
     func backupDatabase() -> URL? {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let backupDir = appSupport.appendingPathComponent("OmegaJournal/backups", isDirectory: true)
+        // Keep backups next to the live database instead of assuming the standard
+        // Application Support path. For the real journal this is the same location
+        // as before; under test isolation it keeps backup files inside the temp
+        // directory rather than dropping them into the user's real backups folder
+        // (where they could evict a genuine backup from the keep-last-7 window).
+        let databaseURL = URL(fileURLWithPath: dbPath)
+        let backupDir = databaseURL.deletingLastPathComponent()
+            .appendingPathComponent("backups", isDirectory: true)
         try? FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()
