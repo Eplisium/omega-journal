@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 import AppKit
@@ -45,6 +46,7 @@ final class JournalViewModel: ObservableObject {
     private var searchDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
     private var undoStack: [UndoAction] = []
+    private var cancellables: Set<AnyCancellable> = []
 
     enum EditorMode: String, CaseIterable, Identifiable {
         case write = "Write"
@@ -79,6 +81,19 @@ final class JournalViewModel: ObservableObject {
     init() {
         reload()
         loadTemplates()
+        // Lock/unlock changes which tags may appear in the sidebar, so
+        // re-derive tag counts whenever the biometric session changes. Combine
+        // subscription keeps this in sync without every mutation site needing
+        // to remember to do it.
+        BiometricAuth.shared.$isAuthenticated
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.allTags = self.db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Loading
@@ -88,13 +103,22 @@ final class JournalViewModel: ObservableObject {
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
         archivedEntries = db.fetchAllEntries(sort: sortOrder, scope: .archived)
         hiddenEntries = db.fetchAllEntries(sort: .dateDesc, scope: .hidden)
-        allTags = db.tagsWithCounts()
+        // While the biometric session is locked, hidden entries must not
+        // advertise their tags in the sidebar/filter chips.
+        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
         GoalManager.shared.loadGoals()
         refreshQuery()
     }
 
     func loadTemplates() {
         templates = db.templates()
+    }
+
+    /// Sidebar tag counts, excluding hidden entries' tags while the biometric
+    /// session is locked. Every mutation path refreshes counts through this so
+    /// the privacy rule holds regardless of where the refresh happens.
+    func refreshTagCounts() {
+        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
     }
 
     /// Re-runs whichever query matches the current search box contents.
@@ -297,7 +321,7 @@ final class JournalViewModel: ObservableObject {
         if searchResults != nil { refreshQuery() }
         selectedEntryId = entry.id
         editingEntryId = entry.id
-        allTags = db.tagsWithCounts()
+        refreshTagCounts()
         return entry
     }
 
@@ -400,7 +424,7 @@ final class JournalViewModel: ObservableObject {
         }
         editingEntryId = nil
         isZenMode = false
-        allTags = db.tagsWithCounts()
+        refreshTagCounts()
         GoalManager.shared.loadGoals()
     }
 
@@ -416,7 +440,7 @@ final class JournalViewModel: ObservableObject {
             await MainActor.run {
                 self.db.saveEntry(updated)
                 if self.searchResults != nil { self.refreshQuery() }
-                self.allTags = self.db.tagsWithCounts()
+                self.refreshTagCounts()
                 GoalManager.shared.loadGoals()
             }
         }
@@ -466,7 +490,7 @@ final class JournalViewModel: ObservableObject {
         if editingEntryId == entry.id { editingEntryId = nil }
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
         undoStack.append(.restoreTrashed(ids: [entry.id]))
-        allTags = db.tagsWithCounts()
+        refreshTagCounts()
         showToast("Moved to Trash", actionLabel: "Undo")
         GoalManager.shared.loadGoals()
     }
@@ -489,7 +513,7 @@ final class JournalViewModel: ObservableObject {
         hiddenEntries.removeAll { $0.id == entry.id }
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
-        allTags = db.tagsWithCounts()
+        refreshTagCounts()
         showToast("Deleted permanently", isError: true)
     }
 
@@ -504,7 +528,7 @@ final class JournalViewModel: ObservableObject {
         if let editing = editingEntryId, entry(id: editing) == nil {
             editingEntryId = nil
         }
-        allTags = db.tagsWithCounts()
+        refreshTagCounts()
         showToast("Emptied Trash (\(count) \(count == 1 ? "entry" : "entries"))", isError: true)
     }
 

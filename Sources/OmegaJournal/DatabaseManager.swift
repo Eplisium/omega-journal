@@ -748,19 +748,22 @@ final class DatabaseManager {
         return tags
     }
 
-    func tagsWithCounts() -> [(tag: String, count: Int)] {
+    func tagsWithCounts(includeHidden: Bool = true) -> [(tag: String, count: Int)] {
         // Count only active (non-trashed, non-archived) entries so the sidebar
         // tag list matches what the entry list actually shows. Archived entries
         // are excluded because they don't appear in `vm.entries` (scope .active).
+        // Hidden entries are excluded while the biometric session is locked —
+        // the sidebar shouldn't advertise the tags used on private entries.
+        let hiddenClause = includeHidden ? "" : " AND e.is_hidden = 0"
         let sql = """
             SELECT t.name, COUNT(et.entry_id) as cnt
             FROM tags t
             INNER JOIN entry_tags et ON t.id = et.tag_id
             INNER JOIN entries e ON et.entry_id = e.id
-            WHERE e.deleted_at IS NULL AND e.is_archived = 0
+            WHERE e.deleted_at IS NULL AND e.is_archived = 0\(hiddenClause)
             GROUP BY t.id
             ORDER BY cnt DESC, t.name;
-        """
+            """
         guard let stmt = try? prepare(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         var results: [(String, Int)] = []
