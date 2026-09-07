@@ -21,7 +21,7 @@ struct CalendarView: View {
     @State private var anchorMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
     @State private var displayMode: DisplayMode = .month
-    @State private var presentedEntry: CalendarEntryRoute?
+    @State private var presentedEntry: EntryDrillThroughRoute?
     @State private var presentedEntryID: String?
 
     private let calendar = Calendar.current
@@ -139,7 +139,7 @@ struct CalendarView: View {
             }
         )
         .sheet(item: $presentedEntry, onDismiss: finishPresentedEntry) { route in
-            CalendarEntryContextSheet(vm: vm, entryID: route.entryID)
+            EntryDrillThroughSheet(vm: vm, entryID: route.entryID, contextTitle: "Calendar entry")
                 // Cap to the workspace so the sheet always fits on screen; the
                 // reader/editor inside scrolls. Floors match the sheet's own
                 // minWidth/minHeight so it never collapses.
@@ -657,7 +657,7 @@ struct CalendarView: View {
 
     private func presentEntry(id: String) {
         presentedEntryID = id
-        presentedEntry = CalendarEntryRoute(entryID: id)
+        presentedEntry = EntryDrillThroughRoute(entryID: id)
     }
 
     private func finishPresentedEntry() {
@@ -831,7 +831,8 @@ private struct CalendarDayCell: View {
 
 // MARK: - Accessible entry row
 
-private struct CalendarEntryRow: View {
+/// Shared with Insights' day drill-down sheet.
+struct CalendarEntryRow: View {
     let entry: JournalEntry
     let onOpen: () -> Void
 
@@ -942,89 +943,6 @@ private struct CalendarEntryRow: View {
     }
 }
 
-// MARK: - Contextual entry drill-through
+// Entry drill-through now lives in the shared EntryDrillThrough.swift, so
+// Calendar and Insights present identical reader/editor sheets.
 
-private struct CalendarEntryRoute: Identifiable {
-    let entryID: String
-    var id: String { entryID }
-}
-
-private struct CalendarEntryContextSheet: View {
-    @ObservedObject var vm: JournalViewModel
-    let entryID: String
-
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
-    @Environment(\.dismiss) private var dismiss
-
-    /// Resolve on every body update rather than retaining an entry snapshot.
-    /// The scoped lookup also removes private metadata immediately on re-lock.
-    private var currentEntry: JournalEntry? {
-        guard let entry = vm.calendarEntries.first(where: { $0.id == entryID }) else { return nil }
-        return entry.isHidden && !biometricAuth.isAuthenticated ? nil : entry
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            sheetHeader
-            Divider().opacity(0.25)
-            sheetContent
-        }
-        .frame(minWidth: 760, minHeight: 560)
-        .background(theme.backgroundColor)
-    }
-
-    private var sheetHeader: some View {
-        HStack(spacing: 8) {
-            Label("Calendar entry", systemImage: "calendar")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(theme.titleTextColor)
-            Spacer()
-            Button(action: { dismiss() }) {
-                Label("Close", systemImage: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(theme.accentColor)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close Calendar entry")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(theme.cardColor.opacity(0.22))
-    }
-
-    @ViewBuilder
-    private var sheetContent: some View {
-        if let entry = currentEntry {
-            if vm.editingEntryId == entryID {
-                EditorView(vm: vm, entry: entry)
-                    .id("calendar-editor-\(entry.id)")
-            } else {
-                ReadView(vm: vm, entry: entry)
-                    .id("calendar-reader-\(entry.id)")
-            }
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundColor(theme.accentColor)
-                Text("Entry unavailable")
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
-                    .foregroundColor(theme.titleTextColor)
-                Text("This entry is no longer available in the current Calendar scope.")
-                    .font(.system(size: 12))
-                    .foregroundColor(theme.secondaryTextColor)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 310)
-                Button("Close", action: { dismiss() })
-                    .buttonStyle(.bordered)
-                    .tint(theme.accentColor)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(32)
-        }
-    }
-}
