@@ -1,10 +1,17 @@
 #!/bin/bash
 set -e
 
-PROJECT_DIR="$HOME/OmegaJournal"
+# Resolve the project directory from this script's own location so the repo
+# can be checked out at any path (issue #1: hardcoding $HOME/OmegaJournal
+# broke clones like ~/omega-journal).
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$PROJECT_DIR/.build"
 APP_NAME="OmegaJournal"
 APP_BUNDLE="$PROJECT_DIR/Omega Journal.app"
+
+# The icon-generation heredoc below needs the project dir as well; hand it
+# over via the environment so arbitrary checkout locations work (issue #1).
+export OMEGA_JOURNAL_PROJECT_DIR="$PROJECT_DIR"
 
 # Prefer the newest binary. A plain `find | head -1` can pick a stale
 # release build over a just-compiled debug binary and ship old SQL.
@@ -102,8 +109,9 @@ labelStr.draw(with: labelRect, options: [.usesLineFragmentOrigin], context: nil)
 img.unlockFocus()
 
 // Build iconset
-let iconsetPath = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("OmegaJournal/AppIcon.iconset")
+let projectDir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["OMEGA_JOURNAL_PROJECT_DIR"]
+    ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("OmegaJournal").path)
+let iconsetPath = projectDir.appendingPathComponent("AppIcon.iconset")
 try? FileManager.default.removeItem(at: iconsetPath)
 try! FileManager.default.createDirectory(at: iconsetPath, withIntermediateDirectories: true)
 
@@ -123,8 +131,8 @@ for (name, px) in sizes {
     try! data.write(to: iconsetPath.appendingPathComponent("\(name).png"))
 }
 
-let icnsPath = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("OmegaJournal/Omega Journal.app/Contents/Resources/AppIcon.icns")
+let icnsPath = projectDir
+    .appendingPathComponent("Omega Journal.app/Contents/Resources/AppIcon.icns")
 let p = Process(); p.launchPath = "/usr/bin/iconutil"
 p.arguments = ["-c", "icns", iconsetPath.path, "-o", icnsPath.path]
 p.launch(); p.waitUntilExit()

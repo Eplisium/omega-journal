@@ -14,7 +14,7 @@ bash build_app.sh    # package "Omega Journal.app" (note the space) + regenerate
 
 Suites: "Archive and trash lifecycle", "Hidden entry tag participation", "Tag storage reconciliation", "Workspace presentation", plus OmegaCore unit suites. Tests that touch the DB must clean up after themselves ("Keep the shared singleton database empty for the other suites") and DB suites use `.serialized`.
 
-- `build_app.sh` hardcodes `PROJECT_DIR="$HOME/OmegaJournal"` — it only works when the repo is checked out at that exact path. It picks the newest binary in `.build/` by mtime and rebuilds the bundle from scratch.
+- `build_app.sh` resolves the project directory from its own location, so the repo works at any checkout path (fixed in issue #1). It picks the newest binary in `.build/` by mtime and rebuilds the bundle from scratch.
 - Tests use Swift Testing (`@Suite`, `@Test`, `#expect`, `#require`, `arguments:` parameterization) — do not add XCTest.
 
 ## Test isolation (critical)
