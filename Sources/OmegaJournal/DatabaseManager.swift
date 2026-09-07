@@ -63,13 +63,16 @@ final class DatabaseManager {
 
     // MARK: - SQL Helpers
 
-    private func exec(_ sql: String) {
+    private func exec(_ sql: String) -> Bool {
         var err: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {
             let msg = err.map { String(cString: $0) } ?? "unknown"
             sqlite3_free(err)
             print("SQLite exec error: \(msg)")
+            flagTransactionFailure()
+            return false
         }
+        return true
     }
 
     private func prepare(_ sql: String) throws -> OpaquePointer? {
@@ -91,10 +94,54 @@ final class DatabaseManager {
     /// caller doesn't need the result. Internal (not private) so the tag-storage
     /// reconciliation and its tests can simulate historical write patterns.
     func execParameterized(_ sql: String, _ values: String...) {
-        guard let stmt = try? prepare(sql) else { return }
+        guard let stmt = try? prepare(sql) else {
+            flagTransactionFailure()
+            return
+        }
         defer { sqlite3_finalize(stmt) }
         for (i, v) in values.enumerated() { bindText(stmt, index: Int32(i + 1), value: v) }
-        sqlite3_step(stmt)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            flagTransactionFailure()
+        }
+    }
+
+    // MARK: - Transactions
+
+    /// Depth of the active transaction stack. The connection is
+    /// single-threaded (every caller is on the main actor), so a plain counter
+    /// is sufficient; re-entrancy lets composed mutations each request their
+    /// own transaction and still behave correctly when nested inside a larger
+    /// one (only the outermost begin/commit touches SQLite).
+    private var transactionDepth = 0
+    /// Set when any statement fails inside the active transaction. The
+    /// outermost unwind then rolls back instead of committing a partial write.
+    /// Failures outside a transaction keep the historical swallow-and-continue
+    /// behaviour (tests rely on simulating failed writes that way).
+    private var transactionFailed = false
+
+    private func flagTransactionFailure() {
+        if transactionDepth > 0 { transactionFailed = true }
+    }
+
+    private func beginTransaction() {
+        if transactionDepth == 0 { exec("BEGIN IMMEDIATE TRANSACTION;") }
+        transactionDepth += 1
+    }
+
+    /// Must be balanced with `beginTransaction` — wrap bodies in
+    /// `defer { endTransaction() }` so early returns cannot strand an open
+    /// transaction (an open one would buffer every later write uncommitted).
+    private func endTransaction() {
+        guard transactionDepth > 0 else { return }
+        transactionDepth -= 1
+        if transactionDepth == 0 {
+            if transactionFailed {
+                exec("ROLLBACK;")
+            } else {
+                exec("COMMIT;")
+            }
+            transactionFailed = false
+        }
     }
 
     // MARK: - Migrations
@@ -308,6 +355,8 @@ final class DatabaseManager {
     /// private) so tests can drive reconciliation directly after simulating
     /// historical drift patterns.
     func reconcileTagStorage() {
+        beginTransaction()
+        defer { endTransaction() }
         // 1. Ensure every entry's tags exist as junction rows, from BOTH stores.
         var entryRows: [(id: String, legacy: [String], junction: [String])] = []
         guard let fetchStmt = try? prepare("""
@@ -615,6 +664,12 @@ final class DatabaseManager {
     }
 
     func saveEntry(_ entry: JournalEntry) {
+        // The row write, tag sync, and FTS update must land together — a crash
+        // between them would leave the entry text, its sidebar tags, and its
+        // search results disagreeing with each other.
+        beginTransaction()
+        defer { endTransaction() }
+
         let wordCount = entry.body.isEmpty ? 0 : entry.body.split(whereSeparator: { $0.isWhitespace }).count
         let sql = """
         INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
@@ -648,6 +703,8 @@ final class DatabaseManager {
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
             print("Save failed: \(msg)")
+            // Nothing (row, tags, FTS) should survive a failed upsert.
+            flagTransactionFailure()
         }
 
         syncTagsForEntry(entry.id, tags: entry.tags)
@@ -688,7 +745,10 @@ final class DatabaseManager {
     }
 
     /// Irreversibly removes an entry, its attachments and its search index rows.
+    /// Runs as one transaction so a crash can never leave half an entry behind.
     func hardDeleteEntry(id: String) {
+        beginTransaction()
+        defer { endTransaction() }
         for attachment in fetchAttachments(entryId: id) {
             deleteAttachment(id: attachment.id)
         }
@@ -857,6 +917,14 @@ final class DatabaseManager {
     }
 
     func renameTag(from oldName: String, to newName: String) {
+        // Renaming a tag to its own name must be a no-op: the merge path below
+        // deletes the old tag row, which for a self-rename is the ONLY row — it
+        // would sever every junction link and destroy the tag.
+        guard oldName != newName else { return }
+
+        beginTransaction()
+        defer { endTransaction() }
+
         // Ensure the new tag row exists (parameterized — no string interpolation).
         execParameterized("INSERT OR IGNORE INTO tags (name) VALUES (?);", newName)
 
@@ -909,6 +977,11 @@ final class DatabaseManager {
         guard sqlite3_step(stmt) == SQLITE_ROW else { return }
         let tagId = sqlite3_column_int(stmt, 0)
 
+        // Junction rows, the tag row, and every affected entry's text column
+        // must change together or not at all.
+        beginTransaction()
+        defer { endTransaction() }
+
         // Collect affected entries before we sever the junction rows, so we can
         // rewrite their `entries.tags` text column afterward.
         guard let entryStmt = try? prepare("SELECT entry_id FROM entry_tags WHERE tag_id = ?;") else { return }
@@ -932,7 +1005,11 @@ final class DatabaseManager {
         }
     }
 
+    /// Rebuilds the FTS index inside a transaction — the delete+insert pair must
+    /// never be observed half-applied.
     private func rebuildFTS() {
+        beginTransaction()
+        defer { endTransaction() }
         exec("DELETE FROM entries_fts;")
         exec("""
             INSERT INTO entries_fts(entry_id, title, body, tags)

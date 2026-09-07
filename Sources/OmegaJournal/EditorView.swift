@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import OmegaJournalCore
 
 // MARK: - Editor
 
@@ -36,7 +37,8 @@ struct EditorView: View {
     }
 
     private var readingTime: String {
-        let m = max(1, Int(ceil(Double(wordCount) / 220.0)))
+        // Empty drafts contribute no fictional minutes (matches JournalEntry).
+        let m = OmegaCore.readingMinutes(forWordCount: wordCount)
         return m == 1 ? "1 min read" : "\(m) min read"
     }
 
@@ -346,7 +348,11 @@ struct EditorView: View {
     // MARK: Actions
 
     private func commitTag() {
-        let t = tagInput.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "#", with: "")
+        // Commas are the text-column separator; a comma inside a tag name would
+        // be misparsed as two tags on the next reconcile. Strip them at input.
+        let t = tagInput.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "#", with: "")
+            .replacingOccurrences(of: ",", with: "")
         if !t.isEmpty && !tags.contains(t) { tags.append(t) }
         tagInput = ""
     }

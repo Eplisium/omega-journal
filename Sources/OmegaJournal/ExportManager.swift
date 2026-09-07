@@ -40,6 +40,10 @@ enum ExportManager {
         // as nil/false and the importer treats them as active (the old behaviour).
         let isArchived: Bool?
         let deletedAt: Date?
+        // Added in v3 of the export format: a hidden entry must survive an
+        // export/import round-trip as hidden — importing a backup must never
+        // silently publish private entries into the visible library.
+        let isHidden: Bool?
     }
 
     struct JSONExport: Codable {
@@ -58,7 +62,8 @@ enum ExportManager {
                 isPinned: e.isPinned, isFavorite: e.isFavorite,
                 wordCount: e.wordCount,
                 isArchived: e.isArchived,
-                deletedAt: e.deletedAt
+                deletedAt: e.deletedAt,
+                isHidden: e.isHidden
             )
         }
         let export = JSONExport(

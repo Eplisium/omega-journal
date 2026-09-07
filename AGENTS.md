@@ -12,7 +12,7 @@ swift test --filter "TagStorageReconciliationTests" # …or by suite struct name
 bash build_app.sh    # package "Omega Journal.app" (note the space) + regenerate icon
 ```
 
-Suites: "Archive and trash lifecycle", "Hidden entry tag participation", "Tag storage reconciliation", "Workspace presentation", plus OmegaCore unit suites. Tests that touch the DB must clean up after themselves ("Keep the shared singleton database empty for the other suites") and DB suites use `.serialized`.
+Suites: "Archive and trash lifecycle", "Autosave flush and export round-trip", "Hidden entry tag participation", "Tag storage reconciliation", "Workspace presentation", plus OmegaCore unit suites. Tests that touch the DB must clean up after themselves ("Keep the shared singleton database empty for the other suites") and DB suites use `.serialized`.
 
 - `build_app.sh` resolves the project directory from its own location, so the repo works at any checkout path (fixed in issue #1). It picks the newest binary in `.build/` by mtime and rebuilds the bundle from scratch.
 - Tests use Swift Testing (`@Suite`, `@Test`, `#expect`, `#require`, `arguments:` parameterization) — do not add XCTest.
@@ -38,6 +38,10 @@ Sources/OmegaJournal/       SwiftUI app: DatabaseManager (all SQL), JournalViewM
 
 - Data flow: `DatabaseManager` → `JournalViewModel` (@MainActor, all published state) → SwiftUI views. No direct SQL from views.
 - ViewModel mutations must update **every** published collection (`entries`, `archivedEntries`, `trashedEntries`, …), not just the active list — `ArchiveTrashLifecycleTests` guards this.
+- **Autosave race rule (critical):** the 700ms debounced autosave (`JournalViewModel.autoSave`) holds a full pre-mutation entry snapshot. EVERY immediate mutation — pin, favorite, mood, archive, hide, plus the trash/bulk paths — must call `flushBeforeImmediateMutation()` (or cancel the debounce) FIRST, or the stale snapshot lands after the mutation and silently reverts it. `AutosaveFlushAndRoundTripTests.pendingAutosaveCannotRevertImmediateMutations` guards pin/archive/hide.
+- `stopEditing()` persists the pending autosave itself before clearing `editingEntryId` — the `EditorView.onDisappear` flush runs too late (id already nil) and cannot be relied on.
+- Multi-statement mutations (`saveEntry`, `hardDeleteEntry`, `renameTag`, `deleteTag`, `reconcileTagStorage`, `rebuildFTS`) run inside re-entrant `beginTransaction`/`endTransaction` blocks in `DatabaseManager`. Statement failures flag the transaction so the outermost unwind rolls back instead of committing a partial write. New multi-statement mutations must do the same.
+- JSON export format v3 adds optional `isHidden` (older files still import; hidden state must round-trip — backups never unhide private entries).
 - Schema migrations live as sequential `migrateToVN()` functions in `DatabaseManager.swift`, tracked in the `schema_version` table (currently V7). Migrations run against real user data — they must be idempotent. New schema change = add `migrateToV8()` and bump.
 - Tests may `@testable import OmegaJournal` (the executable target) because the test target depends on both targets.
 
@@ -60,6 +64,8 @@ Rules:
   `saveEntry` (syncs both) or `syncTagsForEntry`.
 - The two stores use different separators (text column: comma; junction concat
   in reconcile: U+1F control char) so tag names containing commas survive.
+  Comma is still the text-column separator, so tag input must strip commas
+  (`EditorView.commitTag`, `JournalViewModel.bulkAddTag`).
 - Sidebar/filter tag counts are session-aware: `tagsWithCounts(includeHidden:)`
   excludes hidden entries' tags while the biometric session is locked. Every
   VM refresh goes through `JournalViewModel.refreshTagCounts()` — do not call

@@ -411,16 +411,25 @@ final class JournalViewModel: ObservableObject {
     }
 
     func stopEditing() {
-        // Discard entries that were never given any content.
-        if let e = editingEntry, e.title.isEmpty && e.body.isEmpty {
-            saveDebounce?.cancel()
-            db.hardDeleteEntry(id: e.id)
-            entries.removeAll { $0.id == e.id }
-            searchResults?.removeAll { $0.id == e.id }
-            archivedEntries.removeAll { $0.id == e.id }
-            trashedEntries.removeAll { $0.id == e.id }
-            hiddenEntries.removeAll { $0.id == e.id }
-            if selectedEntryId == e.id { selectedEntryId = nil }
+        // Fold any pending debounced autosave into the database BEFORE the
+        // editor tears down. EditorView's onDisappear flush can't do this —
+        // editingEntryId is already nil by the time it runs, so that flush used
+        // to be a no-op and the final keystrokes depended entirely on the
+        // debounce Task surviving a fast "type → Done → quit".
+        saveDebounce?.cancel()
+        if let e = editingEntry {
+            if e.title.isEmpty && e.body.isEmpty {
+                // Discard entries that were never given any content.
+                db.hardDeleteEntry(id: e.id)
+                entries.removeAll { $0.id == e.id }
+                searchResults?.removeAll { $0.id == e.id }
+                archivedEntries.removeAll { $0.id == e.id }
+                trashedEntries.removeAll { $0.id == e.id }
+                hiddenEntries.removeAll { $0.id == e.id }
+                if selectedEntryId == e.id { selectedEntryId = nil }
+            } else {
+                db.saveEntry(e)
+            }
         }
         editingEntryId = nil
         isZenMode = false
@@ -454,7 +463,18 @@ final class JournalViewModel: ObservableObject {
 
     // MARK: - Entry mutations
 
+    /// Immediate mutations must not race a pending debounced autosave: the
+    /// debounce holds a full entry snapshot captured before the mutation, and
+    /// letting it fire afterwards would silently revert pin/favorite/mood/
+    /// archive/hide state. Flush first so storage reflects what is on screen,
+    /// then apply the mutation on top.
+    private func flushBeforeImmediateMutation() {
+        saveDebounce?.cancel()
+        if let e = editingEntry { db.saveEntry(e) }
+    }
+
     func togglePin(_ entry: JournalEntry) {
+        flushBeforeImmediateMutation()
         var u = entry; u.isPinned.toggle(); u.updatedAt = Date()
         db.saveEntry(u)
         updateEntry(u)
@@ -462,6 +482,7 @@ final class JournalViewModel: ObservableObject {
     }
 
     func toggleFavorite(_ entry: JournalEntry) {
+        flushBeforeImmediateMutation()
         var u = entry; u.isFavorite.toggle(); u.updatedAt = Date()
         db.saveEntry(u)
         updateEntry(u)
@@ -469,6 +490,7 @@ final class JournalViewModel: ObservableObject {
     }
 
     func setMood(_ mood: Mood, for entry: JournalEntry) {
+        flushBeforeImmediateMutation()
         var u = entry; u.mood = mood; u.updatedAt = Date()
         db.saveEntry(u)
         updateEntry(u)
@@ -536,6 +558,7 @@ final class JournalViewModel: ObservableObject {
         // Archiving a trashed row would corrupt restore semantics (it would come
         // back pre-archived) and pollute the undo stack — refuse instead.
         guard !entry.isTrashed else { return }
+        flushBeforeImmediateMutation()
         let newValue = !entry.isArchived
         db.setArchived(id: entry.id, archived: newValue)
         if selectedEntryId == entry.id { selectedEntryId = nil }
@@ -558,6 +581,7 @@ final class JournalViewModel: ObservableObject {
     }
 
     private func applyHidden(_ entry: JournalEntry, hidden: Bool) {
+        flushBeforeImmediateMutation()
         db.setHidden(id: entry.id, hidden: hidden)
         // Close editor if hiding, but keep the entry selected so the card
         // stays visible (masked) in the list.
@@ -693,7 +717,8 @@ final class JournalViewModel: ObservableObject {
     }
 
     func bulkAddTag(_ tag: String) {
-        let trimmed = tag.trimmingCharacters(in: .whitespaces)
+        // Commas are the text-column separator — never allow them inside a tag.
+        let trimmed = tag.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
         guard !trimmed.isEmpty, !bulkSelection.isEmpty else { return }
         let ids = selectedIDs(in: nonTrashedEntries)
         guard !ids.isEmpty else {
@@ -1100,7 +1125,7 @@ final class JournalViewModel: ObservableObject {
                     isPinned: je.isPinned, isFavorite: je.isFavorite,
                     isArchived: je.isArchived ?? false,
                     deletedAt: je.deletedAt,
-                    isHidden: false,
+                    isHidden: je.isHidden ?? false,
                     attachments: []
                 )
                 db.saveEntry(entry)
