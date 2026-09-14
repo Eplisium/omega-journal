@@ -193,10 +193,16 @@ final class DatabaseManager {
     }
 
     private func setSchemaVersion(_ version: Int) {
-        guard let stmt = try? prepare("UPDATE schema_version SET version = ? WHERE id = 1;") else { return }
+        // A silent failure here would leave schema_version stale, so the next
+        // launch would re-run migrations against already-migrated data.
+        guard let stmt = try? prepare("UPDATE schema_version SET version = ? WHERE id = 1;") else {
+            fatalError("Could not prepare schema_version update — migration state is untrackable")
+        }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(version))
-        sqlite3_step(stmt)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            fatalError("Could not record schema version \(version): \(String(cString: sqlite3_errmsg(db)))")
+        }
     }
 
     /// V1: Base tables (entries + settings)
@@ -1032,14 +1038,22 @@ final class DatabaseManager {
         }
 
         let sql = "INSERT INTO attachments (id, entry_id, filename, mime_type, created_at) VALUES (?, ?, ?, ?, ?);"
-        guard let stmt = try? prepare(sql) else { return nil }
+        guard let stmt = try? prepare(sql) else {
+            try? FileManager.default.removeItem(atPath: dir)
+            return nil
+        }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
         bindText(stmt, index: 2, value: entryId)
         bindText(stmt, index: 3, value: filename)
         bindText(stmt, index: 4, value: mimeType)
         sqlite3_bind_double(stmt, 5, Date().timeIntervalSince1970)
-        sqlite3_step(stmt)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            print("Attachment insert failed: \(String(cString: sqlite3_errmsg(db)))")
+            // Don't leave an orphaned file behind for a row that doesn't exist.
+            try? FileManager.default.removeItem(atPath: dir)
+            return nil
+        }
 
         return Attachment(id: id, entryId: entryId, filename: filename, mimeType: mimeType, createdAt: Date())
     }
@@ -1072,7 +1086,10 @@ final class DatabaseManager {
         guard let stmt = try? prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
-        sqlite3_step(stmt)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            print("Attachment row delete failed: \(String(cString: sqlite3_errmsg(db)))")
+            return
+        }
     }
 
     /// One query for every attachment, grouped by entry — avoids N+1 when listing entries.
