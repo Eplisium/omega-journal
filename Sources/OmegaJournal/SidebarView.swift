@@ -93,7 +93,7 @@ struct SidebarView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("Omega Journal")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text("\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words")
                     .font(.system(size: 10))
@@ -136,9 +136,10 @@ struct SidebarView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(theme.cardColor.opacity(0.6))
         )
+        .hoverGlow(radius: 11, glow: 0.3, border: 0.35, lift: false)
         .padding(.bottom, 10)
     }
 

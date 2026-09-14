@@ -61,7 +61,13 @@ struct EntryListView: View {
     /// Grouped sections for the currently displayed set.
     private var sections: [JournalViewModel.EntrySection] {
         guard selection == .all || selection == nil else {
-            return displayed.isEmpty ? [] : [.init(title: selection?.title ?? "Entries", entries: displayed)]
+            // Pinned entries always lead, in every collection view.
+            let pinned = displayed.filter(\.isPinned)
+            let rest = displayed.filter { !$0.isPinned }
+            var result: [JournalViewModel.EntrySection] = []
+            if !pinned.isEmpty { result.append(.init(title: "Pinned", entries: pinned)) }
+            if !rest.isEmpty { result.append(.init(title: selection?.title ?? "Entries", entries: rest)) }
+            return displayed.isEmpty ? [] : result
         }
         let ids = Set(displayed.map(\.id))
         return vm.groupedEntries
@@ -260,23 +266,7 @@ struct EntryListView: View {
                 .buttonStyle(.plain)
                 .omegaTooltip("Filters")
 
-                Menu {
-                    ForEach(SortOrder.allCases) { order in
-                        Button {
-                            vm.setSortOrder(order)
-                        } label: {
-                            Label(order.rawValue, systemImage: vm.sortOrder == order ? "checkmark" : order.icon)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 10))
-                        .foregroundColor(theme.secondaryTextColor)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .omegaTooltip("Sort: \(vm.sortOrder.rawValue)")
+                sortSegmentedControl
 
                 Button {
                     withAnimation {
@@ -307,6 +297,36 @@ struct EntryListView: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 8)
+    }
+
+    // MARK: Segmented sort (Latest | Oldest | A–Z)
+
+    private var sortSegmentedControl: some View {
+        HStack(spacing: 2) {
+            segment("Latest", active: vm.sortOrder == .dateDesc) { vm.setSortOrder(.dateDesc) }
+            segment("Oldest", active: vm.sortOrder == .dateAsc) { vm.setSortOrder(.dateAsc) }
+            segment("A–Z", active: vm.sortOrder == .titleAsc) { vm.setSortOrder(.titleAsc) }
+        }
+        .padding(2)
+        .background(
+            Capsule().fill(theme.cardColor.opacity(0.7))
+        )
+        .overlay(Capsule().strokeBorder(theme.titleTextColor.opacity(0.08), lineWidth: 1))
+    }
+
+    private func segment(_ label: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 10, weight: active ? .semibold : .regular))
+                .foregroundColor(active ? .white : theme.secondaryTextColor)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3.5)
+                .background(
+                    Capsule().fill(active ? theme.accentColor : .clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .omegaTooltip(active ? "Sorted by \(label)" : "Sort by \(label)")
     }
 
     // MARK: Bulk action bar
@@ -566,10 +586,10 @@ private struct EntryRow: View {
                     .foregroundColor(isBulkSelected ? theme.accentColor : theme.secondaryTextColor.opacity(0.5))
             }
 
-            RoundedRectangle(cornerRadius: 2)
+            Circle()
                 .fill(entry.mood.color)
-                .frame(width: 3)
-                .opacity(isContentLocked ? 0.35 : 0.85)
+                .frame(width: 8, height: 8)
+                .opacity(isContentLocked ? 0.35 : 0.95)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -582,7 +602,7 @@ private struct EntryRow: View {
                             .foregroundColor(theme.accentColor.opacity(isContentLocked ? 0.9 : 0.7))
                     }
                     Text(entry.displayTitle)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor.opacity(isContentLocked ? 0.72 : 1))
                         .lineLimit(1)
                     Spacer(minLength: 2)
@@ -609,7 +629,7 @@ private struct EntryRow: View {
 
                 HStack(spacing: 6) {
                     Text(entry.mood.emoji).font(.system(size: 9))
-                    Text(isTrash ? trashLabel : entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    Text(isTrash ? trashLabel : entry.createdAt.formatted(date: .abbreviated, time: .shortened).replacingOccurrences(of: " AM", with: " AM"))
                         .font(.system(size: 9.5))
                         .foregroundColor(theme.secondaryTextColor.opacity(0.8))
                     if entry.wordCount > 0 {
@@ -639,13 +659,10 @@ private struct EntryRow: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(rowBackground)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(rowBorder, lineWidth: 1)
-        )
+        .hoverGlow(radius: 11, glow: 0.26, border: 0.4, lift: false)
         .opacity(isContentLocked ? 0.82 : 1)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -657,7 +674,12 @@ private struct EntryRow: View {
             if !isTrash && !isBulkSelecting { vm.startEditing(entry) }
         }
         .onTapGesture {
-            if isBulkSelecting { vm.toggleBulkSelection(entry.id) } else { vm.select(entry) }
+            if isBulkSelecting {
+                vm.toggleBulkSelection(entry.id)
+            } else {
+                // Clicking the selected entry closes it; clicking another opens it.
+                vm.toggleSelection(entry)
+            }
         }
         .contextMenu { contextMenu }
         .confirmationDialog(
@@ -702,7 +724,7 @@ private struct EntryRow: View {
     private var rowBorder: Color {
         if isSelected { return theme.accentColor.opacity(0.45) }
         if isContentLocked { return theme.accentColor.opacity(0.22) }
-        return .clear
+        return theme.titleTextColor.opacity(0.06)
     }
 
     @ViewBuilder

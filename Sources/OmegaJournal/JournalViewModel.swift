@@ -286,7 +286,9 @@ final class JournalViewModel: ObservableObject {
         let rest = filteredEntries.filter { !$0.isPinned }
 
         if !pinned.isEmpty {
-            buckets.append(("Pinned", -1, pinned))
+            // Rank must beat every other bucket — month buckets use
+            // 1000 - (year*12+month), which goes deeply negative for old dates.
+            buckets.append(("Pinned", Int.min, pinned))
         }
         for entry in rest {
             let (label, rank) = bucketIndex(for: entry.createdAt)

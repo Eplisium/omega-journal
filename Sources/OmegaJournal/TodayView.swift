@@ -22,6 +22,8 @@ struct TodayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 welcomeHeader
+                heroCard
+                statRow
                 writingPrompt
                 progressAndShortcuts
 
@@ -76,6 +78,114 @@ struct TodayView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Write a new journal entry")
         }
+    }
+
+    // MARK: Hero — today's entry
+
+    private var todaysEntry: JournalEntry? {
+        vm.entries
+            .filter { Calendar.current.isDate($0.createdAt, inSameDayAs: Date()) }
+            .max { $0.createdAt < $1.createdAt }
+    }
+
+    @ViewBuilder
+    private var heroCard: some View {
+        if let entry = todaysEntry {
+            Button { openEntry(entry) } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(entry.mood.color)
+                            .frame(width: 7, height: 7)
+                        Text("Today · \(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(theme.secondaryTextColor)
+                        Spacer()
+                        if !entry.tags.isEmpty {
+                            ForEach(entry.tags.prefix(2), id: \.self) { tag in
+                                Text("#\(tag)")
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .foregroundColor(theme.accentColor.opacity(0.9))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(theme.accentColor.opacity(0.14)))
+                            }
+                        }
+                    }
+
+                    Text("Today's entry")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(1.0)
+                        .foregroundColor(theme.secondaryTextColor)
+
+                    Text(entry.displayTitle)
+                        .font(.system(size: 22, weight: .semibold, design: .serif))
+                        .foregroundColor(theme.titleTextColor)
+                        .lineLimit(1)
+
+                    Text(entry.preview)
+                        .font(.system(size: 12.5))
+                        .foregroundColor(theme.bodyTextColor)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 10) {
+                        Label("Continue writing", systemImage: "pencil.line")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(theme.accentColor))
+                        Text("\(entry.wordCount) words")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(theme.secondaryTextColor)
+                        Spacer()
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(theme.cardColor.opacity(0.72))
+                )
+                .shadow(color: theme.accentColor.opacity(0.18), radius: 20, x: 0, y: 6)
+                .contentShape(Rectangle())
+                .hoverGlow(radius: 16, glow: 0.4, border: 0.55)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Continue today's entry: \(entry.displayTitle)")
+        }
+    }
+
+    // MARK: Stat cards
+
+    private var statRow: some View {
+        HStack(spacing: 14) {
+            statCard(value: "\(vm.entriesThisWeek)", label: "Entries this week", detail: "\(vm.writingStreak)-day streak")
+            statCard(value: vm.totalWordCount.formatted(), label: "Words written", detail: "\(vm.entries.count) entries total")
+            statCard(value: "\(vm.entriesThisMonth)", label: "This month", detail: "Keep the rhythm going")
+        }
+    }
+
+    private func statCard(value: String, label: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(value)
+                .font(.system(size: 24, weight: .bold, design: .serif))
+                .foregroundColor(theme.titleTextColor)
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(theme.bodyTextColor)
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundColor(theme.secondaryTextColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(theme.cardColor.opacity(0.5))
+        )
+        .hoverGlow(radius: 13, glow: 0.26, border: 0.3, lift: false)
     }
 
     private var writingPrompt: some View {
@@ -168,37 +278,67 @@ struct TodayView: View {
                     .foregroundColor(theme.accentColor)
             }
 
-            ForEach(recentEntries) { entry in
-                Button { openEntry(entry) } label: {
-                    HStack(spacing: 11) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(entry.mood.color)
-                            .frame(width: 3, height: 40)
-                        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(recentEntries) { entry in
+                    Button { openEntry(entry) } label: {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(entry.mood.color)
+                                    .frame(width: 7, height: 7)
+                                Text(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                                    .font(.system(size: 10))
+                                    .foregroundColor(theme.secondaryTextColor)
+                                Spacer(minLength: 4)
+                                if entry.isFavorite {
+                                    Image(systemName: "star.fill")
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.yellow)
+                                }
+                            }
+
                             Text(entry.displayTitle)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold, design: .serif))
                                 .foregroundColor(theme.titleTextColor)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+
                             Text(entry.preview)
                                 .font(.system(size: 11))
                                 .foregroundColor(theme.secondaryTextColor)
-                                .lineLimit(1)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                                .frame(minHeight: 42, alignment: .top)
+
+                            Spacer(minLength: 0)
+
+                            HStack(spacing: 4) {
+                                ForEach(entry.tags.prefix(2), id: \.self) { tag in
+                                    Text("#\(tag)")
+                                        .font(.system(size: 8.5, weight: .medium))
+                                        .foregroundColor(theme.accentColor.opacity(0.9))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+                                }
+                                Spacer(minLength: 2)
+                                Text("\(entry.wordCount)w")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(theme.secondaryTextColor.opacity(0.6))
+                            }
                         }
-                        Spacer(minLength: 8)
-                        Text(entry.createdAt.formatted(.relative(presentation: .named)))
-                            .font(.system(size: 10))
-                            .foregroundColor(theme.secondaryTextColor)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(theme.secondaryTextColor.opacity(0.6))
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .fill(theme.cardColor.opacity(0.5))
+                        )
+                        .contentShape(Rectangle())
+                        .hoverGlow(radius: 13, glow: 0.3, border: 0.4)
                     }
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(theme.cardColor.opacity(0.34)))
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open \(entry.displayTitle)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open \(entry.displayTitle)")
             }
         }
     }
