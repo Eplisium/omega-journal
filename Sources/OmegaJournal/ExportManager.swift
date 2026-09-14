@@ -140,30 +140,4 @@ enum ExportManager {
         return result
     }
 
-    // MARK: - Show Export Panel
-
-    static func showExportPanel(
-        title: String,
-        filename: String,
-        contentType: UTType,
-        export: @escaping (URL) throws -> Void
-    ) -> String {
-        let panel = NSSavePanel()
-        panel.title = title
-        panel.allowedContentTypes = [contentType]
-        panel.nameFieldStringValue = filename
-        panel.canCreateDirectories = true
-
-        var message = ""
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                try export(url)
-                message = "Exported to \(url.lastPathComponent)"
-            } catch {
-                message = "Export failed: \(error.localizedDescription)"
-            }
-        }
-        return message
-    }
 }

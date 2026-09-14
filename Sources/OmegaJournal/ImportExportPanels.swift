@@ -16,6 +16,10 @@ enum ImportExportPanels {
     static func exportMarkdown(vm: JournalViewModel) {
         Task {
             let entries = await entriesForExport(vm: vm)
+            guard !entries.isEmpty else {
+                vm.showToast("Nothing to export — the journal is empty", isError: true)
+                return
+            }
             save(vm: vm, suggested: "OmegaJournal-\(stamp()).md", type: .plainText) { url in
                 try ExportManager.exportMarkdown(entries, to: url)
             }
@@ -25,6 +29,10 @@ enum ImportExportPanels {
     static func exportJSON(vm: JournalViewModel) {
         Task {
             let entries = await entriesForExport(vm: vm)
+            guard !entries.isEmpty else {
+                vm.showToast("Nothing to export — the journal is empty", isError: true)
+                return
+            }
             save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json) { url in
                 try ExportManager.exportJSON(entries, to: url)
             }
@@ -81,10 +89,12 @@ enum ImportExportPanels {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return } // cancelled — no toast
         do {
             try write(url)
             vm.showToast("Exported to \(url.lastPathComponent)")
+        } catch let error as CocoaError where error.code == .fileWriteNoPermission {
+            vm.showToast("Export failed: “\(url.deletingLastPathComponent().lastPathComponent)” is not writable. Try your Documents or Desktop folder.", isError: true)
         } catch {
             vm.showToast("Export failed: \(error.localizedDescription)", isError: true)
         }
