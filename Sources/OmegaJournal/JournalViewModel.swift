@@ -105,10 +105,18 @@ final class JournalViewModel: ObservableObject {
     // MARK: - Loading
 
     func reload() {
-        entries = db.fetchAllEntries(search: "", sort: sortOrder, scope: .active)
-        trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
-        archivedEntries = db.fetchAllEntries(sort: sortOrder, scope: .archived)
-        hiddenEntries = db.fetchAllEntries(sort: .dateDesc, scope: .hidden)
+        // One shared attachments/tags scan for all four scopes (was 8 full-table
+        // scans per reload) plus the single tagsWithCounts query below.
+        let scopes = db.fetchScopes([
+            (.active, sortOrder),
+            (.trashed, .dateDesc),
+            (.archived, sortOrder),
+            (.hidden, .dateDesc),
+        ])
+        entries = scopes[.active] ?? []
+        trashedEntries = scopes[.trashed] ?? []
+        archivedEntries = scopes[.archived] ?? []
+        hiddenEntries = scopes[.hidden] ?? []
         // While the biometric session is locked, hidden entries must not
         // advertise their tags in the sidebar/filter chips.
         allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)

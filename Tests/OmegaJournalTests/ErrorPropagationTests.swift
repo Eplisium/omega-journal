@@ -173,3 +173,47 @@ private extension JSONDecoder {
         return d
     }()
 }
+
+/// Audit item P1 — fetchScopes must return exactly what per-scope
+/// fetchAllEntries calls return, so the batched reload path can't drift.
+@Suite("Fetch scopes equivalence", .serialized)
+struct FetchScopesEquivalenceTests {
+    @MainActor
+    @Test("fetchScopes matches per-scope fetchAllEntries for every lifecycle state")
+    func fetchScopesMatchesPerScopeFetches() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("omega-scopes-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
+        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        let db = DatabaseManager.shared
+
+        var active = JournalEntry.new()
+        active.title = "Active"
+        active.tags = ["shared"]
+        var archived = JournalEntry.new()
+        archived.title = "Archived"
+        archived.isArchived = true
+        var trashed = JournalEntry.new()
+        trashed.title = "Trashed"
+        trashed.deletedAt = Date()
+        var hidden = JournalEntry.new()
+        hidden.title = "Hidden"
+        hidden.isHidden = true
+        for e in [active, archived, trashed, hidden] { db.saveEntry(e) }
+
+        let requests: [(scope: DatabaseManager.EntryScope, sort: OmegaJournal.SortOrder)] = [
+            (.active, .dateDesc), (.trashed, .dateDesc),
+            (.archived, .dateDesc), (.hidden, .dateDesc),
+        ]
+        let batched = db.fetchScopes(requests)
+        for request in requests {
+            let individual = db.fetchAllEntries(sort: request.sort, scope: request.scope)
+            #expect(batched[request.scope]?.map(\.id) == individual.map(\.id))
+            #expect(batched[request.scope]?.map { $0.tags } == individual.map { $0.tags })
+        }
+
+        // Cleanup.
+        for e in [active, archived, trashed, hidden] { db.hardDeleteEntry(id: e.id) }
+    }
+}

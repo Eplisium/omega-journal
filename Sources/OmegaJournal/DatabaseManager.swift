@@ -656,6 +656,25 @@ final class DatabaseManager {
         return collectEntries(stmt)
     }
 
+    /// Fetches several scopes in one pass, sharing a single attachments/tags
+    /// scan across all of them (reload() used to pay 2 full-table scans per
+    /// scope × 4 scopes). Results are keyed by the requested scope.
+    func fetchScopes(_ requests: [(scope: EntryScope, sort: SortOrder)]) -> [EntryScope: [JournalEntry]] {
+        let attachments = allAttachmentsByEntry()
+        let tags = allTagsByEntry()
+        var result: [EntryScope: [JournalEntry]] = [:]
+        result.reserveCapacity(requests.count)
+        for request in requests {
+            let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeClause(request.scope)) \(orderClause(request.sort));"
+            guard let stmt = try? prepare(sql) else {
+                result[request.scope] = []
+                continue
+            }
+            result[request.scope] = collectEntries(stmt, preloaded: (attachments, tags))
+        }
+        return result
+    }
+
     func fullTextSearch(_ query: String, scope: EntryScope = .active) -> [JournalEntry] {
         guard let ftsQuery = sanitizeFTSQuery(query) else { return [] }
         let sql = """
@@ -686,17 +705,22 @@ final class DatabaseManager {
         return nil
     }
 
-    private func collectEntries(_ stmt: OpaquePointer?) -> [JournalEntry] {
+    private func collectEntries(
+        _ stmt: OpaquePointer?,
+        preloaded: (attachments: [String: [Attachment]], tags: [String: [String]])? = nil
+    ) -> [JournalEntry] {
         defer { sqlite3_finalize(stmt) }
         var entries: [JournalEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             entries.append(rowToEntry(stmt))
         }
-        // Attach attachments in one pass rather than N queries.
-        let attachmentsByEntry = allAttachmentsByEntry()
+        // Attach attachments in one pass rather than N queries. Callers that
+        // fetch several scopes in a row can share one preloaded pair of maps
+        // instead of re-scanning the attachments/tags tables per scope.
+        let attachmentsByEntry = preloaded?.attachments ?? allAttachmentsByEntry()
         // Attach tags in one pass too — rowToEntry falls back to the text column,
         // so this batched lookup replaces it with the junction-table source of truth.
-        let tagsByEntry = allTagsByEntry()
+        let tagsByEntry = preloaded?.tags ?? allTagsByEntry()
         for i in entries.indices {
             entries[i].attachments = attachmentsByEntry[entries[i].id] ?? []
             if let tags = tagsByEntry[entries[i].id], !tags.isEmpty {
@@ -1262,8 +1286,8 @@ final class DatabaseManager {
     /// included) plus everything currently in the trash, so backups round-trip
     /// the complete lifecycle state.
     func fetchAllEntriesForExport() -> [JournalEntry] {
-        fetchAllEntries(sort: .dateDesc, scope: .all)
-            + fetchAllEntries(sort: .dateDesc, scope: .trashed)
+        let scopes = fetchScopes([(.all, .dateDesc), (.trashed, .dateDesc)])
+        return (scopes[.all] ?? []) + (scopes[.trashed] ?? [])
     }
 
     var databasePath: String { dbPath }
