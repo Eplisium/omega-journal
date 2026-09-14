@@ -16,9 +16,53 @@ enum SQLiteError: Error, LocalizedError {
 final class DatabaseManager {
     static let shared = DatabaseManager()
 
+    /// Hook the app layer uses to surface write failures to the user. Called on
+    /// the main actor with a human-readable message. Failures that occur before
+    /// an app layer exists (migrations at first launch) are buffered and
+    /// flushed to the first handler that is installed.
+    var onError: ((String) -> Void)? {
+        didSet {
+            guard onError != nil, !pendingErrors.isEmpty else { return }
+            let buffered = pendingErrors
+            pendingErrors.removeAll()
+            buffered.forEach(onError!)
+        }
+    }
+    private var pendingErrors: [String] = []
+
+    /// Reports a failed write. Reporting never changes control flow — inside a
+    /// transaction the failure is also flagged for rollback; outside one the
+    /// swallow-and-continue behaviour that tests rely on is preserved.
+    func reportError(_ message: String) {
+        print("OmegaJournal: \(message)")
+        if let onError {
+            onError(message)
+        } else {
+            // Keep only the most recent few; nothing is listening yet.
+            pendingErrors.append(message)
+            if pendingErrors.count > 5 { pendingErrors.removeFirst(pendingErrors.count - 5) }
+        }
+    }
+
+    /// Runs one UPDATE-style statement with bound parameters, checking the
+    /// step result and reporting failures. Returns whether the write landed.
+    private func execChecked(_ sql: String, context: String, bind: (OpaquePointer?) -> Void) -> Bool {
+        guard let stmt = try? prepare(sql) else {
+            reportError("\(context) failed to prepare")
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt)
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            reportError("\(context): \(String(cString: sqlite3_errmsg(db)))")
+            return false
+        }
+        return true
+    }
+
     private var db: OpaquePointer?
-    private let dbPath: String
-    private let attachmentsDir: String
+    private var dbPath: String
+    private var attachmentsDir: String
 
     // Current schema version — bump when adding migrations
     private static let currentSchemaVersion = 7
@@ -68,7 +112,7 @@ final class DatabaseManager {
         if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {
             let msg = err.map { String(cString: $0) } ?? "unknown"
             sqlite3_free(err)
-            print("SQLite exec error: \(msg)")
+            reportError("SQLite exec error: \(msg)")
             flagTransactionFailure()
             return false
         }
@@ -143,6 +187,29 @@ final class DatabaseManager {
             transactionFailed = false
         }
     }
+
+    // MARK: - Test hooks
+
+    // The error-propagation tests need to make real writes fail. Renaming the
+    // table makes every statement referencing it a prepare error while keeping
+    // ALL data intact — unlike DROP COLUMN, which would destroy column values
+    // other concurrently-running test suites may still be reading. Must always
+    // be paired with `restoreTableForTesting` before the test returns.
+    #if DEBUG
+    func sabotageTableForTesting(_ table: String) {
+        exec("ALTER TABLE \(table) RENAME TO \(table)_sabotaged;")
+    }
+
+    func restoreTableForTesting(_ table: String) {
+        exec("ALTER TABLE \(table)_sabotaged RENAME TO \(table);")
+    }
+
+    var attachmentsDirectoryForTesting: String { attachmentsDir }
+
+    func setAttachmentsDirectoryForTesting(_ path: String) {
+        attachmentsDir = path
+    }
+    #endif
 
     // MARK: - Migrations
 
@@ -450,7 +517,13 @@ final class DatabaseManager {
         // the backup actually succeeded, so a failed attempt (unwritable disk,
         // I/O error) is retried on the next launch instead of being skipped
         // until tomorrow.
-        guard lastBackup != today, backupDatabase() != nil else { return }
+        guard lastBackup != today else { return }
+        guard backupDatabase() != nil else {
+            // Failed attempts retry on the next launch; the user should know
+            // today's backup didn't happen.
+            reportError("Automatic backup failed — will retry on next launch")
+            return
+        }
         setSetting("lastBackupDate", value: today)
     }
 
@@ -687,7 +760,11 @@ final class DatabaseManager {
             is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
             word_count=excluded.word_count, is_hidden=excluded.is_hidden;
         """
-        guard let stmt = try? prepare(sql) else { return }
+        guard let stmt = try? prepare(sql) else {
+            reportError("Save failed to prepare: \(String(cString: sqlite3_errmsg(db)))")
+            flagTransactionFailure()
+            return
+        }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: entry.id)
         bindText(stmt, index: 2, value: entry.title)
@@ -708,7 +785,7 @@ final class DatabaseManager {
         sqlite3_bind_int(stmt, 13, entry.isHidden ? 1 : 0)
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
-            print("Save failed: \(msg)")
+            reportError("Save failed: \(msg)")
             // Nothing (row, tags, FTS) should survive a failed upsert.
             flagTransactionFailure()
         }
@@ -719,35 +796,31 @@ final class DatabaseManager {
 
     /// Moves an entry to the trash. Recoverable for `trashRetentionDays`.
     func trashEntry(id: String) {
-        guard let stmt = try? prepare("UPDATE entries SET deleted_at = ? WHERE id = ?;") else { return }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
-        bindText(stmt, index: 2, value: id)
-        sqlite3_step(stmt)
+        execChecked("UPDATE entries SET deleted_at = ? WHERE id = ?;", context: "Move to trash failed") { stmt in
+            sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+            bindText(stmt, index: 2, value: id)
+        }
     }
 
     /// Pulls an entry back out of the trash.
     func restoreEntry(id: String) {
-        guard let stmt = try? prepare("UPDATE entries SET deleted_at = NULL WHERE id = ?;") else { return }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: id)
-        sqlite3_step(stmt)
+        execChecked("UPDATE entries SET deleted_at = NULL WHERE id = ?;", context: "Restore failed") { stmt in
+            bindText(stmt, index: 1, value: id)
+        }
     }
 
     func setArchived(id: String, archived: Bool) {
-        guard let stmt = try? prepare("UPDATE entries SET is_archived = ? WHERE id = ?;") else { return }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, archived ? 1 : 0)
-        bindText(stmt, index: 2, value: id)
-        sqlite3_step(stmt)
+        execChecked("UPDATE entries SET is_archived = ? WHERE id = ?;", context: "Archive failed") { stmt in
+            sqlite3_bind_int(stmt, 1, archived ? 1 : 0)
+            bindText(stmt, index: 2, value: id)
+        }
     }
 
     func setHidden(id: String, hidden: Bool) {
-        guard let stmt = try? prepare("UPDATE entries SET is_hidden = ? WHERE id = ?;") else { return }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, hidden ? 1 : 0)
-        bindText(stmt, index: 2, value: id)
-        sqlite3_step(stmt)
+        execChecked("UPDATE entries SET is_hidden = ? WHERE id = ?;", context: "Hide failed") { stmt in
+            sqlite3_bind_int(stmt, 1, hidden ? 1 : 0)
+            bindText(stmt, index: 2, value: id)
+        }
     }
 
     /// Irreversibly removes an entry, its attachments and its search index rows.
@@ -758,15 +831,11 @@ final class DatabaseManager {
         for attachment in fetchAttachments(entryId: id) {
             deleteAttachment(id: attachment.id)
         }
-        if let stmt = try? prepare("DELETE FROM entries WHERE id = ?;") {
-            defer { sqlite3_finalize(stmt) }
+        execChecked("DELETE FROM entries WHERE id = ?;", context: "Delete entry failed") { stmt in
             bindText(stmt, index: 1, value: id)
-            sqlite3_step(stmt)
         }
-        if let ftsStmt = try? prepare("DELETE FROM entries_fts WHERE entry_id = ?;") {
-            defer { sqlite3_finalize(ftsStmt) }
-            bindText(ftsStmt, index: 1, value: id)
-            sqlite3_step(ftsStmt)
+        execChecked("DELETE FROM entries_fts WHERE entry_id = ?;", context: "Delete entry search index failed") { stmt in
+            bindText(stmt, index: 1, value: id)
         }
     }
 

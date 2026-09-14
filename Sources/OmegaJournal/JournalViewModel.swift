@@ -79,6 +79,12 @@ final class JournalViewModel: ObservableObject {
     }
 
     init() {
+        // Surface database write failures that used to be swallowed. The
+        // reporter is installed before reload() so launch-time failures
+        // (migration, reconciliation) still reach the user.
+        db.onError = { [weak self] message in
+            self?.showToast(message, isError: true)
+        }
         reload()
         loadTemplates()
         // Lock/unlock changes which tags may appear in the sidebar, so
