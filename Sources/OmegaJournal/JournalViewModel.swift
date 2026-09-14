@@ -396,6 +396,7 @@ final class JournalViewModel: ObservableObject {
     }
 
     /// Re-masks every hidden entry. Safe to call from a walk-by — no auth required.
+    /// Also fires from the idle-relock timer in BiometricAuth.
     func lockHiddenEntries() {
         guard BiometricAuth.shared.isAuthenticated else { return }
         flushPendingSave()
@@ -404,6 +405,9 @@ final class JournalViewModel: ObservableObject {
         }
         BiometricAuth.shared.lock()
         showToast("Hidden entries locked")
+        // Tag counts must re-derive immediately: the locked sidebar must not
+        // advertise tags used on hidden entries (privacy rule in AGENTS.md).
+        refreshTagCounts()
     }
 
     // MARK: - Selection & editing
