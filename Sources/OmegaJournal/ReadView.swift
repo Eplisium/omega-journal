@@ -263,7 +263,7 @@ struct ReadView: View {
 
             ForEach(entry.attachments) { attachment in
                 HStack(spacing: 9) {
-                    if attachment.isImage, let image = NSImage(contentsOf: attachment.fileURL) {
+                    if attachment.isImage, let data = vm.db.readAttachmentData(attachment), let image = NSImage(data: data) {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -287,7 +287,13 @@ struct ReadView: View {
                     }
                     Spacer()
                     Button {
-                        NSWorkspace.shared.open(attachment.fileURL)
+                        // Attachments are encrypted at rest; decrypt to a
+                        // transient temp file for the external app.
+                        if let tempURL = vm.db.openAttachmentExternally(attachment) {
+                            NSWorkspace.shared.open(tempURL)
+                        } else {
+                            vm.showToast("Couldn't open attachment", isError: true)
+                        }
                     } label: {
                         Image(systemName: "arrow.up.forward.square")
                             .font(.system(size: 12))

@@ -65,7 +65,7 @@ final class DatabaseManager {
     private var attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    private static let currentSchemaVersion = 7
+    private static let currentSchemaVersion = 8
 
     /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
     static let trashRetentionDays = 30
@@ -131,6 +131,20 @@ final class DatabaseManager {
     private func bindText(_ stmt: OpaquePointer?, index: Int32, value: String) {
         let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
+    }
+
+    private func bindBlob(_ stmt: OpaquePointer?, index: Int32, value: Data) {
+        let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        let bound = value.withUnsafeBytes { raw in sqlite3_bind_blob(stmt, index, raw.baseAddress, Int32(raw.count), SQLITE_TRANSIENT) }
+        if bound != SQLITE_OK {
+            reportError("Blob bind failed: \(String(cString: sqlite3_errmsg(db)))")
+        }
+    }
+
+    private func blobAt(_ stmt: OpaquePointer?, index: Int32) -> Data? {
+        guard sqlite3_column_type(stmt, index) != SQLITE_NULL else { return nil }
+        guard let bytes = sqlite3_column_blob(stmt, index) else { return nil }
+        return Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, index)))
     }
 
     /// Runs a one-shot statement with the given text parameters bound left-to-right
@@ -204,6 +218,26 @@ final class DatabaseManager {
         exec("ALTER TABLE \(table)_sabotaged RENAME TO \(table);")
     }
 
+    /// Re-writes a body as legacy plaintext (NULL body_enc) to simulate a
+    /// pre-V8 row; the normal save path then re-encrypts it on next write.
+    /// Used by EncryptionAtRestTests to exercise the upgrade path.
+    func legacyPlaintextForTesting(id: String, body: String) {
+        execChecked("UPDATE entries SET body = ?, body_enc = NULL WHERE id = ?;", context: "Legacy plaintext write failed") { stmt in
+            bindText(stmt, index: 1, value: body)
+            bindText(stmt, index: 2, value: id)
+        }
+    }
+
+    /// Flushes the WAL into the main DB file so tests can assert on the
+    /// on-disk bytes (WAL otherwise buffers recent writes).
+    func checkpointForTesting() {
+        exec("PRAGMA wal_checkpoint(TRUNCATE);")
+    }
+
+    func vacuumForTesting() {
+        exec("VACUUM;")
+    }
+
     var attachmentsDirectoryForTesting: String { attachmentsDir }
 
     func setAttachmentsDirectoryForTesting(_ path: String) {
@@ -247,6 +281,9 @@ final class DatabaseManager {
         }
         if current < 7 {
             migrateToV7()
+        }
+        if current < 8 {
+            migrateToV8()
         }
     }
 
@@ -341,7 +378,7 @@ final class DatabaseManager {
         // Populate FTS from existing entries
         exec("""
             INSERT INTO entries_fts(entry_id, title, body, tags)
-            SELECT id, title, body, tags FROM entries;
+            SELECT id, title, '', tags FROM entries;
         """)
         setSchemaVersion(3)
     }
@@ -409,6 +446,56 @@ final class DatabaseManager {
         exec("ALTER TABLE entries ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;")
         exec("CREATE INDEX IF NOT EXISTS idx_entries_hidden ON entries(is_hidden);")
         setSchemaVersion(7)
+    }
+
+    /// V8: Encrypt entry bodies at rest. Adds `body_enc` (AES-GCM blob);
+    /// plaintext `body` is migrated to it and then blanked, so the SQLite
+    /// file and its auto-backups no longer carry journal text. FTS and LIKE
+    /// can no longer see bodies — search re-adds decrypted-body matching in
+    /// Swift (see fetchAllEntries/fetchScopes). Idempotent: blank bodies are
+    /// skipped, so a re-run never double-encrypts.
+    private func migrateToV8() {
+        exec("ALTER TABLE entries ADD COLUMN body_enc BLOB;")
+        encryptPendingBodies()
+        setSchemaVersion(8)
+        // The pre-migration plaintext pages stay in the file as free space
+        // after the UPDATEs — VACUUM rewrites the database so the old bodies
+        // are physically gone, not just logically.
+        exec("VACUUM;")
+    }
+
+    /// Encrypts every entry whose `body_enc` is NULL and whose plaintext
+    /// `body` is non-empty, then clears the plaintext column. Runs inside the
+    /// V8 migration and can be re-invoked (encryption upgrade path).
+    private func encryptPendingBodies() {
+        beginTransaction()
+        defer { endTransaction() }
+        guard let stmt = try? prepare("SELECT id, body FROM entries WHERE body_enc IS NULL AND body != '';"),
+              let upd = try? prepare("UPDATE entries SET body_enc = ?, body = '' WHERE id = ?;")
+        else {
+            reportError("Body encryption migration could not prepare")
+            return
+        }
+        defer { sqlite3_finalize(stmt); sqlite3_finalize(upd) }
+        var pairs: [(id: String, sealed: Data)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(stmt, 0))
+            let body = String(cString: sqlite3_column_text(stmt, 1))
+            guard let sealed = try? JournalCrypto.encryptString(body) else {
+                reportError("Could not encrypt body for entry \(id) — plaintext kept")
+                continue
+            }
+            pairs.append((id, sealed))
+        }
+        for pair in pairs {
+            sqlite3_reset(upd)
+            bindBlob(upd, index: 1, value: pair.sealed)
+            bindText(upd, index: 2, value: pair.id)
+            if sqlite3_step(upd) != SQLITE_DONE {
+                reportError("Body encryption update failed for \(pair.id)")
+                flagTransactionFailure()
+            }
+        }
     }
 
     // MARK: - Tag storage reconciliation
@@ -539,26 +626,36 @@ final class DatabaseManager {
         try? FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
         let filename = "omega_journal_\(formatter.string(from: Date())).sqlite3"
         let backupURL = backupDir.appendingPathComponent(filename)
+        try? FileManager.default.removeItem(at: backupURL) // VACUUM INTO requires a fresh target
 
-        // Use SQLite backup API for safe hot backup
-        var backupDb: OpaquePointer?
-        guard sqlite3_open(backupURL.path, &backupDb) == SQLITE_OK else { return nil }
-        defer { sqlite3_close(backupDb) }
-
-        let backup = sqlite3_backup_init(backupDb, "main", db, "main")
-        guard backup != nil else { return nil }
-        defer { sqlite3_backup_finish(backup) }
-
-        let rc = sqlite3_backup_step(backup, -1)
-        if rc == SQLITE_DONE {
-            // Clean up old backups (keep last 7)
-            cleanupOldBackups(in: backupDir, keep: 7)
-            return backupURL
+        // VACUUM INTO produces a clean hot snapshot (and compacts away freed
+        // pages, so pre-encryption plaintext doesn't ride along in backup
+        // files). Requires no active transaction and the target must not exist
+        // — the timestamped filename guarantees that.
+        let escapedPath = backupURL.path.replacingOccurrences(of: "'", with: "''")
+        guard exec("VACUUM INTO '\(escapedPath)';") else {
+            reportError("Backup failed: VACUUM INTO could not run")
+            try? FileManager.default.removeItem(at: backupURL)
+            return nil
         }
-        return nil
+
+        // Seal the backup file: the hot copy would otherwise be a plaintext
+        // snapshot of the database sitting beside the (body-encrypted) live DB.
+        do {
+            let plain = try Data(contentsOf: backupURL)
+            try JournalCrypto.writeEncrypted(plain, to: backupURL)
+        } catch {
+            reportError("Backup encryption failed — removing partial backup: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: backupURL)
+            return nil
+        }
+
+        // Clean up old backups (keep last 7)
+        cleanupOldBackups(in: backupDir, keep: 7)
+        return backupURL
     }
 
     private func cleanupOldBackups(in directory: URL, keep count: Int) {
@@ -585,8 +682,10 @@ final class DatabaseManager {
         case hidden     // hidden entries only (sidebar filter)
     }
 
+    // Column 2 is `body_enc` (the AES-GCM blob) since V8 — rowToEntry
+    // decrypts it. The legacy `body` text column is always empty on disk.
     private static let entryColumns =
-        "e.id, e.title, e.body, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden"
+        "e.id, e.title, e.body_enc, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden"
 
     private func scopeClause(_ scope: EntryScope) -> String {
         switch scope {
@@ -642,18 +741,36 @@ final class DatabaseManager {
             }
         }
 
+        // Bodies are ciphertext on disk, so LIKE only covers title/tags here;
+        // `decryptBodyMatches` re-adds decrypted-body matching in Swift.
         let likeSQL = """
             SELECT \(Self.entryColumns)
             FROM entries e
-            WHERE (e.title LIKE ? OR e.body LIKE ? OR e.tags LIKE ?) AND \(scopeSQL)
+            WHERE (e.title LIKE ? OR e.tags LIKE ?) AND \(scopeSQL)
             \(orderBy);
         """
         guard let stmt = try? prepare(likeSQL) else { return [] }
         let pattern = "%\(search)%"
         bindText(stmt, index: 1, value: pattern)
         bindText(stmt, index: 2, value: pattern)
-        bindText(stmt, index: 3, value: pattern)
-        return collectEntries(stmt)
+        let likeResults = collectEntries(stmt)
+        if !likeResults.isEmpty {
+            return decryptBodyMatches(likeResults, query: search)
+        }
+        // Title/tags didn't match — the hit may live in an encrypted body.
+        // Scan the scope and filter on decrypted bodies in Swift.
+        let allSQL = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeSQL) \(orderBy);"
+        guard let allStmt = try? prepare(allSQL) else { return [] }
+        return decryptBodyMatches(collectEntries(allStmt), query: search)
+    }
+
+    /// Since V8, SQL can no longer see body text (it's ciphertext), so body
+    /// matching happens here on the decrypted rows. Case-insensitive
+    /// substring, mirroring the old LIKE behaviour.
+    private func decryptBodyMatches(_ entries: [JournalEntry], query: String) -> [JournalEntry] {
+        let q = query.lowercased()
+        guard !q.isEmpty else { return entries }
+        return entries.filter { $0.body.lowercased().contains(q) }
     }
 
     /// Fetches several scopes in one pass, sharing a single attachments/tags
@@ -733,7 +850,15 @@ final class DatabaseManager {
     private func rowToEntry(_ stmt: OpaquePointer?) -> JournalEntry {
         let id = String(cString: sqlite3_column_text(stmt, 0))
         let title = String(cString: sqlite3_column_text(stmt, 1))
-        let body = String(cString: sqlite3_column_text(stmt, 2))
+        // V8: the body is the AES-GCM blob in column 2 (`body_enc`); the
+        // legacy plaintext column is always ''. A failed decryption surfaces
+        // as an empty body rather than a crash — matching a corrupted row.
+        let body: String
+        if let sealed = blobAt(stmt, index: 2) {
+            body = (try? JournalCrypto.decryptString(sealed)) ?? ""
+        } else {
+            body = ""
+        }
         let mood = sqlite3_column_int(stmt, 3)
         let tagsStr = String(cString: sqlite3_column_text(stmt, 4))
         let createdAt = sqlite3_column_double(stmt, 5)
@@ -774,11 +899,16 @@ final class DatabaseManager {
         defer { endTransaction() }
 
         let wordCount = entry.body.isEmpty ? 0 : entry.body.split(whereSeparator: { $0.isWhitespace }).count
+        // Bodies are encrypted at rest (V8): the `body` column stays empty on
+        // disk, the ciphertext lives in `body_enc`. FTS still indexes the
+        // plaintext so search keeps working — the FTS table is part of the
+        // encrypted story being "bodies not recoverable from the DB file";
+        // see rebuildFTS for the residual-surface note.
         let sql = """
-        INSERT INTO entries (id, title, body, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
+        INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-            title=excluded.title, body=excluded.body, mood=excluded.mood,
+            title=excluded.title, body='', body_enc=excluded.body_enc, mood=excluded.mood,
             tags=excluded.tags, updated_at=excluded.updated_at,
             is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
             is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
@@ -790,9 +920,20 @@ final class DatabaseManager {
             return
         }
         defer { sqlite3_finalize(stmt) }
+        let sealedBody: Data
+        do {
+            sealedBody = try JournalCrypto.encryptString(entry.body)
+        } catch {
+            reportError("Could not encrypt entry body — save aborted: \(error.localizedDescription)")
+            flagTransactionFailure()
+            return
+        }
+        // Placeholders follow column order: id, title, body_enc, mood, tags,
+        // created_at, updated_at, is_pinned, is_favorite, is_archived,
+        // deleted_at, word_count, is_hidden (1…13).
         bindText(stmt, index: 1, value: entry.id)
         bindText(stmt, index: 2, value: entry.title)
-        bindText(stmt, index: 3, value: entry.body)
+        bindBlob(stmt, index: 3, value: sealedBody)
         sqlite3_bind_int(stmt, 4, Int32(entry.mood.rawValue))
         bindText(stmt, index: 5, value: entry.tags.joined(separator: ","))
         sqlite3_bind_double(stmt, 6, entry.createdAt.timeIntervalSince1970)
@@ -911,13 +1052,14 @@ final class DatabaseManager {
             bindText(delStmt, index: 1, value: entry.id)
             sqlite3_step(delStmt)
         }
-        let insSQL = "INSERT INTO entries_fts(entry_id, title, body, tags) VALUES (?, ?, ?, ?);"
+        // FTS stores only title/tags — indexing body would put plaintext back
+        // on disk. Body search is handled by decryptBodyMatches in Swift.
+        let insSQL = "INSERT INTO entries_fts(entry_id, title, body, tags) VALUES (?, '', ?, ?);"
         guard let insStmt = try? prepare(insSQL) else { return }
         defer { sqlite3_finalize(insStmt) }
         bindText(insStmt, index: 1, value: entry.id)
         bindText(insStmt, index: 2, value: entry.title)
-        bindText(insStmt, index: 3, value: entry.body)
-        bindText(insStmt, index: 4, value: entry.tags.joined(separator: ","))
+        bindText(insStmt, index: 3, value: entry.tags.joined(separator: ","))
         sqlite3_step(insStmt)
     }
 
@@ -1106,27 +1248,73 @@ final class DatabaseManager {
 
     /// Rebuilds the FTS index inside a transaction — the delete+insert pair must
     /// never be observed half-applied.
+
+
+    /// Rebuilds the FTS index inside a transaction — the delete+insert pair
+    /// must never be observed half-applied. Since V8 the `entries` table no
+    /// longer stores plaintext bodies, so the index is fed from decrypted
+    /// bodies in Swift.
     private func rebuildFTS() {
         beginTransaction()
         defer { endTransaction() }
         exec("DELETE FROM entries_fts;")
-        exec("""
-            INSERT INTO entries_fts(entry_id, title, body, tags)
-            SELECT id, title, body, tags FROM entries;
-        """)
+        guard let stmt = try? prepare("SELECT id, title, tags, body_enc FROM entries;") else {
+            reportError("FTS rebuild could not read entries")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard let insert = try? prepare("INSERT INTO entries_fts(entry_id, title, body, tags) VALUES (?, '', ?, ?);") else {
+            reportError("FTS rebuild could not prepare insert")
+            return
+        }
+        defer { sqlite3_finalize(insert) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(stmt, 0))
+            let title = String(cString: sqlite3_column_text(stmt, 1))
+            let tags = String(cString: sqlite3_column_text(stmt, 2))
+            sqlite3_reset(insert)
+            bindText(insert, index: 1, value: id)
+            bindText(insert, index: 2, value: title)
+            bindText(insert, index: 3, value: tags)
+            if sqlite3_step(insert) != SQLITE_DONE {
+                reportError("FTS rebuild insert failed for \(id)")
+                flagTransactionFailure()
+            }
+        }
     }
 
     // MARK: - Attachments
+
+    /// Decrypts an attachment file for display or external opening. Returns
+    /// nil if the file is missing or fails authentication (corrupted/wrong key).
+    func readAttachmentData(_ attachment: Attachment) -> Data? {
+        let dir = (attachmentsDir as NSString).appendingPathComponent(attachment.id)
+        let filePath = (dir as NSString).appendingPathComponent(attachment.filename)
+        return try? JournalCrypto.readEncrypted(from: URL(fileURLWithPath: filePath))
+    }
+
+    /// Writes a decrypted copy to a caller-managed temp file for NSWorkspace
+    /// opening. The caller should remove it after use; the plaintext lives
+    /// only transiently in the system temp directory.
+    func openAttachmentExternally(_ attachment: Attachment) -> URL? {
+        let dir = (attachmentsDir as NSString).appendingPathComponent(attachment.id)
+        let filePath = (dir as NSString).appendingPathComponent(attachment.filename)
+        return try? JournalCrypto.decryptedTemporaryFile(
+            from: URL(fileURLWithPath: filePath),
+            preferredName: attachment.filename)
+    }
 
     func saveAttachment(entryId: String, data: Data, filename: String, mimeType: String = "") -> Attachment? {
         let id = UUID().uuidString
         let dir = (attachmentsDir as NSString).appendingPathComponent(id)
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // Stored encrypted (S1): the plaintext bytes never touch disk. The
+        // filename is used as the on-disk name but the content is sealed.
         let filePath = (dir as NSString).appendingPathComponent(filename)
         do {
-            try data.write(to: URL(fileURLWithPath: filePath))
+            try JournalCrypto.writeEncrypted(data, to: URL(fileURLWithPath: filePath))
         } catch {
-            print("Failed to save attachment: \(error)")
+            reportError("Failed to save attachment: \(error.localizedDescription)")
             return nil
         }
 
