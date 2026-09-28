@@ -180,7 +180,7 @@ struct CalendarView: View {
     }
 
     private var workspaceControls: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 12) {
             Picker("Calendar display", selection: $displayMode) {
                 ForEach(DisplayMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -192,42 +192,12 @@ struct CalendarView: View {
             .accessibilityLabel("Calendar display")
 
             Divider()
-                .frame(height: 20)
+                .frame(height: 22)
                 .opacity(0.3)
 
-            Button(action: { shiftMonth(-1) }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(theme.accentColor)
-            .omegaTooltip("Previous month")
-            .accessibilityLabel("Previous month")
+            monthNavigator
 
-            Text(anchorMonth.formatted(.dateTime.month(.wide).year()))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(theme.titleTextColor)
-                .frame(minWidth: 142)
-
-            Button(action: { shiftMonth(1) }) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(theme.accentColor)
-            .omegaTooltip("Next month")
-            .accessibilityLabel("Next month")
-
-            Button("Today", action: goToToday)
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(theme.accentColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-                .omegaTooltip("Jump to today")
+            PillActionButton(title: "Today", tooltip: "Jump to today", action: goToToday)
 
             DatePicker(
                 "Jump to date",
@@ -239,6 +209,40 @@ struct CalendarView: View {
             .frame(width: 126)
             .accessibilityLabel("Jump to date")
         }
+        // Never let the controls squeeze: with the labels locked to their ideal
+        // size, ViewThatFits falls back to the stacked header instead of
+        // crushing this row (which used to wrap "Today" one letter per line).
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// One grouped control — ‹ September 2026 › — so the month navigation
+    /// reads as a single date navigator instead of three floating items.
+    private var monthNavigator: some View {
+        HStack(spacing: 0) {
+            MonthChevronButton(systemName: "chevron.left", label: "Previous month", hint: "Show the previous month") {
+                shiftMonth(-1)
+            }
+
+            Text(anchorMonth.formatted(.dateTime.month(.wide).year()))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(theme.titleTextColor)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(minWidth: 142)
+                .padding(.horizontal, 6)
+
+            MonthChevronButton(systemName: "chevron.right", label: "Next month", hint: "Show the next month") {
+                shiftMonth(1)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(theme.accentColor.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(theme.accentColor.opacity(0.16), lineWidth: 1)
+        )
     }
 
     private var reflectiveScopeControl: some View {
@@ -732,6 +736,71 @@ struct CalendarView: View {
                 theme.colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.08),
                 lineWidth: 1
             )
+    }
+}
+
+// MARK: - Header navigation controls
+
+/// Chevron inside the grouped month navigator. The glyph keeps its small look;
+/// a 40x40pt hit target and a soft hover wash make it easy to find and click
+/// without turning it into a chunky button.
+private struct MonthChevronButton: View {
+    let systemName: String
+    let label: String
+    let hint: String
+    let action: () -> Void
+
+    @ObservedObject private var theme = ThemeManager.shared
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(theme.accentColor)
+                .frame(width: 40, height: 40)
+                .background(
+                    Circle()
+                        .fill(theme.accentColor.opacity(isHovered ? 0.16 : 0))
+                        .frame(width: 28, height: 28)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.10), value: isHovered)
+        .omegaTooltip(label)
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
+    }
+}
+
+/// Rounded pill action for the header (Today jump). The label is locked to its
+/// ideal size so it can never wrap one-letter-per-line when space runs low.
+private struct PillActionButton: View {
+    let title: String
+    let tooltip: String
+    let action: () -> Void
+
+    @ObservedObject private var theme = ThemeManager.shared
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(theme.accentColor)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(theme.accentColor.opacity(isHovered ? 0.22 : 0.14)))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.10), value: isHovered)
+        .omegaTooltip(tooltip)
+        .accessibilityLabel(title)
     }
 }
 

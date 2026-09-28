@@ -33,6 +33,19 @@ struct WritingGoal: Identifiable {
             case .weeklyWords: 1500
             }
         }
+
+        /// Settings key where the target is saved. Must match the keys read in
+        /// `GoalManager.loadGoals` — an older build wrote to "goal_\(rawValue)"
+        /// (with spaces) here, which never matched the reads, so edits to goals
+        /// silently didn't stick.
+        var storageKey: String {
+            switch self {
+            case .dailyWords: "goal_dailyWords"
+            case .dailyEntries: "goal_dailyEntries"
+            case .weeklyEntries: "goal_weeklyEntries"
+            case .weeklyWords: "goal_weeklyWords"
+            }
+        }
     }
 
     let id: String
@@ -71,10 +84,11 @@ final class GoalManager: ObservableObject {
     }
 
     func loadGoals() {
-        let dailyWordsTarget = Int(db.getSetting("goal_dailyWords", defaultValue: "\(WritingGoal.GoalType.dailyWords.defaultValue)")) ?? WritingGoal.GoalType.dailyWords.defaultValue
-        let dailyEntriesTarget = Int(db.getSetting("goal_dailyEntries", defaultValue: "\(WritingGoal.GoalType.dailyEntries.defaultValue)")) ?? WritingGoal.GoalType.dailyEntries.defaultValue
-        let weeklyEntriesTarget = Int(db.getSetting("goal_weeklyEntries", defaultValue: "\(WritingGoal.GoalType.weeklyEntries.defaultValue)")) ?? WritingGoal.GoalType.weeklyEntries.defaultValue
-        let weeklyWordsTarget = Int(db.getSetting("goal_weeklyWords", defaultValue: "\(WritingGoal.GoalType.weeklyWords.defaultValue)")) ?? WritingGoal.GoalType.weeklyWords.defaultValue
+        migrateLegacyGoalKeys()
+        let dailyWordsTarget = savedTarget(for: .dailyWords)
+        let dailyEntriesTarget = savedTarget(for: .dailyEntries)
+        let weeklyEntriesTarget = savedTarget(for: .weeklyEntries)
+        let weeklyWordsTarget = savedTarget(for: .weeklyWords)
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -96,7 +110,28 @@ final class GoalManager: ObservableObject {
     }
 
     func updateGoal(type: WritingGoal.GoalType, target: Int) {
-        db.setSetting("goal_\(type.rawValue)", value: "\(target)")
+        let clamped = max(1, min(target, 10000))
+        db.setSetting(type.storageKey, value: "\(clamped)")
         loadGoals()
+    }
+
+    /// Reads a goal's saved target, falling back to its default.
+    private func savedTarget(for type: WritingGoal.GoalType) -> Int {
+        Int(db.getSetting(type.storageKey, defaultValue: "\(type.defaultValue)")) ?? type.defaultValue
+    }
+
+    /// An older build wrote updates to "goal_<Display Name>" (with spaces)
+    /// while `loadGoals` read the camelCase `storageKey`s, so edits never
+    /// stuck. Carry any value written under the legacy key over to the real
+    /// one (only when the real key was never set).
+    private func migrateLegacyGoalKeys() {
+        let missing = "\u{1}missing"
+        for type in WritingGoal.GoalType.allCases {
+            let legacy = db.getSetting("goal_\(type.rawValue)", defaultValue: missing)
+            guard legacy != missing,
+                  db.getSetting(type.storageKey, defaultValue: missing) == missing
+            else { continue }
+            db.setSetting(type.storageKey, value: legacy)
+        }
     }
 }

@@ -1,0 +1,26 @@
+{
+  "name": "OmegaJournal",
+  "ignoredDirectories": [
+    "node_modules",
+    ".git",
+    ".next",
+    ".nuxt",
+    "dist",
+    "build",
+    "out",
+    ".cache",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target"
+  ],
+  "ignoredPatterns": [
+    "*.log",
+    "*.lock",
+    "*.min.js",
+    "*.min.css"
+  ],
+  "autoIndex": true,
+  "createdAt": "2026-09-10T02:58:59.740Z",
+  "updatedAt": "2026-09-10T02:58:59.740Z"
+}
