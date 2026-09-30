@@ -30,11 +30,7 @@ struct ReadView: View {
                             .foregroundColor(theme.secondaryTextColor)
                             .italic()
                     } else {
-                        Text(renderedBody)
-                            .foregroundColor(theme.bodyTextColor)
-                            .textSelection(.enabled)
-                            .lineSpacing(5)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        MarkdownBodyView(markdown: entry.body, style: renderStyle, textColor: theme.bodyTextColor)
                             .environment(\.openURL, OpenURLAction { url in
                                 guard let line = MarkdownLogic.taskLine(from: url) else { return .systemAction }
                                 toggleTask(atLine: line)
@@ -70,10 +66,10 @@ struct ReadView: View {
 
     // MARK: Body rendering & tasks
 
-    private var renderedBody: AttributedString {
-        MarkdownRenderer.render(entry.body, style: MarkdownRenderStyle(
+    private var renderStyle: MarkdownRenderStyle {
+        MarkdownRenderStyle(
             linkColor: theme.accentColor, codeColor: theme.accentColor,
-            mutedColor: theme.secondaryTextColor, interactiveTasks: !isTrash))
+            mutedColor: theme.secondaryTextColor, interactiveTasks: !isTrash)
     }
 
     /// Toggles a task checkbox via the VM's immediate-mutation path (flushes pending autosave first).

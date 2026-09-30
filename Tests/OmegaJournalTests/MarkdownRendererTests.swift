@@ -82,6 +82,34 @@ struct MarkdownRendererTests {
     }
 }
 
+@Suite("Markdown segments")
+@MainActor
+struct MarkdownSegmentTests {
+    @Test("tables split the document into text, table, text")
+    func split() {
+        let segs = MarkdownRenderer.renderSegments("before\n\n| a | b |\n|---|--:|\n| 1 | **2** |\nafter")
+        #expect(segs.count == 3)
+        guard case .text = segs[0], case let .table(_, header, aligns, rows) = segs[1], case .text = segs[2] else {
+            Issue.record("unexpected segment shape"); return
+        }
+        #expect(header.count == 2 && aligns == [.leading, .trailing])
+        #expect(String(rows[0][1].characters) == "2")
+    }
+
+    @Test("documents without tables are a single text segment; empty is none")
+    func plain() {
+        #expect(MarkdownRenderer.renderSegments("a\nb").count == 1)
+        #expect(MarkdownRenderer.renderSegments("").count <= 1)
+    }
+
+    @Test("task links keep absolute source line numbers after a table")
+    func taskLines() {
+        let segs = MarkdownRenderer.renderSegments("| a |\n|---|\n| 1 |\n- [ ] t", style: MarkdownRenderStyle(interactiveTasks: true))
+        guard let last = segs.last, case let .text(_, attr) = last else { Issue.record("no text"); return }
+        #expect(attr.runs.compactMap(\.link).first?.lastPathComponent == "3")
+    }
+}
+
 private func MarkdownLogic_taskLine(_ url: URL) -> Int? {
     url.scheme == "omega-task" ? Int(url.lastPathComponent) : nil
 }

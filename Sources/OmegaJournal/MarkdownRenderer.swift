@@ -34,6 +34,50 @@ enum MarkdownRenderer {
         return result
     }
 
+    // MARK: Segments (text runs + real tables)
+
+    enum Segment: Identifiable {
+        case text(id: Int, AttributedString)
+        case table(id: Int, header: [AttributedString], alignments: [MarkdownBlockItem.Alignment], rows: [[AttributedString]])
+
+        var id: Int {
+            switch self { case .text(let id, _), .table(let id, _, _, _): return id }
+        }
+    }
+
+    /// Splits a document into text runs and tables so the host can draw tables as a real grid.
+    /// Source line numbers (used by interactive tasks) are unaffected.
+    static func renderSegments(_ markdown: String, style: MarkdownRenderStyle = .default) -> [Segment] {
+        var segments: [Segment] = []
+        var run = AttributedString()
+        var runHasContent = false
+        var runStart = 0
+
+        func flush() {
+            if runHasContent { segments.append(.text(id: runStart, run)) }
+            run = AttributedString(); runHasContent = false
+        }
+
+        for item in MarkdownLogic.parseBlocks(markdown) {
+            if case let .table(header, alignments, rows) = item.block {
+                flush()
+                func cell(_ t: String, bold: Bool) -> AttributedString {
+                    inline(t, size: 14, weight: bold ? .semibold : .regular, style: style)
+                }
+                segments.append(.table(id: item.line,
+                                       header: header.map { cell($0, bold: true) },
+                                       alignments: alignments,
+                                       rows: rows.map { $0.map { cell($0, bold: false) } }))
+            } else {
+                if runHasContent { run.append(AttributedString("\n")) } else { runStart = item.line }
+                run.append(renderBlock(item, style: style))
+                runHasContent = true
+            }
+        }
+        flush()
+        return segments
+    }
+
     // MARK: Blocks
 
     private static func renderBlock(_ item: MarkdownBlockItem, style: MarkdownRenderStyle) -> AttributedString {

@@ -30,7 +30,6 @@ struct EditorView: View {
     @State private var selectionWords = 0
     /// Debounced copy of the body for the preview pane.
     @State private var previewText: String
-    @State private var previewAttributed = AttributedString()
 
     init(vm: JournalViewModel, entry: JournalEntry) {
         self.vm = vm
@@ -108,10 +107,6 @@ struct EditorView: View {
                 if Task.isCancelled { return }
             }
             previewText = body_
-            previewAttributed = MarkdownRenderer.render(body_, style: renderStyle)
-        }
-        .onChange(of: theme.accentColor) { _, _ in
-            previewAttributed = MarkdownRenderer.render(previewText, style: renderStyle)
         }
         .onExitCommand { _ = handleEscape() }
         .background(shortcutButtons)
@@ -447,10 +442,7 @@ struct EditorView: View {
                         .font(.system(size: 13))
                         .foregroundColor(theme.secondaryTextColor)
                 } else {
-                    Text(previewAttributed)
-                        .foregroundColor(theme.bodyTextColor)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MarkdownBodyView(markdown: previewText, style: renderStyle, textColor: theme.bodyTextColor)
                 }
             }
             .padding(.horizontal, 22)
