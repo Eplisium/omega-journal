@@ -255,7 +255,7 @@ struct EditorView: View {
                     HStack(spacing: 3) {
                         Text("#\(tag)").font(.system(size: 10))
                         Button { tags.removeAll { $0 == tag } } label: {
-                            Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                            Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove tag \(tag)")
@@ -306,7 +306,6 @@ struct EditorView: View {
         ZStack {
             Button("Larger Text") { stepFontSize(1) }.keyboardShortcut("=", modifiers: .command)
             Button("Smaller Text") { stepFontSize(-1) }.keyboardShortcut("-", modifiers: .command)
-            Button("Find in Entry") { controller.showFind() }.keyboardShortcut("f", modifiers: [.command, .option])
             Button("Find and Replace in Entry") { controller.showFind(replace: true) }.keyboardShortcut("f", modifiers: [.command, .option, .shift])
         }
         .opacity(0)
@@ -390,7 +389,8 @@ struct EditorView: View {
                 palette: palette,
                 onCommandReturn: { vm.stopEditing() },
                 onEscape: { handleEscape() },
-                onSelectionWords: { selectionWords = $0 }
+                onSelectionWords: { selectionWords = $0 },
+                onPasteImage: { data, ext in pasteImage(data, ext: ext) }
             )
             .overlay(alignment: .topLeading) {
                 if body_.isEmpty {
@@ -505,6 +505,18 @@ struct EditorView: View {
         updated.mood = mood
         updated.tags = tags
         vm.autoSave(updated)
+    }
+
+    /// Pasted images become attachments (there is no inline image storage in the body).
+    private func pasteImage(_ data: Data, ext: String) -> Bool {
+        guard data.count <= Self.maxAttachmentBytes else {
+            vm.showToast("Pasted image is too large to attach (limit \(Self.maxAttachmentBytes / 1_048_576) MB)", isError: true)
+            return true
+        }
+        let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "-")
+        let mime = ext == "png" ? "image/png" : "image/tiff"
+        vm.addAttachment(to: entry, data: data, filename: "Pasted image \(stamp).\(ext)", mimeType: mime)
+        return true
     }
 
     /// Largest single attachment accepted (files are encrypted and stored in-app).

@@ -158,12 +158,26 @@ struct MarkdownTextEditor: NSViewRepresentable {
     var onEscape: (() -> Bool)?
     /// Number of words in the current selection (0 when nothing is selected).
     var onSelectionWords: ((Int) -> Void)?
+    /// Called when the pasteboard holds an image and no text. Return true if consumed.
+    var onPasteImage: ((Data, String) -> Bool)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
+        // Same construction as NSTextView.scrollableTextView(), but with a subclass that can
+        // intercept image paste.
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        let textView = OmegaTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude)
+        scrollView.documentView = textView
+        textView.onPasteImage = { data, ext in context.coordinator.parent.onPasteImage?(data, ext) ?? false }
 
         textView.delegate = context.coordinator
         textView.isRichText = false
@@ -592,5 +606,20 @@ extension NSTextView {
         } else {
             setSelectedRange(NSRange(location: range.location, length: selectLength))
         }
+    }
+}
+
+
+/// NSTextView that hands pasted images to the host (as attachments) instead of dropping them.
+final class OmegaTextView: NSTextView {
+    var onPasteImage: ((Data, String) -> Bool)?
+
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        if pb.string(forType: .string) == nil, let handler = onPasteImage {
+            if let png = pb.data(forType: .png), handler(png, "png") { return }
+            if let tiff = pb.data(forType: .tiff), handler(tiff, "tiff") { return }
+        }
+        super.paste(sender)
     }
 }

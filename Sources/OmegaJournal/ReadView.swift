@@ -294,7 +294,7 @@ struct ReadView: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider().opacity(0.2)
             Text("ATTACHMENTS (\(entry.attachments.count))")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .tracking(0.7)
                 .foregroundColor(theme.secondaryTextColor)
 
@@ -319,7 +319,7 @@ struct ReadView: View {
                             .foregroundColor(theme.titleTextColor)
                             .lineLimit(1)
                         Text(attachment.mimeType)
-                            .font(.system(size: 9.5))
+                            .font(.system(size: 11))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     Spacer()
