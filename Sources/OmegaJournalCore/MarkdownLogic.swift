@@ -489,3 +489,57 @@ public enum MarkdownLogic {
         return (lum + 0.05) / 0.05 > 1.05 / (lum + 0.05)
     }
 }
+
+// MARK: - Typing helpers (auto-pairing, URL paste)
+
+public struct MarkdownTypingEdit: Equatable, Sendable {
+    public let range: NSRange
+    public let replacement: String
+    public let selection: NSRange
+}
+
+extension MarkdownLogic {
+    private static let pairs: [Character: Character] = [
+        "`": "`", "*": "*", "_": "_", "~": "~", "(": ")", "[": "]", "\"": "\"",
+    ]
+    private static let closers: Set<Character> = [")", "]", "`", "\""]
+
+    /// Pasting an http(s)/mailto URL over a single-line selection makes `[selection](url)`.
+    public static func pasteLink(selected: String, pasted: String) -> String? {
+        let url = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty, !selected.contains("\n"), !url.contains(where: { $0.isWhitespace }),
+              safeLinkURL(url) != nil, safeLinkURL(selected) == nil else { return nil }
+        return "[\(selected)](\(url))"
+    }
+
+    /// Edit to perform when `typed` is entered at `selection`, or nil to let it type normally.
+    /// - Selection + opener wraps the selection and keeps it selected.
+    /// - Empty selection: `` ` ``, `(`, `[` insert a pair when the next character is blank/closer
+    ///   (never after a backtick, so ``` fences still work); typing a closer skips over it.
+    public static func autoPairEdit(typed: Character, in text: String, selection: NSRange) -> MarkdownTypingEdit? {
+        let ns = text as NSString
+        guard selection.location != NSNotFound, NSMaxRange(selection) <= ns.length else { return nil }
+
+        if selection.length > 0 {
+            guard let close = pairs[typed] else { return nil }
+            let inner = ns.substring(with: selection)
+            if inner.contains("\n") && typed != "`" && typed != "*" && typed != "_" && typed != "~" { return nil }
+            return MarkdownTypingEdit(range: selection, replacement: "\(typed)\(inner)\(close)",
+                                      selection: NSRange(location: selection.location + 1, length: selection.length))
+        }
+
+        let loc = selection.location
+        let next: Character? = loc < ns.length ? Character(UnicodeScalar(ns.character(at: loc)) ?? " ") : nil
+        let prev: Character? = loc > 0 ? Character(UnicodeScalar(ns.character(at: loc - 1)) ?? " ") : nil
+
+        if closers.contains(typed), next == typed {
+            return MarkdownTypingEdit(range: NSRange(location: loc, length: 0), replacement: "",
+                                      selection: NSRange(location: loc + 1, length: 0))
+        }
+        guard typed == "`" || typed == "(" || typed == "[", let close = pairs[typed] else { return nil }
+        if typed == "`" && prev == "`" { return nil }
+        if let n = next, !(n.isWhitespace || closers.contains(n)) { return nil }
+        return MarkdownTypingEdit(range: NSRange(location: loc, length: 0), replacement: "\(typed)\(close)",
+                                  selection: NSRange(location: loc + 1, length: 0))
+    }
+}

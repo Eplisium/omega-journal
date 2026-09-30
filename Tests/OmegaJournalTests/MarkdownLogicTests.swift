@@ -221,3 +221,60 @@ struct MarkdownBlockParsingTests {
         #expect(MarkdownLogic.safeLinkURL("https://") == nil)
     }
 }
+
+@Suite("Markdown logic: typing helpers")
+struct MarkdownTypingTests {
+    private func apply(_ e: MarkdownTypingEdit, to t: String) -> (String, NSRange) {
+        ((t as NSString).replacingCharacters(in: e.range, with: e.replacement), e.selection)
+    }
+
+    @Test("pasting a URL over a selection makes a link")
+    func pasteLink() {
+        #expect(MarkdownLogic.pasteLink(selected: "my site", pasted: " https://example.com/a \n") == "[my site](https://example.com/a)")
+        #expect(MarkdownLogic.pasteLink(selected: "", pasted: "https://example.com") == nil)
+        #expect(MarkdownLogic.pasteLink(selected: "a\nb", pasted: "https://example.com") == nil)
+        #expect(MarkdownLogic.pasteLink(selected: "x", pasted: "not a url") == nil)
+        #expect(MarkdownLogic.pasteLink(selected: "x", pasted: "javascript:alert(1)") == nil)
+        #expect(MarkdownLogic.pasteLink(selected: "https://a.com", pasted: "https://b.com") == nil)
+    }
+
+    @Test("selection is wrapped and stays selected")
+    func wrap() throws {
+        let e = try #require(MarkdownLogic.autoPairEdit(typed: "(", in: "say hi now", selection: NSRange(location: 4, length: 2)))
+        let (out, sel) = apply(e, to: "say hi now")
+        #expect(out == "say (hi) now")
+        #expect(sel == NSRange(location: 5, length: 2))
+        #expect(MarkdownLogic.autoPairEdit(typed: "a", in: "abc", selection: NSRange(location: 0, length: 1)) == nil)
+    }
+
+    @Test("empty selection pairs backtick/paren/bracket at end or before space")
+    func pairEmpty() throws {
+        let e = try #require(MarkdownLogic.autoPairEdit(typed: "[", in: "a ", selection: NSRange(location: 2, length: 0)))
+        #expect(apply(e, to: "a ").0 == "a []")
+        #expect(e.selection == NSRange(location: 3, length: 0))
+        #expect(MarkdownLogic.autoPairEdit(typed: "(", in: "word", selection: NSRange(location: 0, length: 0)) == nil)
+        #expect(MarkdownLogic.autoPairEdit(typed: "*", in: "", selection: NSRange(location: 0, length: 0)) == nil)
+    }
+
+    @Test("typing a closer skips over the existing one")
+    func skip() throws {
+        let e = try #require(MarkdownLogic.autoPairEdit(typed: ")", in: "(a)", selection: NSRange(location: 2, length: 0)))
+        #expect(e.replacement.isEmpty)
+        #expect(e.selection == NSRange(location: 3, length: 0))
+    }
+
+    @Test("triple backtick still produces a fence")
+    func fence() throws {
+        var t = ""
+        var sel = NSRange(location: 0, length: 0)
+        for _ in 0..<3 {
+            if let e = MarkdownLogic.autoPairEdit(typed: "`", in: t, selection: sel) {
+                (t, sel) = apply(e, to: t)
+            } else {
+                t = (t as NSString).replacingCharacters(in: sel, with: "`")
+                sel = NSRange(location: sel.location + 1, length: 0)
+            }
+        }
+        #expect(t == "```")   // pair, skip over, then a plain third backtick
+    }
+}

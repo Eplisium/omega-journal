@@ -230,6 +230,26 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // MARK: Delegate
 
         func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+            // Smart paste / auto-pairing. Skipped while an IME composition is in progress.
+            if !textView.hasMarkedText(), let typed = replacementString {
+                let sel = textView.selectedRange()
+                if typed.count > 1, affectedCharRange == sel, sel.length > 0,
+                   NSPasteboard.general.string(forType: .string) == typed,
+                   let link = MarkdownLogic.pasteLink(selected: (textView.string as NSString).substring(with: sel), pasted: typed) {
+                    textView.insertText(link, replacementRange: sel)
+                    return false
+                }
+                if typed.count == 1, let ch = typed.first, affectedCharRange == sel,
+                   let edit = MarkdownLogic.autoPairEdit(typed: ch, in: textView.string, selection: sel) {
+                    if edit.replacement.isEmpty {
+                        textView.setSelectedRange(edit.selection)
+                    } else {
+                        textView.insertText(edit.replacement, replacementRange: edit.range)
+                        textView.setSelectedRange(edit.selection)
+                    }
+                    return false
+                }
+            }
             let newRange = NSRange(location: affectedCharRange.location, length: (replacementString as NSString?)?.length ?? 0)
             if let d = dirtyRange { dirtyRange = NSUnionRange(d, newRange) } else { dirtyRange = newRange }
             return true
