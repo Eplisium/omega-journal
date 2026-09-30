@@ -206,6 +206,8 @@ extension Notification.Name {
     static let searchAllEntries = Notification.Name("OmegaJournal.searchAllEntries")
     static let showShortcuts = Notification.Name("OmegaJournal.showShortcuts")
     static let showSettings = Notification.Name("OmegaJournal.showSettings")
+    static let duplicateSelected = Notification.Name("OmegaJournal.duplicateSelected")
+    static let exportSelected = Notification.Name("OmegaJournal.exportSelected")
     static let quitTimeSave = Notification.Name("OmegaJournal.quitTimeSave")
 }
 
@@ -261,6 +263,28 @@ struct ShellEntryCommands: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleArchiveSelected)) { _ in
                 if let entry = vm.selectedEntry, !entry.isTrashed { vm.toggleArchive(entry) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .duplicateSelected)) { _ in
+                if let entry = vm.selectedEntry, !entry.isTrashed { vm.duplicate(entry) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .exportSelected)) { _ in
+                if vm.selectedEntry != nil { ImportExportPanels.exportCurrentEntry(vm: vm) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .quickCapture)) { note in
+                guard let text = note.userInfo?[QuickCapture.notificationKey] as? String,
+                      let body = QuickCapture.normalized(text) else { return }
+                // Keep whatever the user is editing intact: flush, capture, then
+                // put them back where they were.
+                let resumeId = vm.editingEntryId
+                vm.flushPendingSave()
+                let created = vm.createEntry(body: body, tags: [QuickCapture.tag])
+                vm.stopEditing()
+                if let resumeId, let previous = vm.entries.first(where: { $0.id == resumeId }) {
+                    vm.startEditing(previous)
+                } else {
+                    vm.selectedEntryId = created.id
+                }
+                vm.showToast("Saved quick capture")
             }
             .onReceive(NotificationCenter.default.publisher(for: .findInEntryOrList)) { _ in
                 if vm.editingEntryId != nil, NSApp.keyWindow?.firstResponder is NSTextView {

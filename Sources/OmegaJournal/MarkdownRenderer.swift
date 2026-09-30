@@ -18,8 +18,23 @@ struct MarkdownRenderStyle {
     var mutedColor: Color = .secondary
     /// When true, ☐/☑ glyphs carry an `omega-task://toggle/<line>` link so the host can toggle them.
     var interactiveTasks = false
+    /// Lower-cased titles of entries that exist. `[[links]]` to other titles render
+    /// muted (unresolved). nil = don't know, so every link renders as resolved.
+    var resolvedLinkTitles: Set<String>? = nil
+    /// Font design for body text (serif by default).
+    var fontDesign: Font.Design = .serif
 
     static let `default` = MarkdownRenderStyle()
+
+    /// Maps a stored preference name to a design; unknown names fall back to serif.
+    static func fontDesign(named name: String) -> Font.Design {
+        switch name.lowercased() {
+        case "default", "sans": return .default
+        case "rounded": return .rounded
+        case "mono", "monospaced": return .monospaced
+        default: return .serif
+        }
+    }
 }
 
 enum MarkdownRenderer {
@@ -107,18 +122,18 @@ enum MarkdownRenderer {
             let glyphs = ["\u{2022}", "\u{25E6}", "\u{25AA}"]
             var marker = AttributedString(indent(level) + glyphs[level % glyphs.count] + "  ")
             marker.foregroundColor = style.mutedColor
-            marker.font = .system(size: 16, design: .serif)
+            marker.font = .system(size: 16, design: style.fontDesign)
             return marker + inline(text, size: 16, weight: .regular, style: style)
 
         case let .ordered(level, number, delimiter, text):
             var marker = AttributedString(indent(level) + number + delimiter + " ")
             marker.foregroundColor = style.mutedColor
-            marker.font = .system(size: 16, design: .serif)
+            marker.font = .system(size: 16, design: style.fontDesign)
             return marker + inline(text, size: 16, weight: .regular, style: style)
 
         case let .task(level, done, text):
             var box = AttributedString(indent(level) + (done ? "\u{2611}" : "\u{2610}"))
-            box.font = .system(size: 16, design: .serif)
+            box.font = .system(size: 16, design: style.fontDesign)
             box.foregroundColor = done ? style.mutedColor : style.linkColor
             if style.interactiveTasks, let url = MarkdownLogic.taskURL(line: item.line) {
                 box.link = url
@@ -196,7 +211,8 @@ enum MarkdownRenderer {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible)
-        var attr = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        var attr = (try? AttributedString(markdown: Self.rewritingWikiLinks(in: text), options: options)) ?? AttributedString(text)
+        replaceImages(in: &attr, style: style)
 
         // Snapshot runs first; mutating while iterating invalidates indices.
         var edits: [(Range<AttributedString.Index>, InlinePresentationIntent?, URL?)] = []
@@ -209,13 +225,18 @@ enum MarkdownRenderer {
                 attr[range].foregroundColor = style.codeColor
                 attr[range].backgroundColor = style.codeColor.opacity(0.1)
             } else {
-                var f = Font.system(size: size, weight: i.contains(.stronglyEmphasized) ? .bold : weight, design: .serif)
+                var f = Font.system(size: size, weight: i.contains(.stronglyEmphasized) ? .bold : weight, design: style.fontDesign)
                 if italic || i.contains(.emphasized) { f = f.italic() }
                 attr[range].font = f
             }
             if i.contains(.strikethrough) { attr[range].strikethroughStyle = .single }
             if let link {
-                if MarkdownLogic.safeLinkURL(link.absoluteString) != nil {
+                if let title = MarkdownLogic.wikiLinkTitle(from: link) {
+                    // In-app entry link: always kept; muted when no such entry exists.
+                    let known = style.resolvedLinkTitles?.contains(title.lowercased()) ?? true
+                    attr[range].foregroundColor = known ? style.linkColor : style.mutedColor
+                    attr[range].underlineStyle = known ? .single : nil
+                } else if MarkdownLogic.safeLinkURL(link.absoluteString) != nil {
                     attr[range].foregroundColor = style.linkColor
                     attr[range].underlineStyle = .single
                 } else {
@@ -225,6 +246,39 @@ enum MarkdownRenderer {
         }
         autolink(&attr, style: style)
         return attr
+    }
+
+    /// Rewrites `[[Title]]` / `[[Title|alias]]` (outside code) into markdown links to
+    /// `omega-entry://` so the normal inline pass styles them.
+    private static func rewritingWikiLinks(in text: String) -> String {
+        let links = MarkdownLogic.wikiLinks(in: text)
+        guard !links.isEmpty else { return text }
+        var ns = text as NSString
+        for link in links.reversed() {
+            guard let url = MarkdownLogic.wikiLinkURL(title: link.title) else { continue }
+            var label = ""
+            for ch in link.displayText {
+                if "\\[]*_`~<>".contains(ch) { label.append("\\") }
+                label.append(ch)
+            }
+            let dest = url.absoluteString.replacingOccurrences(of: "(", with: "%28").replacingOccurrences(of: ")", with: "%29")
+            ns = ns.replacingCharacters(in: link.range, with: "[\(label)](\(dest))") as NSString
+        }
+        return ns as String
+    }
+
+    /// Remote/embedded images are never loaded (privacy: no network fetch on read).
+    /// They become a muted `[image: alt]` placeholder.
+    private static func replaceImages(in attr: inout AttributedString, style: MarkdownRenderStyle) {
+        let ranges = attr.runs.compactMap { $0.imageURL != nil ? $0.range : nil }
+        for range in ranges.reversed() {
+            // An empty alt comes back from the parser as U+FFFC (object replacement).
+            let alt = String(attr[range].characters).replacingOccurrences(of: "\u{FFFC}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var placeholder = AttributedString(alt.isEmpty ? "[image]" : "[image: \(alt)]")
+            placeholder.foregroundColor = style.mutedColor
+            attr.replaceSubrange(range, with: placeholder)
+        }
     }
 
     private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)

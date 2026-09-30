@@ -11,7 +11,7 @@ enum OmegaTheme {
     static let headingFont = Font.system(size: 15, weight: .semibold)
     static let bodyFont = Font.system(size: 13)
     static let metaFont = Font.system(size: 10)
-    static let captionFont = Font.system(size: 9, weight: .semibold)
+    static let captionFont = Font.system(size: 10, weight: .semibold)
 
     // Geometry
     static let cardRadius: CGFloat = 11

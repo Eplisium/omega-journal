@@ -158,6 +158,8 @@ final class DatabaseManager {
         exec("PRAGMA journal_mode=WAL;")
         exec("PRAGMA synchronous=NORMAL;")
         exec("PRAGMA foreign_keys=ON;")
+        // Deleted entry text should not linger in free pages of the file.
+        exec("PRAGMA secure_delete=ON;")
     }
 
     /// Refuses further writes on this connection and records why.
@@ -219,7 +221,7 @@ final class DatabaseManager {
     }
 
     /// Runs a one-shot statement with the given text parameters bound left-to-right
-    /// (1, 2, 3…). Silently logs failures — used for internal mutations where the
+    /// (1, 2, 3…). Failures do not throw or log; inside a transaction they flag it for rollback — used for internal mutations where the
     /// caller doesn't need the result. Internal (not private) so the tag-storage
     /// reconciliation and its tests can simulate historical write patterns.
     func execParameterized(_ sql: String, _ values: String...) {
@@ -1057,52 +1059,30 @@ final class DatabaseManager {
             return collectEntries(stmt)
         }
 
-        // Prefer FTS, fall back to LIKE when the query yields nothing (or can't be tokenized).
-        if let ftsQuery = sanitizeFTSQuery(search) {
-            let ftsSQL = """
-                SELECT \(Self.entryColumns)
-                FROM entries e
-                INNER JOIN entries_fts f ON e.id = f.entry_id
-                WHERE entries_fts MATCH ? AND \(scopeSQL)
-                \(orderBy);
-            """
-            if let stmt = try? prepare(ftsSQL) {
-                bindText(stmt, index: 1, value: ftsQuery)
-                let results = collectEntries(stmt)
-                if !results.isEmpty { return results }
+        // Bodies are ciphertext on disk, so SQL can only see title/tags. The
+        // result is the UNION of (a) FTS token/prefix hits on title+tags and
+        // (b) a case-insensitive substring pass over title, tags and the
+        // decrypted body of the scope. Doing both every time means a body-only
+        // match is never hidden by a title hit, and a mid-word title match
+        // ("ournal" in "Journal") is never dropped for lacking a body match.
+        var ftsIDs = Set<String>()
+        if let ftsQuery = sanitizeFTSQuery(search),
+           let stmt = try? prepare("SELECT f.entry_id FROM entries_fts f WHERE entries_fts MATCH ?;") {
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, index: 1, value: ftsQuery)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                ftsIDs.insert(String(cString: sqlite3_column_text(stmt, 0)))
             }
         }
-
-        // Bodies are ciphertext on disk, so LIKE only covers title/tags here;
-        // `decryptBodyMatches` re-adds decrypted-body matching in Swift.
-        let likeSQL = """
-            SELECT \(Self.entryColumns)
-            FROM entries e
-            WHERE (e.title LIKE ? OR e.tags LIKE ?) AND \(scopeSQL)
-            \(orderBy);
-        """
-        guard let stmt = try? prepare(likeSQL) else { return [] }
-        let pattern = "%\(search)%"
-        bindText(stmt, index: 1, value: pattern)
-        bindText(stmt, index: 2, value: pattern)
-        let likeResults = collectEntries(stmt)
-        if !likeResults.isEmpty {
-            return decryptBodyMatches(likeResults, query: search)
-        }
-        // Title/tags didn't match — the hit may live in an encrypted body.
-        // Scan the scope and filter on decrypted bodies in Swift.
         let allSQL = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeSQL) \(orderBy);"
         guard let allStmt = try? prepare(allSQL) else { return [] }
-        return decryptBodyMatches(collectEntries(allStmt), query: search)
-    }
-
-    /// Since V8, SQL can no longer see body text (it's ciphertext), so body
-    /// matching happens here on the decrypted rows. Case-insensitive
-    /// substring, mirroring the old LIKE behaviour.
-    private func decryptBodyMatches(_ entries: [JournalEntry], query: String) -> [JournalEntry] {
-        let q = query.lowercased()
-        guard !q.isEmpty else { return entries }
-        return entries.filter { $0.body.lowercased().contains(q) }
+        let q = search.trimmingCharacters(in: .whitespaces)
+        return collectEntries(allStmt).filter { e in
+            ftsIDs.contains(e.id)
+                || e.title.localizedCaseInsensitiveContains(q)
+                || e.tags.contains { $0.localizedCaseInsensitiveContains(q) }
+                || e.body.localizedCaseInsensitiveContains(q)
+        }
     }
 
     /// Fetches several scopes in one pass, sharing a single attachments/tags
@@ -1410,11 +1390,89 @@ final class DatabaseManager {
         removeFTS(entryId: id)
     }
 
-    /// Legacy name — now a soft delete so nothing is lost by accident.
-    func deleteEntry(id: String) { trashEntry(id: id) }
+    // MARK: - Bulk operations (one transaction each)
+
+    /// Runs `body` inside one transaction (re-entrant). Returns true only if
+    /// nothing failed and COMMIT succeeded; on failure everything is rolled back.
+    func inTransaction(_ body: () -> Void) -> Bool {
+        beginTransaction()
+        body()
+        return endTransaction()
+    }
+
+    /// Sets/clears the favorite flag on many entries atomically. Metadata
+    /// only — bodies are never re-read or re-encrypted. Returns how many rows
+    /// changed, or nil (nothing applied) if any statement failed.
+    func bulkSetFavorite(ids: [String], favorite: Bool) -> Int? {
+        beginTransaction()
+        var changed = 0
+        for id in ids {
+            let ok = execChecked("UPDATE entries SET is_favorite = ? WHERE id = ? AND is_favorite != ?;", context: "Bulk favorite failed") { stmt in
+                sqlite3_bind_int(stmt, 1, favorite ? 1 : 0)
+                bindText(stmt, index: 2, value: id)
+                sqlite3_bind_int(stmt, 3, favorite ? 1 : 0)
+            }
+            if ok { changed += Int(sqlite3_changes(db)) }
+        }
+        return endTransaction() ? changed : nil
+    }
+
+    /// Adds a tag (case-insensitive de-dupe) to many entries atomically,
+    /// keeping the text column, junction table and FTS in step. Bodies are not
+    /// touched. Returns the number of entries changed, or nil on failure.
+    func bulkAddTag(ids: [String], tag: String) -> Int? {
+        let trimmed = tag.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return 0 }
+        beginTransaction()
+        var changed = 0
+        for id in ids {
+            guard let stmt = try? prepare("SELECT title FROM entries WHERE id = ?;") else { flagTransactionFailure(); continue }
+            bindText(stmt, index: 1, value: id)
+            let title: String? = sqlite3_step(stmt) == SQLITE_ROW ? String(cString: sqlite3_column_text(stmt, 0)) : nil
+            sqlite3_finalize(stmt)
+            guard let title else { continue }
+            var tags = fetchTagsForEntry(id) ?? []
+            if tags.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) { continue }
+            tags.append(trimmed)
+            let joined = tags.joined(separator: ",")
+            execChecked("UPDATE entries SET tags = ?, updated_at = ? WHERE id = ?;", context: "Bulk tag failed") { s in
+                bindText(s, index: 1, value: joined)
+                sqlite3_bind_double(s, 2, Date().timeIntervalSince1970)
+                bindText(s, index: 3, value: id)
+            }
+            syncTagsForEntry(id, tags: tags)
+            let probe = JournalEntry(id: id, title: title, body: "", mood: .neutral, tags: tags,
+                                 createdAt: Date(), updatedAt: Date(), isPinned: false, isFavorite: false,
+                                 isArchived: false, deletedAt: nil, isHidden: false, attachments: [])
+            updateFTS(probe)
+            changed += 1
+        }
+        return endTransaction() ? changed : nil
+    }
+
+    /// Moves many entries to the trash atomically.
+    @discardableResult
+    func bulkTrash(ids: [String]) -> Bool {
+        beginTransaction()
+        let now = Date().timeIntervalSince1970
+        for id in ids {
+            execChecked("UPDATE entries SET deleted_at = ? WHERE id = ?;", context: "Bulk trash failed") { stmt in
+                sqlite3_bind_double(stmt, 1, now)
+                bindText(stmt, index: 2, value: id)
+            }
+        }
+        return endTransaction()
+    }
 
     func emptyTrash() {
-        let ids = fetchAllEntries(scope: .trashed).map(\.id)
+        // Ids only — decrypting every trashed body just to delete it is
+        // wasteful and would be blocked by unreadable rows.
+        guard let stmt = try? prepare("SELECT id FROM entries WHERE deleted_at IS NOT NULL;") else { return }
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { ids.append(String(cString: sqlite3_column_text(stmt, 0))) }
+        sqlite3_finalize(stmt)
+        beginTransaction()
+        defer { endTransaction() }
         for id in ids { hardDeleteEntry(id: id) }
     }
 
@@ -1569,17 +1627,6 @@ final class DatabaseManager {
             map[entryId, default: []].append(name)
         }
         return map
-    }
-
-    func allTags() -> [String] {
-        let sql = "SELECT name FROM tags ORDER BY name;"
-        guard let stmt = try? prepare(sql) else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        var tags: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            tags.append(String(cString: sqlite3_column_text(stmt, 0)))
-        }
-        return tags
     }
 
     func tagsWithCounts(includeHidden: Bool = true) -> [(tag: String, count: Int)] {
@@ -1843,7 +1890,8 @@ final class DatabaseManager {
         return result
     }
 
-    func saveTemplate(_ template: EntryTemplate) {
+    @discardableResult
+    func saveTemplate(_ template: EntryTemplate) -> Bool {
         let sql = """
             INSERT INTO templates (id, name, body, tags, icon, sort_order)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -1851,22 +1899,21 @@ final class DatabaseManager {
                 name=excluded.name, body=excluded.body, tags=excluded.tags,
                 icon=excluded.icon, sort_order=excluded.sort_order;
         """
-        guard let stmt = try? prepare(sql) else { return }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: template.id)
-        bindText(stmt, index: 2, value: template.name)
-        bindText(stmt, index: 3, value: template.body)
-        bindText(stmt, index: 4, value: template.tags.joined(separator: ","))
-        bindText(stmt, index: 5, value: template.icon)
-        sqlite3_bind_int(stmt, 6, Int32(template.sortOrder))
-        sqlite3_step(stmt)
+        return execChecked(sql, context: "Saving template failed") { stmt in
+            bindText(stmt, index: 1, value: template.id)
+            bindText(stmt, index: 2, value: template.name)
+            bindText(stmt, index: 3, value: template.body)
+            bindText(stmt, index: 4, value: template.tags.joined(separator: ","))
+            bindText(stmt, index: 5, value: template.icon)
+            sqlite3_bind_int(stmt, 6, Int32(template.sortOrder))
+        }
     }
 
-    func deleteTemplate(id: String) {
-        guard let stmt = try? prepare("DELETE FROM templates WHERE id = ?;") else { return }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: id)
-        sqlite3_step(stmt)
+    @discardableResult
+    func deleteTemplate(id: String) -> Bool {
+        execChecked("DELETE FROM templates WHERE id = ?;", context: "Deleting template failed") { stmt in
+            bindText(stmt, index: 1, value: id)
+        }
     }
 
     // MARK: - Settings

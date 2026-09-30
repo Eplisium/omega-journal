@@ -44,10 +44,36 @@ enum ExportManager {
         // export/import round-trip as hidden — importing a backup must never
         // silently publish private entries into the visible library.
         let isHidden: Bool?
+        // Added in v5: attachment payloads (base64). Absent in older files.
+        var attachments: [JSONAttachment]? = nil
     }
 
-    /// Bump when the JSON layout changes. v3 = adds isHidden; v4 = adds formatVersion.
-    static let formatVersion = 4
+    struct JSONAttachment: Codable {
+        let filename: String
+        let mimeType: String
+        /// Base64 of the decrypted file bytes.
+        let dataBase64: String
+    }
+
+    /// Decoded attachment payload ready to hand to `DatabaseManager.saveAttachment`.
+    struct DecodedAttachment: Equatable {
+        let filename: String
+        let mimeType: String
+        let data: Data
+    }
+
+    /// Attachments carried by a JSON entry; entries from older files, or with
+    /// undecodable payloads, yield fewer/no attachments rather than failing.
+    static func decodeAttachments(_ entry: JSONEntry) -> [DecodedAttachment] {
+        (entry.attachments ?? []).compactMap { a in
+            guard let data = Data(base64Encoded: a.dataBase64) else { return nil }
+            return DecodedAttachment(filename: a.filename, mimeType: a.mimeType, data: data)
+        }
+    }
+
+    /// Bump when the JSON layout changes. v3 = adds isHidden; v4 = adds formatVersion;
+    /// v5 = optional per-entry attachments (older files stay importable).
+    static let formatVersion = 5
 
     /// Real app version from the bundle (falls back for `swift run`/tests).
     static var appVersion: String {
@@ -71,7 +97,10 @@ enum ExportManager {
         let entries: [JSONEntry]
     }
 
-    static func exportJSON(_ entries: [JournalEntry], to url: URL) throws {
+    /// `attachmentData` supplies the decrypted bytes of an attachment; when nil,
+    /// attachments are not embedded.
+    static func exportJSON(_ entries: [JournalEntry], to url: URL,
+                           attachmentData: ((Attachment) -> Data?)? = nil) throws {
         let jsonEntries = entries.map { e in
             JSONEntry(
                 id: e.id, title: e.title, body: e.body,
@@ -81,7 +110,13 @@ enum ExportManager {
                 wordCount: e.wordCount,
                 isArchived: e.isArchived,
                 deletedAt: e.deletedAt,
-                isHidden: e.isHidden
+                isHidden: e.isHidden,
+                attachments: attachmentData.flatMap { read in
+                    let list = e.attachments.compactMap { a in
+                        read(a).map { JSONAttachment(filename: a.filename, mimeType: a.mimeType, dataBase64: $0.base64EncodedString()) }
+                    }
+                    return list.isEmpty ? nil : list
+                }
             )
         }
         let export = JSONExport(

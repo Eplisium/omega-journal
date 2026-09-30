@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Sidebar
 
@@ -10,6 +11,7 @@ struct SidebarView: View {
 
     @AppStorage("shell.sidebar.tagsExpanded") private var tagsExpanded = true
     @AppStorage("shell.sidebar.moodsExpanded") private var moodsExpanded = false
+    @AppStorage("shell.sidebar.savedExpanded") private var savedExpanded = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var settingsSection: SettingsSection = .appearance
@@ -41,8 +43,16 @@ struct SidebarView: View {
 
                     disclosureSection("MOODS", isExpanded: $moodsExpanded) {
                         ForEach(Mood.allCases) { mood in
-                            let count = vm.entries.filter { $0.mood == mood }.count
+                            let count = vm.moodCounts[mood] ?? 0
                             if count > 0 { row(.mood(mood), badge: count) }
+                        }
+                    }
+
+                    if !vm.savedSearches.isEmpty {
+                        disclosureSection("SAVED SEARCHES", isExpanded: $savedExpanded) {
+                            ForEach(vm.savedSearches) { search in
+                                savedSearchRow(search)
+                            }
                         }
                     }
 
@@ -98,15 +108,15 @@ struct SidebarView: View {
                     )
                     .frame(width: 26, height: 26)
                 Text("Ω")
-                    .font(.system(size: 115, weight: .bold, design: .serif))
+                    .font(.system(size: 15, weight: .bold, design: .serif))
                     .foregroundColor(theme.onAccentColor)
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("Omega Journal")
-                    .font(.system(size: 113.5, weight: .semibold, design: .serif))
+                    .font(.system(size: 13.5, weight: .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text("\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words")
-                    .font(.system(size: 110))
+                    .font(.system(size: 10))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()
@@ -125,17 +135,18 @@ struct SidebarView: View {
                         .font(.system(size: 11))
                         .foregroundColor(vm.writingStreak > 0 ? .orange : theme.secondaryTextColor.opacity(0.5))
                     Text("\(vm.writingStreak)")
-                        .font(.system(size: 117, weight: .bold, design: .rounded))
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundColor(theme.titleTextColor)
                 }
-                Text("day streak")
+                Text(vm.writingStreak == 0 ? "fresh start" : "\(vm.streakUnit)\(vm.writingStreak == 1 ? "" : "s") showing up")
                     .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
             Divider().frame(height: 26).opacity(0.25)
             VStack(spacing: 1) {
                 Text("\(vm.entriesThisMonth)")
-                    .font(.system(size: 117, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                 Text("this month")
                     .font(.system(size: 11))
@@ -167,10 +178,10 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Image(systemName: goal.isComplete ? "checkmark.circle.fill" : goal.type.icon)
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                             .foregroundColor(goal.isComplete ? .green : theme.accentColor)
                         Text(goal.type.rawValue)
-                            .font(.system(size: 110, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundColor(theme.bodyTextColor)
                         Spacer()
                         Text(goal.displayProgress)
@@ -204,7 +215,7 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "square.and.pencil").font(.system(size: 11, weight: .semibold))
-                    Text("New Entry").font(.system(size: 111, weight: .medium))
+                    Text("New Entry").font(.system(size: 11, weight: .medium))
                 }
                 .foregroundColor(theme.onAccentColor)
                 .frame(maxWidth: .infinity)
@@ -263,7 +274,7 @@ struct SidebarView: View {
                         .foregroundColor(theme.secondaryTextColor)
                         .tracking(0.7)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundColor(theme.secondaryTextColor)
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                     Spacer()
@@ -279,6 +290,34 @@ struct SidebarView: View {
             .accessibilityHint("Double tap to \(isExpanded.wrappedValue ? "collapse" : "expand")")
 
             if isExpanded.wrappedValue { content() }
+        }
+    }
+
+    private func savedSearchRow(_ search: SavedSearch) -> some View {
+        Button {
+            selection = .all
+            vm.selectedEntryId = nil
+            vm.applySavedSearch(search)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.secondaryTextColor)
+                    .frame(width: 15)
+                Text(search.name)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.bodyTextColor)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Saved search: \(search.name)")
+        .contextMenu {
+            Button("Delete Saved Search", role: .destructive) { vm.deleteSavedSearch(search) }
         }
     }
 
@@ -305,6 +344,7 @@ private struct SidebarRow: View {
     let action: () -> Void
 
     @State private var hover = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tint: Color {
         if case .mood(let m) = item { return m.color }
@@ -320,7 +360,7 @@ private struct SidebarRow: View {
                     .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
                     .frame(width: 15)
                 Text(item.title)
-                    .font(.system(size: 112, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -358,6 +398,6 @@ private struct SidebarRow: View {
         .accessibilityValue(badge.map { $0 > 0 ? "\($0) \($0 == 1 ? "entry" : "entries")" : "" } ?? "")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
     }
 }

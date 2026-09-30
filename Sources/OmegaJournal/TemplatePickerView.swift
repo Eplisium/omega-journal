@@ -77,7 +77,7 @@ struct TemplatePickerView: View {
                     HStack(spacing: 3) {
                         ForEach(template.tags.prefix(3), id: \.self) { tag in
                             Text("#\(tag)")
-                                .font(.system(size: 8.5))
+                                .font(.system(size: 10))
                                 .foregroundColor(theme.accentColor)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)

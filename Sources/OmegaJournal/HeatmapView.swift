@@ -7,6 +7,7 @@ struct HeatmapView: View {
     let onOpenDate: ((Date) -> Void)?
 
     @ObservedObject private var theme = ThemeManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoveredDate: Date?
     @State private var selectedDate: Date?
 
@@ -210,7 +211,7 @@ struct HeatmapView: View {
                             .font(.system(size: 12))
                             .foregroundColor(Color.white.opacity(0.45))
                         Text("Hover a day to see entries, moods, and titles")
-                            .font(.system(size: 111.5, weight: .medium, design: .rounded))
+                            .font(.system(size: 11.5, weight: .medium, design: .rounded))
                             .foregroundColor(Color.white.opacity(0.62))
                         Spacer(minLength: 0)
                     }
@@ -219,7 +220,7 @@ struct HeatmapView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.easeInOut(duration: 0.15), value: hoveredDate ?? selectedDate)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: hoveredDate ?? selectedDate)
         }
     }
 
@@ -234,7 +235,7 @@ struct HeatmapView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(dateStr)
-                        .font(.system(size: 113, weight: .semibold, design: .rounded))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                     if isToday {
                         Text("Today")
@@ -248,18 +249,18 @@ struct HeatmapView: View {
 
                 if count == 0 {
                     Text("No entries")
-                        .font(.system(size: 111.5))
+                        .font(.system(size: 11.5))
                         .foregroundColor(Color.white.opacity(0.55))
                 } else {
                     HStack(spacing: 6) {
                         Text("\(count) \(count == 1 ? "entry" : "entries")")
-                            .font(.system(size: 112, weight: .semibold, design: .rounded))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundColor(detailAccent)
                         if let moods = info?.moods, !moods.isEmpty {
                             Text("·").foregroundColor(Color.white.opacity(0.35))
                             HStack(spacing: 2) {
                                 ForEach(Array(moods.prefix(6).enumerated()), id: \.offset) { _, mood in
-                                    Text(mood.emoji).font(.system(size: 112))
+                                    Text(mood.emoji).font(.system(size: 12))
                                 }
                             }
                         }
@@ -281,14 +282,14 @@ struct HeatmapView: View {
                                 .frame(width: 4, height: 4)
                                 .padding(.top, 4)
                             Text(title)
-                                .font(.system(size: 111))
+                                .font(.system(size: 11))
                                 .foregroundColor(Color.white.opacity(0.8))
                                 .lineLimit(1)
                         }
                     }
                     if count > titles.count {
                         Text("+ \(count - titles.count) more…")
-                            .font(.system(size: 110, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundColor(Color.white.opacity(0.45))
                             .padding(.leading, 10)
                     }
@@ -329,10 +330,10 @@ struct HeatmapView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(value)
-                    .font(.system(size: 113, weight: .bold, design: .rounded))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
                 Text(label)
-                    .font(.system(size: 110))
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
         }
@@ -369,7 +370,7 @@ struct HeatmapView: View {
                     let xOffset = CGFloat(label.weekIndex) * (cellSize + cellSpacing) + 8
                     HStack(spacing: 4) {
                         Text(label.name)
-                            .font(.system(size: 110, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.secondary)
                         if label.showYear {
                             Text(Self.cal.component(.year, from: weeks[label.weekIndex].startDate).description)
@@ -418,20 +419,20 @@ struct HeatmapView: View {
                                   lineWidth: isToday || hovered || selected ? 1.6 : 1)
             )
             .shadow(color: ((hovered || selected) && count > 0) ? accent.opacity(0.35) : .clear, radius: 4, y: 1)
-            .scaleEffect(hovered ? 1.35 : (selected ? 1.15 : 1.0))
+            .scaleEffect(reduceMotion ? 1.0 : (hovered ? 1.35 : (selected ? 1.15 : 1.0)))
             .zIndex(hovered || selected ? 20 : 0)
             .contentShape(Rectangle())
             .onHover { inside in
-                withAnimation(.easeInOut(duration: 0.12)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.12)) {
                     hoveredDate = inside ? date : nil
                 }
             }
             .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.12)) { selectedDate = date }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.12)) { selectedDate = date }
                 onOpenDate?(date)
             }
-            .animation(.spring(response: 0.22, dampingFraction: 0.82), value: hovered)
-            .animation(.spring(response: 0.22, dampingFraction: 0.82), value: selected)
+            .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.82), value: hovered)
+            .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.82), value: selected)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(accessibilityLabel(date: date, count: count))
@@ -453,7 +454,7 @@ struct HeatmapView: View {
     private var legendRow: some View {
         HStack(spacing: 8) {
             Text("Less")
-                .font(.system(size: 110, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.secondary)
 
             HStack(spacing: 3) {
@@ -474,7 +475,7 @@ struct HeatmapView: View {
             }
 
             Text("More")
-                .font(.system(size: 110, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.secondary)
 
             Spacer()
@@ -484,7 +485,7 @@ struct HeatmapView: View {
                     .strokeBorder(accent, lineWidth: 1.5)
                     .frame(width: 12, height: 12)
                 Text("Today")
-                    .font(.system(size: 110, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.secondary)
             }
             .padding(.horizontal, 8)

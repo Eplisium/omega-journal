@@ -17,13 +17,6 @@ final class BiometricAuth: ObservableObject {
     /// Independent instance for tests (the shared one is touched by other suites).
     init(forTesting: Void) {}
 
-    /// Returns true if biometric auth is available on this device.
-    var isAvailable: Bool {
-        let context = LAContext()
-        var error: NSError?
-        return context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
-    }
-
     /// Returns a user-facing description of the available biometric type.
     var biometricType: String {
         let context = LAContext()
@@ -40,30 +33,43 @@ final class BiometricAuth: ObservableObject {
         }
     }
 
-    /// Prompts the user to authenticate. Returns true on success.
+    /// Test seam: replaces the system prompt.
+    var evaluateOverride: (() async -> Bool)?
+    /// The single in-flight prompt. Concurrent callers await it instead of
+    /// starting a second dialog, so one caller's completion cannot clear
+    /// `isAuthenticating` (or flip `isAuthenticated`) under another.
+    private var inFlight: Task<Bool, Never>?
+
+    /// Prompts the user to authenticate. Returns true on success. A failed or
+    /// cancelled prompt never revokes an existing session.
     func authenticate() async -> Bool {
-        // Already authenticated this session
         if isAuthenticated { return true }
+        if let inFlight { return await inFlight.value }
 
         isAuthenticating = true
-        defer { isAuthenticating = false }
-
-        let context = LAContext()
-        context.localizedReason = "Unlock hidden journal entries"
-        context.localizedCancelTitle = "Cancel"
-
-        do {
-            let success = try await context.evaluatePolicy(
-                .deviceOwnerAuthentication,
-                localizedReason: "Unlock hidden journal entries"
-            )
-            isAuthenticated = success
-            if success { scheduleIdleRelock() }
-            return success
-        } catch {
-            isAuthenticated = false
-            return false
+        let override = evaluateOverride
+        let task = Task { @MainActor () -> Bool in
+            if let override { return await override() }
+            let context = LAContext()
+            context.localizedReason = "Unlock hidden journal entries"
+            context.localizedCancelTitle = "Cancel"
+            do {
+                return try await context.evaluatePolicy(
+                    .deviceOwnerAuthentication,
+                    localizedReason: "Unlock hidden journal entries")
+            } catch {
+                return false
+            }
         }
+        inFlight = task
+        let success = await task.value
+        inFlight = nil
+        isAuthenticating = false
+        if success {
+            isAuthenticated = true
+            scheduleIdleRelock()
+        }
+        return success
     }
 
     /// Locks hidden entries (e.g. when navigating away or after timeout).

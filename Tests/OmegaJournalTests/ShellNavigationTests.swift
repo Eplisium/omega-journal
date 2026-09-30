@@ -52,3 +52,31 @@ struct ShellNavigationTests {
         #expect(ShellPrefs.lockOnResignKey == "shell.lockHiddenOnResignActive")
     }
 }
+
+@Suite("Shell quick capture and reading prefs")
+struct ShellQuickCaptureTests {
+    @Test("quick capture trims and rejects blank text")
+    func normalize() {
+        #expect(QuickCapture.normalized("  hello \n") == "hello")
+        #expect(QuickCapture.normalized(" \n\t ") == nil)
+        #expect(QuickCapture.normalized("") == nil)
+    }
+
+    @Test("reading width clamps and falls back to the default")
+    func width() {
+        #expect(ReadingPreferences.clampedWidth(0) == ReadingPreferences.defaultMaxWidth)
+        #expect(ReadingPreferences.clampedWidth(.nan) == ReadingPreferences.defaultMaxWidth)
+        #expect(ReadingPreferences.clampedWidth(100) == ReadingPreferences.widthRange.lowerBound)
+        #expect(ReadingPreferences.clampedWidth(5000) == ReadingPreferences.widthRange.upperBound)
+        #expect(ReadingPreferences.clampedWidth(800) == 800)
+    }
+
+    @Test("reading font design maps stored values, unknown falls back")
+    func design() {
+        #expect(ReadingPreferences.fontDesign(from: "serif") == .serif)
+        #expect(ReadingPreferences.fontDesign(from: "monospaced") == .monospaced)
+        #expect(ReadingPreferences.fontDesign(from: "nonsense") == .default)
+        #expect(ReadingPreferences.maxWidthKey == "readingMaxWidth")
+        #expect(ReadingPreferences.fontDesignKey == "readingFontDesign")
+    }
+}

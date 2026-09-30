@@ -273,10 +273,50 @@ struct MarkdownTextEditor: NSViewRepresentable {
                     return false
                 }
             }
-            let newRange = NSRange(location: affectedCharRange.location, length: (replacementString as NSString?)?.length ?? 0)
-            if let d = dirtyRange { dirtyRange = NSUnionRange(d, newRange) } else { dirtyRange = newRange }
+            noteEdit(range: affectedCharRange, replacementLength: (replacementString as NSString?)?.length ?? 0)
             return true
         }
+
+        /// Records an edit (pre-edit `range` replaced by `replacementLength` UTF-16
+        /// units) so the next highlight pass restyles only what changed.
+        func noteEdit(range: NSRange, replacementLength: Int) {
+            let newRange = NSRange(location: range.location, length: replacementLength)
+            if let d = dirtyRange { dirtyRange = NSUnionRange(d, newRange) } else { dirtyRange = newRange }
+            pendingEdits.append((range.location, range.length, replacementLength))
+        }
+
+        /// Edits since the last pass, used to predict where unchanged code
+        /// fences moved to. Without this, inserting one character shifts every
+        /// later fence offset and looks like "fences changed" (a full restyle
+        /// of the whole document on every keystroke).
+        private var pendingEdits: [(loc: Int, oldLen: Int, newLen: Int)] = []
+
+        /// Maps the previous pass's code ranges through `pendingEdits`. Returns
+        /// nil when an edit touches a range boundary (structure may have changed).
+        private func predictedCodeRanges() -> [NSRange]? {
+            var ranges = lastCodeRanges
+            for e in pendingEdits {
+                let delta = e.newLen - e.oldLen
+                let editEnd = e.loc + e.oldLen
+                var next: [NSRange] = []
+                for r in ranges {
+                    if NSMaxRange(r) <= e.loc { next.append(r) }
+                    else if r.location >= editEnd { next.append(NSRange(location: r.location + delta, length: r.length)) }
+                    else if e.loc > r.location && editEnd < NSMaxRange(r) {
+                        next.append(NSRange(location: r.location, length: r.length + delta))
+                    } else { return nil }
+                }
+                ranges = next
+            }
+            return ranges
+        }
+
+        /// Synchronous highlight pass on `storage` (the async scheduler calls the
+        /// same code). Exposed so tests can measure it without a run loop.
+        func highlightNow(_ storage: NSTextStorage) { runHighlight(storage) }
+
+        /// Range restyled by the most recent pass (whole document for a full pass).
+        private(set) var lastHighlightRange: NSRange?
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
@@ -417,8 +457,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
             let ns = storage.string as NSString
             let fullRange = NSRange(location: 0, length: ns.length)
             let codeRanges = MarkdownLogic.codeBlockRanges(in: storage.string)
-            if codeRanges != lastCodeRanges { needsFullPass = true }
+            if codeRanges != lastCodeRanges, codeRanges != predictedCodeRanges() { needsFullPass = true }
             lastCodeRanges = codeRanges
+            pendingEdits.removeAll()
 
             var target = fullRange
             if !needsFullPass, let dirty = dirtyRange, NSMaxRange(dirty) <= ns.length, dirty.length < 20_000 {
@@ -429,6 +470,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             needsFullPass = false
             dirtyRange = nil
             styleSignature = signature(for: parent)
+            lastHighlightRange = target
             highlight(storage, in: target, codeRanges: codeRanges)
         }
 

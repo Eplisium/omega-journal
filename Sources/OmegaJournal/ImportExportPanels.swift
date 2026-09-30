@@ -34,7 +34,7 @@ enum ImportExportPanels {
                 return
             }
             save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json, omittedHidden: omitted) { url in
-                try ExportManager.exportJSON(entries, to: url)
+                try ExportManager.exportJSON(entries, to: url, attachmentData: { vm.db.readAttachmentData($0) })
             }
         }
     }

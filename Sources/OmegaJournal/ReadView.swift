@@ -12,6 +12,7 @@ struct ReadView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
     @State private var showPermanentDeleteConfirmation = false
+    @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +33,10 @@ struct ReadView: View {
                     } else {
                         MarkdownBodyView(markdown: entry.body, style: renderStyle, textColor: theme.bodyTextColor)
                             .environment(\.openURL, OpenURLAction { url in
+                                if let title = MarkdownLogic.wikiLinkTitle(from: url) {
+                                    vm.openLinkedEntry(titled: title)
+                                    return .handled
+                                }
                                 guard let line = MarkdownLogic.taskLine(from: url) else { return .systemAction }
                                 toggleTask(atLine: line)
                                 return .handled
@@ -69,7 +74,9 @@ struct ReadView: View {
     private var renderStyle: MarkdownRenderStyle {
         MarkdownRenderStyle(
             linkColor: theme.accentColor, codeColor: theme.accentColor,
-            mutedColor: theme.secondaryTextColor, interactiveTasks: !isTrash)
+            mutedColor: theme.secondaryTextColor, interactiveTasks: !isTrash,
+            resolvedLinkTitles: vm.linkableTitles(),
+            fontDesign: ReadingPreferences.fontDesign(from: readingFontDesign))
     }
 
     /// Toggles a task checkbox via the VM's immediate-mutation path (flushes pending autosave first).
@@ -290,6 +297,16 @@ struct ReadView: View {
 
     // MARK: Attachments
 
+    /// Capped, cached thumbnail so re-rendering doesn't re-decrypt and decode
+    /// full-size photos every time.
+    private func attachmentThumbnail(_ attachment: Attachment) -> NSImage? {
+        if let hit = AttachmentPreview.cached(attachment.id) { return hit }
+        guard let data = vm.db.readAttachmentData(attachment),
+              let image = AttachmentPreview.thumbnail(from: data, maxPixel: 132) else { return nil }
+        AttachmentPreview.store(image, for: attachment.id)
+        return image
+    }
+
     private var attachmentsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider().opacity(0.2)
@@ -300,7 +317,7 @@ struct ReadView: View {
 
             ForEach(entry.attachments) { attachment in
                 HStack(spacing: 9) {
-                    if attachment.isImage, let data = vm.db.readAttachmentData(attachment), let image = NSImage(data: data) {
+                    if attachment.isImage, let image = attachmentThumbnail(attachment) {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -328,6 +345,7 @@ struct ReadView: View {
                         // transient temp file for the external app.
                         if let tempURL = vm.db.openAttachmentExternally(attachment) {
                             NSWorkspace.shared.open(tempURL)
+                            AttachmentPreview.scheduleTempCleanup(of: tempURL)
                         } else {
                             vm.showToast("Couldn't open attachment", isError: true)
                         }

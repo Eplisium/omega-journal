@@ -32,6 +32,8 @@ final class JournalViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published var sortOrder: SortOrder = .dateDesc
     @Published var filter: EntryFilter = .empty
+    /// Named search + tag/mood filter combinations (stored as JSON in settings).
+    @Published private(set) var savedSearches: [SavedSearch] = []
 
     // Reflection scope
     @Published var analyticsPeriod: AnalyticsPeriod = .thirtyDays
@@ -144,6 +146,97 @@ final class JournalViewModel: ObservableObject {
            let saved = try? JSONDecoder().decode(EntryFilter.self, from: data) {
             filter = saved
         }
+        savedSearches = SavedSearchStore.decode(db.getSetting(SavedSearchStore.settingKey))
+    }
+
+    // MARK: - Saved searches
+
+    private func persistSavedSearches() {
+        db.setSetting(SavedSearchStore.settingKey, value: SavedSearchStore.encode(savedSearches))
+    }
+
+    /// Saves the current search box + first tag/mood filter under `name`.
+    /// A same-named search is replaced; an empty search with no filter is ignored.
+    func saveCurrentSearch(name: String) {
+        let new = SavedSearch(
+            name: name, query: searchText,
+            tag: filter.tags.sorted().first,
+            mood: filter.moods.sorted { $0.rawValue < $1.rawValue }.first?.label)
+        let updated = SavedSearchStore.adding(new, to: savedSearches)
+        guard updated != savedSearches else { return }
+        savedSearches = updated
+        persistSavedSearches()
+    }
+
+    func deleteSavedSearch(_ s: SavedSearch) {
+        savedSearches.removeAll { $0.id == s.id }
+        persistSavedSearches()
+    }
+
+    func applySavedSearch(_ s: SavedSearch) {
+        var f = EntryFilter.empty
+        if let tag = s.tag { f.tags = [tag] }
+        if let label = s.mood, let m = Mood.allCases.first(where: { $0.label == label }) { f.moods = [m] }
+        filter = f
+        searchText = s.query
+        refreshQuery()
+    }
+
+    // MARK: - Backlinks
+
+    /// Entries whose body links to `entry` via `[[Title]]`. Hidden entries only
+    /// count while the biometric session is unlocked; trashed entries never do.
+    func backlinks(for entry: JournalEntry) -> [JournalEntry] {
+        let unlocked = BiometricAuth.shared.isAuthenticated
+        let pool = entries + archivedEntries + (unlocked ? hiddenEntries : [])
+        let linkable = pool.map { LinkableEntry(id: $0.id, title: $0.title, body: $0.body, isHidden: $0.isHidden) }
+        let ids = Set(WikiLinks.backlinks(toTitle: entry.title, in: linkable, excludingId: entry.id, includeHidden: unlocked).map(\.id))
+        return pool.filter { ids.contains($0.id) }
+    }
+
+    // MARK: - Wiki link resolution
+
+    /// Lower-cased titles `[[links]]` can resolve to. Trashed entries never
+    /// resolve; hidden entries only while the biometric session is unlocked.
+    func linkableTitles() -> Set<String> {
+        let unlocked = BiometricAuth.shared.isAuthenticated
+        let pool = (entries + archivedEntries + hiddenEntries).filter { unlocked || !$0.isHidden }
+        return Set(pool.map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })
+    }
+
+    /// Opens the entry a `[[title]]` link points at (case-insensitive; the most
+    /// recently created wins when titles collide). Returns false, with a toast,
+    /// when nothing resolves.
+    @discardableResult
+    func openLinkedEntry(titled title: String) -> Bool {
+        let unlocked = BiometricAuth.shared.isAuthenticated
+        let wanted = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let pool = (entries + archivedEntries + hiddenEntries).filter { unlocked || !$0.isHidden }
+        guard let target = pool.filter({ $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == wanted })
+                .max(by: { $0.createdAt < $1.createdAt }) else {
+            showToast("No entry titled “\(title)”", isError: true)
+            return false
+        }
+        flushBeforeImmediateMutation()
+        select(target)
+        return true
+    }
+
+    // MARK: - Reviews
+
+    /// Creates a weekly/monthly review draft entry (tag "review") from the
+    /// current period's entries. Hidden entries are only summarised while unlocked.
+    @discardableResult
+    func createReviewEntry(period: ReviewPeriod, reference: Date = Date()) -> JournalEntry {
+        let unlocked = BiometricAuth.shared.isAuthenticated
+        let pool = entries + (unlocked ? hiddenEntries : [])
+        let values = pool.map {
+            ReviewEntry(title: $0.title, body: $0.body, mood: $0.mood.rawValue, tags: $0.tags,
+                        createdAt: $0.createdAt, isFavorite: $0.isFavorite, isPinned: $0.isPinned, isHidden: $0.isHidden)
+        }
+        let draft = ReviewGenerator.draft(period: period, entries: values, reference: reference, includeHidden: unlocked)
+        flushBeforeImmediateMutation()
+        return createEntry(title: draft.title, body: draft.body, tags: ["review"])
     }
 
     private func recomputeMoodCounts() {
@@ -741,7 +834,11 @@ final class JournalViewModel: ObservableObject {
             clearBulkSelection()
             return
         }
-        for id in ids { db.trashEntry(id: id) }
+        guard db.bulkTrash(ids: ids) else {
+            showToast("Couldn't move the selection to Trash — nothing was changed", isError: true)
+            reload()
+            return
+        }
         if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
         if let editing = editingEntryId, ids.contains(editing) { editingEntryId = nil }
         pushUndo(.restoreTrashed(ids: ids))
@@ -823,13 +920,11 @@ final class JournalViewModel: ObservableObject {
         // Work from the in-memory (already decrypted) snapshot instead of
         // re-fetching + decrypting every row from SQLite.
         flushBeforeImmediateMutation()
-        let byID = Dictionary(uniqueKeysWithValues: nonTrashedEntries.map { ($0.id, $0) })
-        var changed = 0
-        for id in ids {
-            guard var e = byID[id], !e.isFavorite else { continue }
-            e.isFavorite = true
-            db.saveEntry(e)
-            changed += 1
+        // One metadata-only transaction: no body re-encryption, all-or-nothing.
+        guard let changed = db.bulkSetFavorite(ids: ids, favorite: true) else {
+            showToast("Couldn't favorite the selection — nothing was changed", isError: true)
+            reload()
+            return
         }
         clearBulkSelection()
         reload()
@@ -845,14 +940,10 @@ final class JournalViewModel: ObservableObject {
             return
         }
         flushBeforeImmediateMutation()
-        let byID = Dictionary(uniqueKeysWithValues: nonTrashedEntries.map { ($0.id, $0) })
-        var changed = 0
-        for id in ids {
-            guard var e = byID[id], !e.tags.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { continue }
-            e.tags.append(trimmed)
-            e.updatedAt = Date()
-            db.saveEntry(e)
-            changed += 1
+        guard let changed = db.bulkAddTag(ids: ids, tag: trimmed) else {
+            showToast("Couldn't tag the selection — nothing was changed", isError: true)
+            reload()
+            return
         }
         clearBulkSelection()
         reload()
@@ -1275,7 +1366,12 @@ final class JournalViewModel: ObservableObject {
             var knownIDs = Set(stored.map(\.id))
             var added = 0
             var skipped = 0
-            for je in export.entries {
+            var pendingAttachments: [(id: String, items: [ExportManager.DecodedAttachment])] = []
+            // One transaction for the whole file: a failure leaves the journal
+            // untouched instead of half-imported, and there is one commit/FTS
+            // pass instead of one per entry.
+            let committed = db.inTransaction {
+              for je in export.entries {
                 guard knownIDs.insert(je.id).inserted else { skipped += 1; continue }
                 let entry = JournalEntry(
                     id: je.id, title: je.title, body: je.body,
@@ -1290,6 +1386,18 @@ final class JournalViewModel: ObservableObject {
                 )
                 db.saveEntry(entry)
                 added += 1
+                let atts = ExportManager.decodeAttachments(je)
+                if !atts.isEmpty { pendingAttachments.append((je.id, atts)) }
+              }
+            }
+            guard committed else {
+                reload()
+                showToast("Import failed and was rolled back — no entries were added", isError: true)
+                return 0
+            }
+            // Attachment files are written only after the entries committed.
+            for (id, items) in pendingAttachments {
+                for a in items { _ = db.saveAttachment(entryId: id, data: a.data, filename: a.filename, mimeType: a.mimeType) }
             }
             reload()
             if added == 0 {

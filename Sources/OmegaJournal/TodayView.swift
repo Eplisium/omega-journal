@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Today workspace
 
@@ -48,17 +49,17 @@ struct TodayView: View {
         HStack(alignment: .bottom, spacing: 20) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(greeting)
-                    .font(.system(size: 110, weight: .semibold, design: .serif))
+                    .font(.system(size: 10, weight: .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
 
                 Text(todayLabel)
-                    .font(.system(size: 113, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundColor(theme.secondaryTextColor)
 
                 Text(vm.entries.isEmpty
                      ? "A private place to put down a thought."
-                     : "\(vm.writingStreak)-day rhythm · \(vm.entriesThisMonth) entries this month")
-                    .font(.system(size: 113))
+                     : "\(StreakCopy.streakLine(vm.streakSummary)) · \(vm.entriesThisMonth) entries this month")
+                    .font(.system(size: 13))
                     .foregroundColor(theme.bodyTextColor)
             }
 
@@ -69,7 +70,7 @@ struct TodayView: View {
                 vm.createEntry()
             } label: {
                 Label("Write", systemImage: "square.and.pencil")
-                    .font(.system(size: 113, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(theme.onAccentColor)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -98,7 +99,7 @@ struct TodayView: View {
                             .fill(entry.mood.color)
                             .frame(width: 7, height: 7)
                         Text("Today · \(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
-                            .font(.system(size: 111, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(theme.secondaryTextColor)
                         Spacer()
                         if !entry.tags.isEmpty {
@@ -114,30 +115,30 @@ struct TodayView: View {
                     }
 
                     Text("Today's entry")
-                        .font(.system(size: 110, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .tracking(1.0)
                         .foregroundColor(theme.secondaryTextColor)
 
                     Text(entry.displayTitle)
-                        .font(.system(size: 112, weight: .semibold, design: .serif))
+                        .font(.system(size: 12, weight: .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
 
                     Text(entry.preview)
-                        .font(.system(size: 112.5))
+                        .font(.system(size: 12.5))
                         .foregroundColor(theme.bodyTextColor)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
                     HStack(spacing: 10) {
                         Label("Continue writing", systemImage: "pencil.line")
-                            .font(.system(size: 112, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(theme.onAccentColor)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .background(Capsule().fill(theme.accentColor))
                         Text("\(entry.wordCount) words")
-                            .font(.system(size: 110.5))
+                            .font(.system(size: 10.5))
                             .foregroundColor(theme.secondaryTextColor)
                         Spacer()
                     }
@@ -161,22 +162,22 @@ struct TodayView: View {
 
     private var statRow: some View {
         HStack(spacing: 14) {
-            statCard(value: "\(vm.entriesThisWeek)", label: "Entries this week", detail: "\(vm.writingStreak)-day streak")
+            statCard(value: "\(vm.entriesThisWeek)", label: "Entries this week", detail: StreakCopy.streakLine(vm.streakSummary))
             statCard(value: vm.totalWordCount.formatted(), label: "Words written", detail: "\(vm.entries.count) entries total")
-            statCard(value: "\(vm.entriesThisMonth)", label: "This month", detail: "Keep the rhythm going")
+            statCard(value: "\(vm.entriesThisMonth)", label: "This month", detail: "Every entry counts")
         }
     }
 
     private func statCard(value: String, label: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(value)
-                .font(.system(size: 114, weight: .bold, design: .serif))
+                .font(.system(size: 14, weight: .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text(label)
-                .font(.system(size: 111, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(theme.bodyTextColor)
             Text(detail)
-                .font(.system(size: 110))
+                .font(.system(size: 10))
                 .foregroundColor(theme.secondaryTextColor)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -195,13 +196,13 @@ struct TodayView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(theme.accentColor)
                 Text("TODAY'S PROMPT")
-                    .font(.system(size: 110, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .tracking(0.9)
                     .foregroundColor(theme.secondaryTextColor)
             }
 
             Text(PromptGenerator.today())
-                .font(.system(size: 112, weight: .medium, design: .serif))
+                .font(.system(size: 12, weight: .medium, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -210,7 +211,7 @@ struct TodayView: View {
                 vm.createEntryFromPrompt()
             } label: {
                 Label("Write about this", systemImage: "arrow.right")
-                    .font(.system(size: 112, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(theme.accentColor)
             }
             .buttonStyle(.plain)
@@ -230,7 +231,7 @@ struct TodayView: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("TODAY'S PROGRESS")
-                    .font(.system(size: 110, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .tracking(0.8)
                     .foregroundColor(theme.secondaryTextColor)
 
@@ -244,7 +245,7 @@ struct TodayView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("RETURN TO")
-                    .font(.system(size: 110, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .tracking(0.8)
                     .foregroundColor(theme.secondaryTextColor)
 
@@ -265,16 +266,16 @@ struct TodayView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Recent writing")
-                        .font(.system(size: 117, weight: .semibold, design: .serif))
+                        .font(.system(size: 17, weight: .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                     Text("A few places to return to")
-                        .font(.system(size: 112))
+                        .font(.system(size: 12))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Button("See all") { openJournal() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 112, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(theme.accentColor)
             }
 
@@ -287,24 +288,24 @@ struct TodayView: View {
                                     .fill(entry.mood.color)
                                     .frame(width: 7, height: 7)
                                 Text(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                                    .font(.system(size: 110))
+                                    .font(.system(size: 10))
                                     .foregroundColor(theme.secondaryTextColor)
                                 Spacer(minLength: 4)
                                 if entry.isFavorite {
                                     Image(systemName: "star.fill")
-                                        .font(.system(size: 8))
+                                        .font(.system(size: 10))
                                         .foregroundColor(.yellow)
                                 }
                             }
 
                             Text(entry.displayTitle)
-                                .font(.system(size: 114, weight: .semibold, design: .serif))
+                                .font(.system(size: 14, weight: .semibold, design: .serif))
                                 .foregroundColor(theme.titleTextColor)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
 
                             Text(entry.preview)
-                                .font(.system(size: 111))
+                                .font(.system(size: 11))
                                 .foregroundColor(theme.secondaryTextColor)
                                 .lineLimit(3)
                                 .multilineTextAlignment(.leading)
@@ -354,10 +355,10 @@ struct TodayView: View {
                     .background(Circle().fill(Color.teal.opacity(0.12)))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("On This Day")
-                        .font(.system(size: 112, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text(entry.displayTitle)
-                        .font(.system(size: 113))
+                        .font(.system(size: 13))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(1)
                 }
@@ -399,11 +400,11 @@ private struct TodayGoalRow: View {
                     .font(.system(size: 10))
                     .foregroundColor(goal.isComplete ? .green : theme.accentColor)
                 Text(goal.type.rawValue)
-                    .font(.system(size: 111, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundColor(theme.bodyTextColor)
                 Spacer()
                 Text(goal.displayProgress)
-                    .font(.system(size: 110, design: .rounded))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundColor(theme.secondaryTextColor)
             }
             GeometryReader { proxy in
@@ -433,7 +434,7 @@ private struct TodayShortcut: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(theme.accentColor)
                 Text(title)
-                    .font(.system(size: 111, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(theme.bodyTextColor)
                 Text(subtitle)
                     .font(.system(size: 11))

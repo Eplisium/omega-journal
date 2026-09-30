@@ -49,6 +49,9 @@ struct SettingsView: View {
     @State private var customCard = ThemeManager.shared.cardColor
     @State private var showEmptyTrashConfirmation = false
     @AppStorage(ShellPrefs.lockOnResignKey) private var lockOnResign = true
+    @AppStorage(ReadingPreferences.maxWidthKey) private var readingMaxWidth = ReadingPreferences.defaultMaxWidth
+    @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
+    @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
 
     init(vm: JournalViewModel, initialSection: SettingsSection = .appearance) {
         self._vm = ObservedObject(wrappedValue: vm)
@@ -93,12 +96,12 @@ struct SettingsView: View {
                         )
                         .frame(width: 30, height: 30)
                     Text("Ω")
-                        .font(.system(size: 115, weight: .bold, design: .serif))
+                        .font(.system(size: 15, weight: .bold, design: .serif))
                         .foregroundColor(theme.onAccentColor)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Settings")
-                        .font(.system(size: 113, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Omega Journal")
                         .font(.system(size: 11))
@@ -130,10 +133,10 @@ struct SettingsView: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(section.rawValue)
-                        .font(.system(size: 117, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text(section.subtitle)
-                        .font(.system(size: 111))
+                        .font(.system(size: 11))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
@@ -180,6 +183,41 @@ struct SettingsView: View {
                     ForEach(ThemePresets.all.keys.sorted(), id: \.self) { name in
                         themePresetButton(name)
                     }
+                }
+            }
+
+            SettingsCard(
+                title: "Reading",
+                icon: "textformat",
+                footnote: "Applies to the entry reader. A narrower column is easier on the eyes for long entries."
+            ) {
+                SettingsRow(title: "Font style") {
+                    Picker("Reading font style", selection: $readingFontDesign) {
+                        ForEach(ReadingPreferences.fontDesignOptions, id: \.raw) { option in
+                            Text(option.label).tag(option.raw)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
+                }
+                SettingsRowDivider()
+                SettingsRow(title: "Maximum width", subtitle: "\(Int(ReadingPreferences.clampedWidth(readingMaxWidth))) pt") {
+                    Slider(value: $readingMaxWidth, in: ReadingPreferences.widthRange, step: 20)
+                        .frame(width: 200)
+                        .accessibilityLabel("Reading maximum width")
+                }
+            }
+
+            SettingsCard(
+                title: "Quick Capture",
+                icon: "square.and.pencil",
+                footnote: "Jot a thought from the menu bar. It is saved as a normal entry tagged #quick."
+            ) {
+                SettingsRow(title: "Show menu bar quick capture") {
+                    Toggle("Show menu bar quick capture", isOn: $menuBarQuickCapture)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
                 }
             }
 
@@ -233,7 +271,7 @@ struct SettingsView: View {
                 .frame(height: 32)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 Text(name)
-                    .font(.system(size: 111, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(theme.titleTextColor)
             }
             .padding(7)
@@ -266,10 +304,10 @@ struct SettingsView: View {
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(goal.type.rawValue)
-                            .font(.system(size: 112, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(theme.titleTextColor)
                         Text(goal.displayProgress)
-                            .font(.system(size: 110))
+                            .font(.system(size: 10))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     Spacer(minLength: 12)
@@ -388,17 +426,17 @@ struct SettingsView: View {
                         )
                         .frame(width: 72, height: 72)
                     Text("Ω")
-                        .font(.system(size: 116, weight: .bold, design: .serif))
+                        .font(.system(size: 16, weight: .bold, design: .serif))
                         .foregroundColor(theme.onAccentColor)
                 }
                 Text("Omega Journal")
-                    .font(.system(size: 117, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text("A fast, private, local-first journal for macOS.")
-                    .font(.system(size: 111))
+                    .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor)
                 Text("Version \(appVersion)")
-                    .font(.system(size: 110, design: .rounded))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.8))
             }
             .frame(maxWidth: .infinity)
@@ -432,14 +470,14 @@ struct SettingsView: View {
     private func shortcut(_ keys: String, _ label: String) -> some View {
         HStack(spacing: 8) {
             Text(keys)
-                .font(.system(size: 110, design: .rounded))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundColor(theme.bodyTextColor)
                 .fixedSize()
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 4).fill(theme.secondaryTextColor.opacity(0.13)))
             Text(label)
-                .font(.system(size: 111))
+                .font(.system(size: 11))
                 .foregroundColor(theme.secondaryTextColor)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -488,7 +526,7 @@ private struct SettingsCard<Content: View>: View {
                             .fill(theme.accentColor.opacity(0.14))
                     )
                 Text(title)
-                    .font(.system(size: 111, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .tracking(0.5)
                     .foregroundColor(theme.secondaryTextColor)
             }
@@ -512,7 +550,7 @@ private struct SettingsCard<Content: View>: View {
 
             if let footnote {
                 Text(footnote)
-                    .font(.system(size: 110))
+                    .font(.system(size: 10))
                     .foregroundColor(theme.secondaryTextColor)
                     .padding(.leading, 2)
             }
@@ -554,11 +592,11 @@ private struct SettingsRow<Trailing: View>: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 112, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(theme.titleTextColor)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.system(size: 110))
+                        .font(.system(size: 10))
                         .foregroundColor(theme.secondaryTextColor)
                 }
             }
@@ -579,11 +617,11 @@ private struct SettingsValueRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(title)
-                .font(.system(size: 111))
+                .font(.system(size: 11))
                 .foregroundColor(theme.secondaryTextColor)
             Spacer(minLength: 12)
             Text(value)
-                .font(.system(size: 111, design: .rounded))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundColor(theme.bodyTextColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -623,7 +661,7 @@ private struct SettingsPillButton: View {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 111, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
                     .fixedSize()
             }
@@ -634,7 +672,7 @@ private struct SettingsPillButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .animation(.easeOut(duration: 0.10), value: isHovered)
+        .animation(nil, value: isHovered)
     }
 
     private var foreground: Color {
@@ -683,7 +721,7 @@ private struct GoalTargetField: View {
         HStack(spacing: 5) {
             TextField("", text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 112, weight: .semibold, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundColor(theme.titleTextColor)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 48)
@@ -751,7 +789,7 @@ private struct SidebarRow: View {
                     .foregroundColor(isSelected ? theme.accentColor : theme.secondaryTextColor)
                     .frame(width: 18)
                 Text(section.rawValue)
-                    .font(.system(size: 111, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
                     .lineLimit(1)
                 Spacer(minLength: 0)

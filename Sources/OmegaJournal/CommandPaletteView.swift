@@ -161,7 +161,7 @@ struct CommandPaletteView: View {
                         .foregroundColor(theme.accentColor)
                     TextField("Type a command or search entries…", text: $query)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 115))
+                        .font(.system(size: 15))
                         .foregroundColor(theme.titleTextColor)
                         .focused($focused)
                         .onSubmit { runHighlighted() }
@@ -188,7 +188,7 @@ struct CommandPaletteView: View {
                             }
                             if results.isEmpty {
                                 Text("No matching commands")
-                                    .font(.system(size: 112))
+                                    .font(.system(size: 12))
                                     .foregroundColor(theme.secondaryTextColor)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 24)
@@ -255,11 +255,11 @@ struct CommandPaletteView: View {
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cmd.title)
-                        .font(.system(size: 112.5, weight: isOn ? .semibold : .regular))
+                        .font(.system(size: 12.5, weight: isOn ? .semibold : .regular))
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
                     Text(cmd.subtitle)
-                        .font(.system(size: 110))
+                        .font(.system(size: 10))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(1)
                 }

@@ -7,6 +7,8 @@ import AppKit
 struct OmegaJournalApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    @AppStorage(QuickCapture.insertedKey) private var showQuickCapture = true
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -16,6 +18,11 @@ struct OmegaJournalApp: App {
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1200, height: 780)
         .commands { menuCommands }
+
+        MenuBarExtra("Quick Capture", systemImage: "square.and.pencil", isInserted: $showQuickCapture) {
+            QuickCaptureView()
+        }
+        .menuBarExtraStyle(.window)
     }
 
     // MARK: Menus
@@ -80,6 +87,10 @@ struct OmegaJournalApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             Button("Archive / Unarchive") { post(.toggleArchiveSelected) }
                 .keyboardShortcut("a", modifiers: [.command, .control])
+            Button("Duplicate") { post(.duplicateSelected) }
+                .keyboardShortcut("d", modifiers: [.command, .control])
+            Button("Export Entry…") { post(.exportSelected) }
+                .keyboardShortcut("e", modifiers: [.command, .control])
             Divider()
             Button("Next Entry") { post(.selectNextEntry) }
                 .keyboardShortcut("]", modifiers: .command)
