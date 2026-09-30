@@ -311,6 +311,8 @@ struct EditorView: View {
         ZStack {
             Button("Larger Text") { stepFontSize(1) }.keyboardShortcut("=", modifiers: .command)
             Button("Smaller Text") { stepFontSize(-1) }.keyboardShortcut("-", modifiers: .command)
+            Button("Find in Entry") { controller.showFind() }.keyboardShortcut("f", modifiers: [.command, .option])
+            Button("Find and Replace in Entry") { controller.showFind(replace: true) }.keyboardShortcut("f", modifiers: [.command, .option, .shift])
             Button("Toggle Task Done") { controller.apply(.toggleTask) }.keyboardShortcut("d", modifiers: [.command, .shift])
         }
         .opacity(0)
@@ -412,6 +414,25 @@ struct EditorView: View {
         }
         .frame(maxWidth: vm.isZenMode ? 760 : .infinity)
         .frame(maxWidth: .infinity)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers)
+        }
+    }
+
+    /// Dragging files from Finder onto the editor attaches them.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !fileProviders.isEmpty else { return false }
+        for provider in fileProviders {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                var url: URL?
+                if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+                else if let u = item as? URL { url = u }
+                guard let url, url.isFileURL else { return }
+                Task { @MainActor in attachURLs([url]) }
+            }
+        }
+        return true
     }
 
     private var previewPane: some View {
@@ -502,7 +523,10 @@ struct EditorView: View {
         panel.canChooseDirectories = false
         panel.title = "Attach files to this entry"
         guard panel.runModal() == .OK else { return }
-        let urls = panel.urls
+        attachURLs(panel.urls)
+    }
+
+    private func attachURLs(_ urls: [URL]) {
         let limit = Self.maxAttachmentBytes
         let target = entry
         Task {

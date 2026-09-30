@@ -278,3 +278,37 @@ struct MarkdownTypingTests {
         #expect(t == "```")   // pair, skip over, then a plain third backtick
     }
 }
+
+@Suite("Markdown logic: large documents")
+struct MarkdownLargeDocumentTests {
+    private let big = (0..<20_000).map { i -> String in
+        switch i % 5 {
+        case 0: return "# Heading \(i)"
+        case 1: return "- [ ] task \(i) with **bold** and `code`"
+        case 2: return "```"
+        case 3: return "let x = \(i)"
+        default: return "```"
+        }
+    }.joined(separator: "\n")
+
+    @Test("block parsing and fence scanning stay fast on ~20k lines")
+    func speed() {
+        let start = Date()
+        let blocks = MarkdownLogic.parseBlocks(big)
+        let ranges = MarkdownLogic.codeBlockRanges(in: big)
+        #expect(!blocks.isEmpty)
+        #expect(ranges.count == 4000)
+        #expect(Date().timeIntervalSince(start) < 5)
+    }
+
+    @Test("word count over a large document")
+    func words() {
+        #expect(MarkdownLogic.wordCount(big) > 40_000)
+    }
+
+    @Test("CRLF input parses without stray carriage returns")
+    func crlf() {
+        #expect(MarkdownLogic.parseBlocks("# Hi\r\n- a\r\n").map(\.block).prefix(2) == [
+            .heading(level: 1, text: "Hi"), .bullet(level: 0, text: "a")])
+    }
+}

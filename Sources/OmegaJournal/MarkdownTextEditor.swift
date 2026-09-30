@@ -116,6 +116,15 @@ final class MarkdownEditorController: ObservableObject {
         tv.performTextFinderAction(item)
     }
 
+    /// Opens the text view's find bar (optionally with replace).
+    func showFind(replace: Bool = false) {
+        guard let tv = textView else { return }
+        tv.window?.makeFirstResponder(tv)
+        let item = NSMenuItem()
+        item.tag = (replace ? NSTextFinder.Action.showReplaceInterface : NSTextFinder.Action.showFindInterface).rawValue
+        tv.performTextFinderAction(item)
+    }
+
     var selectedText: String {
         guard let tv = textView else { return "" }
         return (tv.string as NSString).substring(with: tv.selectedRange())
