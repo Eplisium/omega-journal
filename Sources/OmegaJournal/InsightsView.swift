@@ -18,7 +18,7 @@ struct InsightsView: View {
             Text("Insights")
                 .font(OmegaTheme.titleFont)
             Text("Your journaling, visualized")
-                .font(.system(size: 13))
+                .font(.system(size: 113))
                 .foregroundColor(.secondary)
         }
     }
@@ -74,9 +74,9 @@ struct InsightsView: View {
     private func sectionTitle(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 115, weight: .semibold))
             Text(subtitle)
-                .font(.system(size: 12))
+                .font(.system(size: 112))
                 .foregroundColor(.secondary)
         }
     }
@@ -98,9 +98,9 @@ struct InsightStat: View {
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(.system(size: 110, weight: .bold, design: .rounded))
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(.system(size: 111))
                     .foregroundColor(.secondary)
             }
             Spacer(minLength: 0)
@@ -171,16 +171,16 @@ struct InsightsGoalView: View {
                                 .foregroundColor(.green)
                         } else {
                             Text("\(Int(goal.progress * 100))%")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .font(.system(size: 110, weight: .bold, design: .rounded))
                                 .foregroundColor(.primary)
                         }
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(goal.type.rawValue)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 112, weight: .semibold))
                             .foregroundColor(.primary)
                         Text(goal.displayProgress)
-                            .font(.system(size: 11))
+                            .font(.system(size: 111))
                             .foregroundColor(.secondary)
                     }
                 }

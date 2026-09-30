@@ -57,12 +57,39 @@ struct OmegaJournalApp: App {
             formatButton("Divider", .divider, "-", [.command, .shift])
         }
 
-        CommandMenu("View") {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { post(.showSettings) }
+                .keyboardShortcut(",", modifiers: .command)
+        }
+
+        CommandGroup(after: .textEditing) {
+            Divider()
+            Button("Find") { post(.findInEntryOrList) }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("Search All Entries") { post(.searchAllEntries) }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+        }
+
+        CommandMenu("Entry") {
+            Button("Edit Entry") { post(.editSelectedEntry) }
+                .keyboardShortcut("e", modifiers: .command)
+            Button("Pin / Unpin") { post(.togglePinSelected) }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            Button("Favorite / Unfavorite") { post(.toggleFavoriteSelected) }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+            Button("Archive / Unarchive") { post(.toggleArchiveSelected) }
+                .keyboardShortcut("a", modifiers: [.command, .control])
+            Divider()
+            Button("Next Entry") { post(.selectNextEntry) }
+                .keyboardShortcut("]", modifiers: .command)
+            Button("Previous Entry") { post(.selectPreviousEntry) }
+                .keyboardShortcut("[", modifiers: .command)
+        }
+
+        CommandGroup(after: .sidebar) {
+            Divider()
             Button("Command Palette") { post(.toggleCommandPalette) }
                 .keyboardShortcut("k", modifiers: .command)
-            Button("Search") { post(.focusSearch) }
-                .keyboardShortcut("f", modifiers: .command)
-            Divider()
             Button("Zen Mode") { post(.toggleZenMode) }
                 .keyboardShortcut("f", modifiers: [.command, .control])
             Divider()
@@ -82,6 +109,10 @@ struct OmegaJournalApp: App {
         CommandGroup(replacing: .help) {
             Button("Omega Journal Help") {
                 NSWorkspace.shared.open(URL(string: "https://github.com/Eplisium/omega-journal")!)
+            }
+            Button("Keyboard Shortcuts") { post(.showShortcuts) }
+            Button("Report an Issue…") {
+                NSWorkspace.shared.open(URL(string: "https://github.com/Eplisium/omega-journal/issues")!)
             }
         }
     }
@@ -109,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidResignActive(_ notification: Notification) {
         // Touch ID / password dialogs resign the app — don't lock mid-prompt.
         guard !BiometricAuth.shared.isAuthenticating else { return }
+        // Default ON (preserves the original behaviour); Settings can disable it.
+        let lockOnResign = UserDefaults.standard.object(forKey: ShellPrefs.lockOnResignKey) as? Bool ?? true
+        guard lockOnResign else { return }
         NotificationCenter.default.post(name: .lockHiddenEntries, object: nil)
     }
 
@@ -124,4 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .quitTimeSave, object: nil)
         DatabaseManager.shared.purgeExpiredTrash()
     }
+}
+
+enum ShellPrefs {
+    static let lockOnResignKey = "shell.lockHiddenOnResignActive"
 }

@@ -8,6 +8,9 @@ struct ContentView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @State private var sidebarSelection: SidebarItem? = .today
     @State private var showTemplatePicker = false
+    @SceneStorage("shell.sidebarSelection") private var storedSelection = SidebarItem.today.storageKey
+    @State private var didRestoreSelection = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -25,8 +28,8 @@ struct ContentView: View {
                     .zIndex(10)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: vm.isZenMode)
-        .animation(.easeInOut(duration: 0.15), value: vm.showCommandPalette)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: vm.isZenMode)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: vm.showCommandPalette)
         .tint(theme.accentColor)
         .preferredColorScheme(theme.colorScheme)
         .background(theme.backgroundColor)
@@ -34,57 +37,9 @@ struct ContentView: View {
         .sheet(isPresented: $showTemplatePicker) {
             TemplatePickerView(vm: vm)
         }
-        .onChange(of: sidebarSelection) { _, next in
-            // A bulk selection is meaningful only within the collection in
-            // which it was made. Never carry it into another library/storage
-            // destination or a reflective workspace.
-            vm.clearBulkSelection()
-            guard let next, !next.workspace.usesEntryCollection, vm.isEditing else { return }
-            vm.flushPendingSave()
-            vm.stopEditing()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .newEntry)) { _ in
-            sidebarSelection = .all
-            vm.createEntry()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .newFromTemplate)) { _ in
-            sidebarSelection = .all
-            showTemplatePicker = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .newFromPrompt)) { _ in
-            sidebarSelection = .all
-            vm.createEntryFromPrompt()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
-            vm.showCommandPalette.toggle()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleZenMode)) { _ in
-            if vm.editingEntryId != nil { vm.isZenMode.toggle() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showToday)) { _ in
-            sidebarSelection = .today
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showJournal)) { _ in
-            sidebarSelection = .all
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showInsights)) { _ in
-            sidebarSelection = .insights
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showCalendar)) { _ in
-            sidebarSelection = .calendar
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .importEntries)) { _ in
-            ImportExportPanels.showImportPanel(vm: vm)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .lockHiddenEntries)) { _ in
-            vm.lockHiddenEntries()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .quitTimeSave)) { _ in
-            // Quit is in progress and this call runs synchronously — flush
-            // regardless of the `isEditing` guard used for workspace switches,
-            // otherwise the final keystrokes of an edit session are lost.
-            vm.flushPendingSave()
-        }
+        .modifier(ShellEntryCommands(vm: vm, selection: $sidebarSelection))
+        .modifier(ShellLifecycle(vm: vm, selection: $sidebarSelection, showTemplatePicker: $showTemplatePicker,
+                                 storedSelection: $storedSelection, didRestore: $didRestoreSelection))
     }
 
     @ViewBuilder
@@ -170,6 +125,49 @@ enum SidebarItem: Hashable {
         }
     }
 
+    /// Stable string for @SceneStorage state restoration.
+    var storageKey: String {
+        switch self {
+        case .today: "today"
+        case .all: "all"
+        case .favorites: "favorites"
+        case .thisWeek: "thisWeek"
+        case .mood(let m): "mood:\(m.rawValue)"
+        case .insights: "insights"
+        case .calendar: "calendar"
+        case .onThisDay: "onThisDay"
+        case .archive: "archive"
+        case .hidden: "hidden"
+        case .trash: "trash"
+        case .tag(let t): "tag:\(t)"
+        }
+    }
+
+    /// Restores a selection. `.hidden` is never restored — a relaunch must
+    /// not open straight onto private entries.
+    init?(storageKey: String) {
+        switch storageKey {
+        case "today": self = .today
+        case "all": self = .all
+        case "favorites": self = .favorites
+        case "thisWeek": self = .thisWeek
+        case "insights": self = .insights
+        case "calendar": self = .calendar
+        case "onThisDay": self = .onThisDay
+        case "archive": self = .archive
+        case "hidden": self = .all
+        case "trash": self = .trash
+        default:
+            if storageKey.hasPrefix("mood:"), let raw = Int(storageKey.dropFirst(5)), let m = Mood(rawValue: raw) {
+                self = .mood(m)
+            } else if storageKey.hasPrefix("tag:"), storageKey.count > 4 {
+                self = .tag(String(storageKey.dropFirst(4)))
+            } else {
+                return nil
+            }
+        }
+    }
+
     /// Collection filters stay inside the Journal workspace. Reflective pages
     /// intentionally take over the content area instead of inheriting the list.
     var workspace: JournalWorkspace {
@@ -198,5 +196,165 @@ extension Notification.Name {
     static let importEntries = Notification.Name("OmegaJournal.importEntries")
     static let focusSearch = Notification.Name("OmegaJournal.focusSearch")
     static let lockHiddenEntries = Notification.Name("OmegaJournal.lockHiddenEntries")
+    static let editSelectedEntry = Notification.Name("OmegaJournal.editSelectedEntry")
+    static let togglePinSelected = Notification.Name("OmegaJournal.togglePinSelected")
+    static let toggleFavoriteSelected = Notification.Name("OmegaJournal.toggleFavoriteSelected")
+    static let toggleArchiveSelected = Notification.Name("OmegaJournal.toggleArchiveSelected")
+    static let selectNextEntry = Notification.Name("OmegaJournal.selectNextEntry")
+    static let selectPreviousEntry = Notification.Name("OmegaJournal.selectPreviousEntry")
+    static let findInEntryOrList = Notification.Name("OmegaJournal.findInEntryOrList")
+    static let searchAllEntries = Notification.Name("OmegaJournal.searchAllEntries")
+    static let showShortcuts = Notification.Name("OmegaJournal.showShortcuts")
+    static let showSettings = Notification.Name("OmegaJournal.showSettings")
     static let quitTimeSave = Notification.Name("OmegaJournal.quitTimeSave")
+}
+
+// MARK: - Drop import filter
+
+enum ShellImportFilter {
+    /// File URLs that look like markdown documents (.md / .markdown).
+    static func markdownFiles(in urls: [URL]) -> [URL] {
+        urls.filter { $0.isFileURL && ["md", "markdown"].contains($0.pathExtension.lowercased()) }
+    }
+}
+
+// MARK: - Entry keyboard navigation
+
+enum ShellEntryNavigation {
+    /// Next/previous id in `ids` relative to `current`; clamps at the ends and
+    /// selects the first entry when nothing (or something not listed) is selected.
+    static func step(_ delta: Int, from current: String?, in ids: [String]) -> String? {
+        guard !ids.isEmpty else { return nil }
+        guard let current, let i = ids.firstIndex(of: current) else {
+            return delta >= 0 ? ids.first : ids.last
+        }
+        return ids[min(max(i + delta, 0), ids.count - 1)]
+    }
+}
+
+// MARK: - Entry command receivers
+
+/// Menu-driven entry commands, kept out of ContentView.body so the main view
+/// chain stays cheap for the type checker.
+struct ShellEntryCommands: ViewModifier {
+    @ObservedObject var vm: JournalViewModel
+    @Binding var selection: SidebarItem?
+
+    func body(content: Content) -> some View {
+        content
+            .dropDestination(for: URL.self) { urls, _ in
+                let markdown = ShellImportFilter.markdownFiles(in: urls)
+                guard !markdown.isEmpty else { return false }
+                selection = .all
+                vm.importMarkdown(from: markdown)
+                return true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .editSelectedEntry)) { _ in
+                guard selection != .trash, let entry = vm.selectedEntry, !entry.isTrashed else { return }
+                vm.startEditing(entry)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .togglePinSelected)) { _ in
+                if let entry = vm.selectedEntry, !entry.isTrashed { vm.togglePin(entry) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleFavoriteSelected)) { _ in
+                if let entry = vm.selectedEntry, !entry.isTrashed { vm.toggleFavorite(entry) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleArchiveSelected)) { _ in
+                if let entry = vm.selectedEntry, !entry.isTrashed { vm.toggleArchive(entry) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .findInEntryOrList)) { _ in
+                if vm.editingEntryId != nil, NSApp.keyWindow?.firstResponder is NSTextView {
+                    let item = NSMenuItem()
+                    item.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+                    if NSApp.sendAction(#selector(NSTextView.performFindPanelAction(_:)), to: nil, from: item) { return }
+                }
+                focusListSearch()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .searchAllEntries)) { _ in
+                vm.filter = .empty
+                focusListSearch(forceLibrary: true)
+            }
+    }
+
+    /// The search field only exists in the Journal workspace, so switch there
+    /// first and focus on the next runloop turn once the field is on screen.
+    private func focusListSearch(forceLibrary: Bool = false) {
+        if forceLibrary || !(selection?.workspace ?? .today).usesEntryCollection {
+            selection = .all
+        }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .focusSearch, object: nil)
+        }
+    }
+}
+
+// MARK: - Navigation / lifecycle receivers
+
+struct ShellLifecycle: ViewModifier {
+    @ObservedObject var vm: JournalViewModel
+    @Binding var selection: SidebarItem?
+    @Binding var showTemplatePicker: Bool
+    @Binding var storedSelection: String
+    @Binding var didRestore: Bool
+
+    func body(content: Content) -> some View {
+        content
+        .onAppear {
+            guard !didRestore else { return }
+            didRestore = true
+            selection = SidebarItem(storageKey: storedSelection) ?? .today
+        }
+        .onChange(of: selection) { _, next in
+            if let next { storedSelection = next.storageKey }
+            // A bulk selection is meaningful only within the collection in
+            // which it was made. Never carry it into another library/storage
+            // destination or a reflective workspace.
+            vm.clearBulkSelection()
+            guard let next, !next.workspace.usesEntryCollection, vm.isEditing else { return }
+            vm.flushPendingSave()
+            vm.stopEditing()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newEntry)) { _ in
+            selection = .all
+            vm.createEntry()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newFromTemplate)) { _ in
+            selection = .all
+            showTemplatePicker = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newFromPrompt)) { _ in
+            selection = .all
+            vm.createEntryFromPrompt()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleCommandPalette)) { _ in
+            vm.showCommandPalette.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleZenMode)) { _ in
+            if vm.editingEntryId != nil { vm.isZenMode.toggle() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showToday)) { _ in
+            selection = .today
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showJournal)) { _ in
+            selection = .all
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showInsights)) { _ in
+            selection = .insights
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showCalendar)) { _ in
+            selection = .calendar
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .importEntries)) { _ in
+            ImportExportPanels.showImportPanel(vm: vm)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lockHiddenEntries)) { _ in
+            vm.lockHiddenEntries()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .quitTimeSave)) { _ in
+            // Quit is in progress and this call runs synchronously — flush
+            // regardless of the `isEditing` guard used for workspace switches,
+            // otherwise the final keystrokes of an edit session are lost.
+            vm.flushPendingSave()
+        }
+    }
 }

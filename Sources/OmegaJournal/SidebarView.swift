@@ -8,9 +8,11 @@ struct SidebarView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var goals = GoalManager.shared
 
-    @State private var tagsExpanded = true
-    @State private var moodsExpanded = false
+    @AppStorage("shell.sidebar.tagsExpanded") private var tagsExpanded = true
+    @AppStorage("shell.sidebar.moodsExpanded") private var moodsExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
+    @State private var settingsSection: SettingsSection = .appearance
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +21,7 @@ struct SidebarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    streakCard
+                    if !vm.entries.isEmpty { streakCard }
 
                     section("TODAY") {
                         row(.today)
@@ -70,7 +72,15 @@ struct SidebarView: View {
         }
         .background(theme.sidebarColor)
         .sheet(isPresented: $showSettings) {
-            SettingsView(vm: vm)
+            SettingsView(vm: vm, initialSection: settingsSection)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
+            settingsSection = .appearance
+            showSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showShortcuts)) { _ in
+            settingsSection = .about
+            showSettings = true
         }
     }
 
@@ -88,15 +98,15 @@ struct SidebarView: View {
                     )
                     .frame(width: 26, height: 26)
                 Text("Ω")
-                    .font(.system(size: 15, weight: .bold, design: .serif))
-                    .foregroundColor(.white)
+                    .font(.system(size: 115, weight: .bold, design: .serif))
+                    .foregroundColor(theme.onAccentColor)
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("Omega Journal")
-                    .font(.system(size: 13.5, weight: .semibold, design: .serif))
+                    .font(.system(size: 113.5, weight: .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text("\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words")
-                    .font(.system(size: 10))
+                    .font(.system(size: 110))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()
@@ -115,20 +125,20 @@ struct SidebarView: View {
                         .font(.system(size: 11))
                         .foregroundColor(vm.writingStreak > 0 ? .orange : theme.secondaryTextColor.opacity(0.5))
                     Text("\(vm.writingStreak)")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 117, weight: .bold, design: .rounded))
                         .foregroundColor(theme.titleTextColor)
                 }
                 Text("day streak")
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Divider().frame(height: 26).opacity(0.25)
             VStack(spacing: 1) {
                 Text("\(vm.entriesThisMonth)")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(size: 117, weight: .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                 Text("this month")
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()
@@ -148,7 +158,7 @@ struct SidebarView: View {
     private var goalsCard: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text("TODAY'S GOALS")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(theme.secondaryTextColor)
                 .tracking(0.7)
                 .padding(.horizontal, 4)
@@ -160,11 +170,11 @@ struct SidebarView: View {
                             .font(.system(size: 9))
                             .foregroundColor(goal.isComplete ? .green : theme.accentColor)
                         Text(goal.type.rawValue)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 110, weight: .medium))
                             .foregroundColor(theme.bodyTextColor)
                         Spacer()
                         Text(goal.displayProgress)
-                            .font(.system(size: 9, design: .rounded))
+                            .font(.system(size: 11, design: .rounded))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     GeometryReader { geo in
@@ -194,9 +204,9 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "square.and.pencil").font(.system(size: 11, weight: .semibold))
-                    Text("New Entry").font(.system(size: 11, weight: .medium))
+                    Text("New Entry").font(.system(size: 111, weight: .medium))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(theme.onAccentColor)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(
@@ -207,7 +217,7 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .omegaTooltip("New Entry (⌘N)")
 
-            Button { showSettings = true } label: {
+            Button { settingsSection = .appearance; showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12))
                     .foregroundColor(theme.secondaryTextColor)
@@ -218,6 +228,7 @@ struct SidebarView: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
             .omegaTooltip("Settings (⌘,)")
         }
         .padding(.horizontal, 10)
@@ -230,7 +241,7 @@ struct SidebarView: View {
     private func section<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(theme.secondaryTextColor)
                 .tracking(0.7)
                 .padding(.horizontal, 8)
@@ -244,11 +255,11 @@ struct SidebarView: View {
     private func disclosureSection<C: View>(_ title: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) { isExpanded.wrappedValue.toggle() }
+                if reduceMotion { isExpanded.wrappedValue.toggle() } else { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.wrappedValue.toggle() } }
             } label: {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(theme.secondaryTextColor)
                         .tracking(0.7)
                     Image(systemName: "chevron.right")
@@ -263,6 +274,9 @@ struct SidebarView: View {
                 .padding(.bottom, 3)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(title.capitalized) section")
+            .accessibilityValue(isExpanded.wrappedValue ? "expanded" : "collapsed")
+            .accessibilityHint("Double tap to \(isExpanded.wrappedValue ? "collapse" : "expand")")
 
             if isExpanded.wrappedValue { content() }
         }
@@ -306,13 +320,13 @@ private struct SidebarRow: View {
                     .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
                     .frame(width: 15)
                 Text(item.title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 112, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let badge, badge > 0 {
                     Text("\(badge)")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -340,6 +354,9 @@ private struct SidebarRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(item.title)
+        .accessibilityValue(badge.map { $0 > 0 ? "\($0) \($0 == 1 ? "entry" : "entries")" : "" } ?? "")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
     }

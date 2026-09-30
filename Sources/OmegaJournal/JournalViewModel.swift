@@ -9,7 +9,12 @@ import OmegaJournalCore
 @MainActor
 final class JournalViewModel: ObservableObject {
     // Library
-    @Published var entries: [JournalEntry] = []
+    @Published var entries: [JournalEntry] = [] {
+        didSet { recomputeMoodCounts() }
+    }
+    /// Precomputed per-mood counts of active entries (sidebar badges) so views
+    /// don't re-filter the whole library for every mood on every render.
+    private(set) var moodCounts: [Mood: Int] = [:]
     @Published var trashedEntries: [JournalEntry] = []
     @Published var archivedEntries: [JournalEntry] = []
     @Published var hiddenEntries: [JournalEntry] = []
@@ -46,6 +51,8 @@ final class JournalViewModel: ObservableObject {
     private var searchDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
     private var undoStack: [UndoAction] = []
+    /// Undo history is bounded: an unbounded stack of id arrays only grows.
+    static let maxUndoDepth = 50
     private var cancellables: Set<AnyCancellable> = []
 
     enum EditorMode: String, CaseIterable, Identifiable {
@@ -85,8 +92,26 @@ final class JournalViewModel: ObservableObject {
         db.onError = { [weak self] message in
             self?.showToast(message, isError: true)
         }
+        loadPersistedViewState()
         reload()
         loadTemplates()
+        $sortOrder
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] order in
+                self?.db.setSetting(Self.sortOrderSettingKey, value: order.rawValue)
+            }
+            .store(in: &cancellables)
+        $filter
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] filter in
+                guard let self else { return }
+                if let data = try? JSONEncoder().encode(filter), let text = String(data: data, encoding: .utf8) {
+                    self.db.setSetting(Self.filterSettingKey, value: text)
+                }
+            }
+            .store(in: &cancellables)
         // Lock/unlock changes which tags may appear in the sidebar, so
         // re-derive tag counts whenever the biometric session changes. Combine
         // subscription keeps this in sync without every mutation site needing
@@ -100,6 +125,28 @@ final class JournalViewModel: ObservableObject {
                 self.allTags = self.db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: - Persisted view state
+
+    static let sortOrderSettingKey = "ui_sortOrder"
+    static let filterSettingKey = "ui_entryFilter"
+
+    private func loadPersistedViewState() {
+        if let order = SortOrder(rawValue: db.getSetting(Self.sortOrderSettingKey)) {
+            sortOrder = order
+        }
+        let raw = db.getSetting(Self.filterSettingKey)
+        if !raw.isEmpty, let data = raw.data(using: .utf8),
+           let saved = try? JSONDecoder().decode(EntryFilter.self, from: data) {
+            filter = saved
+        }
+    }
+
+    private func recomputeMoodCounts() {
+        var counts: [Mood: Int] = [:]
+        for e in entries { counts[e.mood, default: 0] += 1 }
+        moodCounts = counts
     }
 
     // MARK: - Loading
@@ -136,24 +183,35 @@ final class JournalViewModel: ObservableObject {
     }
 
     /// Re-runs whichever query matches the current search box contents.
+    ///
+    /// Results are the union of the FTS hits and a substring pass over the
+    /// decrypted in-memory library, so a body-only match is found even when the
+    /// title/tags also match (and vice versa). Locked hidden entries never
+    /// match on body or tags.
     func refreshQuery() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
             searchResults = nil
             return
-        } else {
-            var results = db.fullTextSearch(q, scope: .active)
-            if results.isEmpty {
-                results = db.fetchAllEntries(search: q, sort: sortOrder, scope: .active)
-            }
-            // Locked hidden entries stay in the list, but body text must not
-            // be searchable until the session is unlocked.
-            if !BiometricAuth.shared.isAuthenticated {
-                results = results.filter { entry in
-                    !entry.isHidden || Self.matchesVisibleFields(entry, query: q)
-                }
-            }
-            searchResults = results
+        }
+        let unlocked = BiometricAuth.shared.isAuthenticated
+        let fts = db.fullTextSearch(q, scope: .active).filter { entry in
+            unlocked || !entry.isHidden || Self.matchesVisibleFields(entry, query: q)
+        }
+        var seen = Set(fts.map(\.id))
+        var results = fts
+        for entry in Self.searchMatches(entries, query: q, unlocked: unlocked) where seen.insert(entry.id).inserted {
+            results.append(entry)
+        }
+        searchResults = results
+    }
+
+    /// Pure substring search over already-decrypted entries. Locked hidden
+    /// entries match on title only.
+    static func searchMatches(_ source: [JournalEntry], query: String, unlocked: Bool) -> [JournalEntry] {
+        source.filter { entry in
+            if entry.isHidden && !unlocked { return matchesVisibleFields(entry, query: query) }
+            return matchesSearchableFields(entry, query: query)
         }
     }
 
@@ -192,27 +250,44 @@ final class JournalViewModel: ObservableObject {
         }
     }
 
-    private func replaceEntry(_ entry: JournalEntry, in collection: inout [JournalEntry]) {
-        if let idx = collection.firstIndex(where: { $0.id == entry.id }) {
-            collection[idx] = entry
+    /// Replaces the entry in `collection` and returns the previous value.
+    @discardableResult
+    private func replaceEntry(_ entry: JournalEntry, in collection: inout [JournalEntry]) -> JournalEntry? {
+        guard let idx = collection.firstIndex(where: { $0.id == entry.id }) else { return nil }
+        let old = collection[idx]
+        collection[idx] = entry
+        return old
+    }
+
+    /// Whether replacing `old` with `new` can change its position under the
+    /// current sort order. Typing changes body/updatedAt on every keystroke, so
+    /// re-sorting unconditionally made each keystroke O(n log n).
+    private func sortKeyChanged(from old: JournalEntry, to new: JournalEntry) -> Bool {
+        if old.isPinned != new.isPinned { return true }
+        switch sortOrder {
+        case .dateDesc, .dateAsc: return old.createdAt != new.createdAt
+        case .updatedDesc: return old.updatedAt != new.updatedAt
+        case .titleAsc, .titleDesc: return old.displayTitle != new.displayTitle
+        case .wordsDesc: return old.wordCount != new.wordCount
+        case .moodDesc: return old.mood != new.mood || old.createdAt != new.createdAt
         }
     }
 
     /// Targeted update — refresh a single entry in every lifecycle collection
     /// that can display it, without paying for a full SQLite reload.
     private func updateEntry(_ entry: JournalEntry, refreshSearch: Bool = true) {
-        replaceEntry(entry, in: &entries)
-        replaceEntry(entry, in: &archivedEntries)
+        if let old = replaceEntry(entry, in: &entries), sortKeyChanged(from: old, to: entry) {
+            sort(&entries)
+        }
+        if let old = replaceEntry(entry, in: &archivedEntries), sortKeyChanged(from: old, to: entry) {
+            sort(&archivedEntries)
+        }
         replaceEntry(entry, in: &trashedEntries)
         replaceEntry(entry, in: &hiddenEntries)
         if var results = searchResults {
-            replaceEntry(entry, in: &results)
-            searchResults = results
-        }
-        sort(&entries)
-        sort(&archivedEntries)
-        if var results = searchResults {
-            sort(&results)
+            if let old = replaceEntry(entry, in: &results), sortKeyChanged(from: old, to: entry) {
+                sort(&results)
+            }
             searchResults = results
         }
         if refreshSearch, searchResults != nil { refreshQuery() }
@@ -330,7 +405,7 @@ final class JournalViewModel: ObservableObject {
         var entry = JournalEntry.new()
         entry.title = title
         entry.body = body
-        entry.tags = tags
+        entry.tags = OmegaCore.normalizeTags(tags)
         db.saveEntry(entry)
         entries.insert(entry, at: 0)
         sortInPlace()
@@ -531,7 +606,7 @@ final class JournalViewModel: ObservableObject {
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
-        undoStack.append(.restoreTrashed(ids: [entry.id]))
+        pushUndo(.restoreTrashed(ids: [entry.id]))
         refreshTagCounts()
         showToast("Moved to Trash", actionLabel: "Undo")
         GoalManager.shared.loadGoals()
@@ -583,7 +658,7 @@ final class JournalViewModel: ObservableObject {
         db.setArchived(id: entry.id, archived: newValue)
         if selectedEntryId == entry.id { selectedEntryId = nil }
         reload()
-        if newValue { undoStack.append(.unarchive(ids: [entry.id])) }
+        if newValue { pushUndo(.unarchive(ids: [entry.id])) }
         showToast(newValue ? "Archived" : "Unarchived", actionLabel: newValue ? "Undo" : nil)
     }
 
@@ -650,7 +725,7 @@ final class JournalViewModel: ObservableObject {
         for id in ids { db.trashEntry(id: id) }
         if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
         if let editing = editingEntryId, ids.contains(editing) { editingEntryId = nil }
-        undoStack.append(.restoreTrashed(ids: ids))
+        pushUndo(.restoreTrashed(ids: ids))
         clearBulkSelection()
         reload()
         showToast("Moved \(ids.count) \(ids.count == 1 ? "entry" : "entries") to Trash", actionLabel: "Undo")
@@ -663,19 +738,21 @@ final class JournalViewModel: ObservableObject {
     }
 
     func bulkArchive() {
+        flushBeforeImmediateMutation()
         let ids = selectedIDs(in: entries)
         guard !ids.isEmpty else {
             clearBulkSelection()
             return
         }
         for id in ids { db.setArchived(id: id, archived: true) }
-        undoStack.append(.unarchive(ids: ids))
+        pushUndo(.unarchive(ids: ids))
         clearBulkSelection()
         reload()
         showToast("Archived \(ids.count) \(ids.count == 1 ? "entry" : "entries")", actionLabel: "Undo")
     }
 
     func bulkUnarchive() {
+        flushBeforeImmediateMutation()
         let ids = selectedIDs(in: archivedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()
@@ -724,9 +801,13 @@ final class JournalViewModel: ObservableObject {
             clearBulkSelection()
             return
         }
+        // Work from the in-memory (already decrypted) snapshot instead of
+        // re-fetching + decrypting every row from SQLite.
+        flushBeforeImmediateMutation()
+        let byID = Dictionary(uniqueKeysWithValues: nonTrashedEntries.map { ($0.id, $0) })
         var changed = 0
         for id in ids {
-            guard var e = db.fetchEntry(id: id), !e.isFavorite else { continue }
+            guard var e = byID[id], !e.isFavorite else { continue }
             e.isFavorite = true
             db.saveEntry(e)
             changed += 1
@@ -738,16 +819,17 @@ final class JournalViewModel: ObservableObject {
 
     func bulkAddTag(_ tag: String) {
         // Commas are the text-column separator — never allow them inside a tag.
-        let trimmed = tag.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
-        guard !trimmed.isEmpty, !bulkSelection.isEmpty else { return }
+        guard let trimmed = OmegaCore.normalizeTags([tag]).first, !bulkSelection.isEmpty else { return }
         let ids = selectedIDs(in: nonTrashedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()
             return
         }
+        flushBeforeImmediateMutation()
+        let byID = Dictionary(uniqueKeysWithValues: nonTrashedEntries.map { ($0.id, $0) })
         var changed = 0
         for id in ids {
-            guard var e = db.fetchEntry(id: id), !e.tags.contains(trimmed) else { continue }
+            guard var e = byID[id], !e.tags.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { continue }
             e.tags.append(trimmed)
             e.updatedAt = Date()
             db.saveEntry(e)
@@ -771,17 +853,37 @@ final class JournalViewModel: ObservableObject {
         }
     }
 
+    private func pushUndo(_ action: UndoAction) {
+        undoStack.append(action)
+        if undoStack.count > Self.maxUndoDepth {
+            undoStack.removeFirst(undoStack.count - Self.maxUndoDepth)
+        }
+    }
+
+    var undoDepth: Int { undoStack.count }
+
     func performUndo() {
         guard let action = undoStack.popLast() else { return }
+        // Report what actually changed: entries may since have been deleted
+        // forever or restored by hand.
         switch action {
         case .restoreTrashed(let ids):
-            for id in ids { db.restoreEntry(id: id) }
-            showToast("Restored \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
+            let restorable = ids.filter { db.fetchEntry(id: $0)?.isTrashed == true }
+            for id in restorable { db.restoreEntry(id: id) }
+            showToast(Self.undoMessage(verb: "Restored", count: restorable.count, requested: ids.count))
         case .unarchive(let ids):
-            for id in ids { db.setArchived(id: id, archived: false) }
-            showToast("Unarchived \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
+            let archived = ids.filter { db.fetchEntry(id: $0).map { $0.isArchived && !$0.isTrashed } == true }
+            for id in archived { db.setArchived(id: id, archived: false) }
+            showToast(Self.undoMessage(verb: "Unarchived", count: archived.count, requested: ids.count))
         }
         reload()
+    }
+
+    static func undoMessage(verb: String, count: Int, requested: Int) -> String {
+        if count == 0 { return "Nothing to undo — those entries have changed since" }
+        let noun = count == 1 ? "entry" : "entries"
+        if count < requested { return "\(verb) \(count) of \(requested) \(requested == 1 ? "entry" : "entries")" }
+        return "\(verb) \(count) \(noun)"
     }
 
     // MARK: - Reflection scope
@@ -841,38 +943,29 @@ final class JournalViewModel: ObservableObject {
     var favoriteCount: Int { entries.filter(\.isFavorite).count }
     var hiddenCount: Int { hiddenEntries.count }
 
-    var writingStreak: Int {
+    /// Distinct calendar days with an active entry. Cached against a cheap
+    /// fingerprint so keystroke-driven `entries` updates don't redo calendar math.
+    private var writingDaysCache: (key: [Double], days: Set<Date>)?
+
+    private var writingDays: Set<Date> {
+        let key = [Double(entries.count), entries.reduce(0) { $0 + $1.createdAt.timeIntervalSince1970 }]
+        if let cache = writingDaysCache, cache.key == key { return cache.days }
         let cal = Calendar.current
         let days = Set(entries.map { cal.startOfDay(for: $0.createdAt) })
-        guard !days.isEmpty else { return 0 }
-        var streak = 0
-        var date = cal.startOfDay(for: Date())
-        // A streak is still "alive" if the user wrote yesterday but not yet today.
-        if !days.contains(date) {
-            guard let yesterday = cal.date(byAdding: .day, value: -1, to: date), days.contains(yesterday) else { return 0 }
-            date = yesterday
-        }
-        while days.contains(date) {
-            streak += 1
-            guard let prev = cal.date(byAdding: .day, value: -1, to: date) else { break }
-            date = prev
-        }
-        return streak
+        writingDaysCache = (key, days)
+        return days
     }
 
-    var longestStreak: Int {
-        let cal = Calendar.current
-        let days = Set(entries.map { cal.startOfDay(for: $0.createdAt) })
-        guard !days.isEmpty else { return 0 }
-        let sorted = days.sorted()
-        var best = 1, cur = 1
-        for i in 1..<sorted.count {
-            if let next = cal.date(byAdding: .day, value: 1, to: sorted[i - 1]), next == sorted[i] {
-                cur += 1; best = max(best, cur)
-            } else { cur = 1 }
-        }
-        return best
+    /// Non-punitive streak: see `StreakCalculator` (one rest day per 7 is
+    /// forgiven; weekly-goal mode counts weeks that hit the target).
+    var streakSummary: StreakSummary {
+        GoalManager.shared.streakSummary(writingDays: writingDays)
     }
+    var writingStreak: Int { streakSummary.current }
+    var longestStreak: Int { streakSummary.longest }
+    var streakUnit: String { streakSummary.unit }
+    /// Gentle "welcome back" copy, owned by Core so all views share one voice.
+    var welcomeBackMessage: String { StreakCopy.welcomeBack(daysAway: streakSummary.daysSinceLastEntry) }
 
     var entriesThisMonth: Int {
         let cal = Calendar.current
@@ -1127,7 +1220,27 @@ final class JournalViewModel: ObservableObject {
 
     // MARK: - Import
 
+    struct ImportReport: Equatable {
+        var added = 0
+        var duplicates = 0
+        var skipped: [String] = []
+    }
+
+    /// Every stored entry, trashed included. Returns nil when the read looks
+    /// failed (row count disagrees with COUNT(*)) so callers never treat an
+    /// unreadable database as an empty one and re-insert over real data.
+    private func allStoredEntries() -> [JournalEntry]? {
+        let stored = db.fetchAllEntriesForExport()
+        let expected = db.entryCount(scope: .all) + db.entryCount(scope: .trashed)
+        return stored.count == expected ? stored : nil
+    }
+
+    private static func dupKey(title: String, createdAt: Date) -> String {
+        "\(title)\u{1}\(Int((createdAt.timeIntervalSince1970 * 1000).rounded()))"
+    }
+
     /// Imports entries from a previously exported JSON file. Returns the number added.
+    /// Existing ids (active, archived, hidden OR trashed) are never overwritten.
     @discardableResult
     func importJSON(from url: URL) -> Int {
         do {
@@ -1135,13 +1248,21 @@ final class JournalViewModel: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let export = try decoder.decode(ExportManager.JSONExport.self, from: data)
-            let existing = Set(db.fetchAllEntries(scope: .all).map(\.id))
+            guard let stored = allStoredEntries() else {
+                showToast("Import aborted: couldn't read the existing journal safely", isError: true)
+                return 0
+            }
+            flushBeforeImmediateMutation()
+            var knownIDs = Set(stored.map(\.id))
             var added = 0
-            for je in export.entries where !existing.contains(je.id) {
+            var skipped = 0
+            for je in export.entries {
+                guard knownIDs.insert(je.id).inserted else { skipped += 1; continue }
                 let entry = JournalEntry(
                     id: je.id, title: je.title, body: je.body,
                     mood: Mood(rawValue: je.mood) ?? .neutral,
-                    tags: je.tags, createdAt: je.createdAt, updatedAt: je.updatedAt,
+                    tags: OmegaCore.normalizeTags(je.tags),
+                    createdAt: je.createdAt, updatedAt: je.updatedAt,
                     isPinned: je.isPinned, isFavorite: je.isFavorite,
                     isArchived: je.isArchived ?? false,
                     deletedAt: je.deletedAt,
@@ -1152,7 +1273,11 @@ final class JournalViewModel: ObservableObject {
                 added += 1
             }
             reload()
-            showToast(added == 0 ? "Nothing new to import" : "Imported \(added) entries")
+            if added == 0 {
+                showToast("Nothing new to import (\(skipped) already in your journal)")
+            } else {
+                showToast("Imported \(added) \(added == 1 ? "entry" : "entries")" + (skipped > 0 ? ", skipped \(skipped) already present" : ""))
+            }
             return added
         } catch {
             showToast("Import failed: \(error.localizedDescription)", isError: true)
@@ -1166,28 +1291,55 @@ final class JournalViewModel: ObservableObject {
         OmegaCore.parseMarkdownImport(text: text, fallbackTitle: fallbackTitle)
     }
 
-    /// Imports a folder of markdown files, one entry per file.
+    /// Imports markdown files, one entry per file. Returns the number added;
+    /// use `importMarkdownReport` for the skipped/duplicate breakdown.
     @discardableResult
     func importMarkdown(from urls: [URL]) -> Int {
-        var added = 0
+        importMarkdownReport(from: urls).added
+    }
+
+    @discardableResult
+    func importMarkdownReport(from urls: [URL]) -> ImportReport {
+        var report = ImportReport()
+        guard let stored = allStoredEntries() else {
+            showToast("Import aborted: couldn't read the existing journal safely", isError: true)
+            report.skipped = urls.map(\.lastPathComponent)
+            return report
+        }
+        flushBeforeImmediateMutation()
+        var keys = Set(stored.map { Self.dupKey(title: $0.title, createdAt: $0.createdAt) })
         for url in urls {
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+                report.skipped.append(url.lastPathComponent)
+                continue
+            }
             let parsed = Self.parseMarkdownImport(
                 text: text,
                 fallbackTitle: url.deletingPathExtension().lastPathComponent
             )
             let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+            guard keys.insert(Self.dupKey(title: parsed.title, createdAt: created)).inserted else {
+                report.duplicates += 1
+                continue
+            }
             var entry = JournalEntry.new()
             entry.title = parsed.title
             entry.body = parsed.body
-            entry.tags = ["imported"]
+            entry.tags = OmegaCore.normalizeTags(["imported"])
             entry.createdAt = created
             entry.updatedAt = created
             db.saveEntry(entry)
-            added += 1
+            report.added += 1
         }
         reload()
-        showToast(added == 0 ? "No markdown files imported" : "Imported \(added) markdown files")
-        return added
+        var parts: [String] = []
+        parts.append(report.added == 0 ? "No markdown files imported" : "Imported \(report.added) markdown \(report.added == 1 ? "file" : "files")")
+        if report.duplicates > 0 { parts.append("\(report.duplicates) already imported") }
+        if !report.skipped.isEmpty {
+            let names = report.skipped.prefix(3).joined(separator: ", ")
+            parts.append("\(report.skipped.count) unreadable (\(names)\(report.skipped.count > 3 ? "…" : ""))")
+        }
+        showToast(parts.joined(separator: " · "), isError: !report.skipped.isEmpty)
+        return report
     }
 }

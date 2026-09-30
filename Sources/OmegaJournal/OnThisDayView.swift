@@ -23,7 +23,7 @@ struct OnThisDayView: View {
                             .font(OmegaTheme.titleFont)
                     }
                     Text(todayFormatted)
-                        .font(.system(size: 13))
+                        .font(.system(size: 113))
                         .foregroundColor(.secondary)
                 }
 
@@ -33,7 +33,7 @@ struct OnThisDayView: View {
                     // Entries from this day in past years
                     VStack(alignment: .leading, spacing: 16) {
                         Text("You wrote on this day in \(thisDay.count == 1 ? "a previous year" : "previous years"):")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 114, weight: .medium))
                             .foregroundColor(.secondary)
 
                         ForEach(thisDay) { entry in
@@ -66,10 +66,10 @@ struct OnThisDayView: View {
             }
             VStack(spacing: 8) {
                 Text("No memories for today yet")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 116, weight: .medium))
                     .foregroundColor(.secondary)
                 Text("Keep journaling and your past entries will appear here on their anniversaries.")
-                    .font(.system(size: 13))
+                    .font(.system(size: 113))
                     .foregroundColor(.secondary.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
@@ -85,14 +85,14 @@ struct OnThisDayView: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Text(entry.mood.emoji)
-                    .font(.system(size: 32))
+                    .font(.system(size: 112))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title.isEmpty ? "Untitled" : entry.title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 116, weight: .semibold))
                         .foregroundColor(.primary)
                     HStack(spacing: 6) {
                         Text("\(yearsAgo) \(yearsAgo == 1 ? "year" : "years") ago")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 112, weight: .medium))
                             .foregroundColor(.teal)
                         Text("·")
                             .foregroundColor(.secondary.opacity(0.5))
@@ -113,7 +113,7 @@ struct OnThisDayView: View {
                 HStack(spacing: 4) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Text("#\(tag)")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 110, weight: .medium))
                             .foregroundColor(theme.accentColor.opacity(0.85))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
@@ -124,7 +124,7 @@ struct OnThisDayView: View {
             }
 
             Text(entry.isHidden && !biometricAuth.isAuthenticated ? "Hidden · unlock to read" : entry.preview)
-                .font(.system(size: 14))
+                .font(.system(size: 114))
                 .foregroundColor(.secondary)
                 .lineLimit(4)
                 .lineSpacing(3)

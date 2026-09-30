@@ -15,6 +15,8 @@ enum MarkdownCommand {
     case heading1, heading2, heading3
     case bulletList, numberedList, checkbox, quote
     case link, divider, codeBlock
+    /// Toggles `- [ ]` ↔ `- [x]` on the selected lines (converts bullets/plain lines to tasks).
+    case toggleTask
 
     /// Characters placed on either side of the selection, for simple wrapping commands.
     var wrap: (String, String)? {
@@ -57,6 +59,7 @@ enum MarkdownCommand {
         case .link: "link"
         case .divider: "minus"
         case .codeBlock: "curlybraces"
+        case .toggleTask: "checkmark.square"
         }
     }
 
@@ -76,6 +79,7 @@ enum MarkdownCommand {
         case .link: "Link"
         case .divider: "Divider"
         case .codeBlock: "Code Block"
+        case .toggleTask: "Toggle Task Done"
         }
     }
 }
@@ -100,10 +104,36 @@ final class MarkdownEditorController: ObservableObject {
         tv.insertText(text, replacementRange: tv.selectedRange())
     }
 
+    /// Wraps the text view's own find bar visibility so Esc can close it first.
+    var isFindBarVisible: Bool {
+        textView?.enclosingScrollView?.isFindBarVisible ?? false
+    }
+
+    func hideFindBar() {
+        guard let tv = textView else { return }
+        let item = NSMenuItem()
+        item.tag = NSTextFinder.Action.hideFindInterface.rawValue
+        tv.performTextFinderAction(item)
+    }
+
     var selectedText: String {
         guard let tv = textView else { return "" }
         return (tv.string as NSString).substring(with: tv.selectedRange())
     }
+}
+
+/// Theme-driven colors for source highlighting.
+struct MarkdownEditorPalette: Hashable {
+    var text: NSColor
+    var muted: NSColor
+    var accent: NSColor
+    var code: NSColor
+    var link: NSColor
+    var tag: NSColor
+
+    static let system = MarkdownEditorPalette(
+        text: .labelColor, muted: .secondaryLabelColor, accent: .controlAccentColor,
+        code: .systemOrange, link: .controlAccentColor, tag: .controlAccentColor)
 }
 
 struct MarkdownTextEditor: NSViewRepresentable {
@@ -113,7 +143,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
     var isTypewriterMode: Bool = false
     var isFocusMode: Bool = false
     var controller: MarkdownEditorController
+    var palette: MarkdownEditorPalette = .system
     var onCommandReturn: (() -> Void)?
+    /// Esc pressed in the text view. Return true when handled (find bar / zen closed).
+    var onEscape: (() -> Bool)?
+    /// Number of words in the current selection (0 when nothing is selected).
+    var onSelectionWords: ((Int) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -140,7 +175,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
 
         controller.textView = textView
-        context.coordinator.applyHighlighting(to: textView)
+        context.coordinator.applyHighlighting(to: textView, full: true)
         return scrollView
     }
 
@@ -149,15 +184,25 @@ struct MarkdownTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         controller.textView = textView
 
-        // Only touch the text storage when the model genuinely diverged, otherwise
-        // every keystroke would reset the insertion point to the end.
+        // Only touch the text storage when the model genuinely diverged (equal text
+        // must never be reassigned: it resets the caret and wipes the undo stack).
+        var needsFull = false
         if textView.string != text {
             let selected = textView.selectedRange()
-            textView.string = text
+            let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+            // Replace through the undo-aware path so external edits stay undoable.
+            if textView.shouldChangeText(in: whole, replacementString: text) {
+                context.coordinator.suppressChangeCallback = true
+                textView.textStorage?.replaceCharacters(in: whole, with: text)
+                context.coordinator.suppressChangeCallback = false
+                textView.didChangeText()
+            }
             let safeLocation = min(selected.location, (text as NSString).length)
             textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
+            needsFull = true
         }
-        context.coordinator.applyHighlighting(to: textView)
+        if context.coordinator.styleSignature != context.coordinator.signature(for: self) { needsFull = true }
+        context.coordinator.applyHighlighting(to: textView, full: needsFull)
 
         if isTypewriterMode {
             context.coordinator.centerCaret(in: textView, scrollView: scrollView)
@@ -168,81 +213,132 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextEditor
+        var suppressChangeCallback = false
         private var highlightScheduled = false
+        private var needsFullPass = true
+        /// Union of ranges touched since the last highlight pass (post-edit coordinates).
+        private var dirtyRange: NSRange?
+        private var lastCodeRanges: [NSRange] = []
+        var styleSignature = ""
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
+        func signature(for editor: MarkdownTextEditor) -> String {
+            "\(editor.font.fontName)|\(editor.font.pointSize)|\(editor.lineSpacing)|\(editor.palette.hashValue)"
+        }
+
+        // MARK: Delegate
+
+        func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
+            let newRange = NSRange(location: affectedCharRange.location, length: (replacementString as NSString?)?.length ?? 0)
+            if let d = dirtyRange { dirtyRange = NSUnionRange(d, newRange) } else { dirtyRange = newRange }
+            return true
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
-            parent.text = tv.string
+            if !suppressChangeCallback, parent.text != tv.string { parent.text = tv.string }
             applyHighlighting(to: tv)
         }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView, let cb = parent.onSelectionWords else { return }
+            let r = tv.selectedRange()
+            let words = r.length == 0 ? 0 : MarkdownLogic.wordCount((tv.string as NSString).substring(with: r))
+            DispatchQueue.main.async { cb(words) }
+        }
+
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            if selector == #selector(NSResponder.insertNewline(_:)) {
+            switch selector {
+            case #selector(NSResponder.insertNewline(_:)):
                 if NSEvent.modifierFlags.contains(.command) {
                     parent.onCommandReturn?()
                     return true
                 }
                 return continueList(in: textView)
+            case #selector(NSResponder.insertTab(_:)):
+                return shiftLines(in: textView, outdenting: false)
+            case #selector(NSResponder.insertBacktab(_:)):
+                return shiftLines(in: textView, outdenting: true)
+            case #selector(NSResponder.cancelOperation(_:)):
+                return parent.onEscape?() ?? false
+            default:
+                return false
             }
-            return false
         }
 
-        /// Pressing Return inside a list item continues the list; on an empty item it ends it.
+        // MARK: Tab / Shift-Tab
+
+        /// Tab indents list items (or any multi-line selection); Shift-Tab outdents.
+        /// Returns false to let a plain Tab insert a tab character in ordinary prose.
+        private func shiftLines(in textView: NSTextView, outdenting: Bool) -> Bool {
+            let ns = textView.string as NSString
+            let sel = textView.selectedRange()
+            let lineRange = ns.lineRange(for: sel)
+            let block = ns.substring(with: lineRange)
+            let multiLine = block.trimmingCharacters(in: .newlines).contains("\n")
+            let firstLine = block.components(separatedBy: "\n").first ?? ""
+            guard multiLine || MarkdownLogic.isListLine(firstLine) || outdenting else { return false }
+
+            let shifted = MarkdownLogic.shiftBlock(block, outdenting: outdenting)
+            if shifted == block { return outdenting }   // swallow Shift-Tab even when nothing to remove
+            guard textView.shouldChangeText(in: lineRange, replacementString: shifted) else { return true }
+            textView.textStorage?.replaceCharacters(in: lineRange, with: shifted)
+            let delta = (shifted as NSString).length - lineRange.length
+            if multiLine || sel.length > 0 {
+                textView.setSelectedRange(NSRange(location: lineRange.location, length: (shifted as NSString).length - (block.hasSuffix("\n") ? 1 : 0)))
+            } else {
+                textView.setSelectedRange(NSRange(location: max(lineRange.location, sel.location + delta), length: 0))
+            }
+            textView.didChangeText()
+            return true
+        }
+
+        // MARK: List continuation
+
+        /// Pressing Return inside a list item continues the list; on an empty item it ends
+        /// (or outdents) it. All offsets are UTF-16.
         private func continueList(in textView: NSTextView) -> Bool {
             let ns = textView.string as NSString
-            let caret = textView.selectedRange().location
-            let lineRange = ns.lineRange(for: NSRange(location: min(caret, ns.length), length: 0))
-            let line = ns.substring(with: lineRange).trimmingCharacters(in: .newlines)
-
-            func replaceLineWithBlank() {
-                textView.insertText("", replacementRange: NSRange(location: lineRange.location, length: line.count))
+            let sel = textView.selectedRange()
+            let caret = min(sel.location, ns.length)
+            let lineRange = ns.lineRange(for: NSRange(location: caret, length: 0))
+            var contentRange = lineRange
+            while contentRange.length > 0, [10, 13].contains(ns.character(at: NSMaxRange(contentRange) - 1)) {
+                contentRange.length -= 1
             }
+            let line = ns.substring(with: contentRange)
+            guard let ctx = MarkdownLogic.listContext(forLine: line) else { return false }
+            // Caret inside the marker: behave like a normal newline.
+            if caret - lineRange.location < ctx.markerLength && !ctx.isEmptyItem { return false }
 
-            // Checklist
-            if let match = line.range(of: #"^(\s*)- \[[ xX]\] "#, options: .regularExpression) {
-                let marker = String(line[match])
-                if line.trimmingCharacters(in: .whitespaces) == marker.trimmingCharacters(in: .whitespaces) {
-                    replaceLineWithBlank(); return true
+            if ctx.isEmptyItem && sel.length == 0 {
+                // Only when the caret is at the end of the (empty) item.
+                guard caret >= NSMaxRange(contentRange) || caret - lineRange.location >= ctx.markerLength else { return false }
+                if textView.shouldChangeText(in: contentRange, replacementString: ctx.exitLine) {
+                    textView.textStorage?.replaceCharacters(in: contentRange, with: ctx.exitLine)
+                    textView.setSelectedRange(NSRange(location: contentRange.location + (ctx.exitLine as NSString).length, length: 0))
+                    textView.didChangeText()
                 }
-                let indent = marker.prefix { $0 == " " || $0 == "\t" }
-                textView.insertText("\n\(indent)- [ ] ", replacementRange: textView.selectedRange())
                 return true
             }
 
-            // Bullet
-            if let match = line.range(of: #"^(\s*)[-*+] "#, options: .regularExpression) {
-                let marker = String(line[match])
-                if line.trimmingCharacters(in: .whitespaces).count <= 1 {
-                    replaceLineWithBlank(); return true
+            textView.insertText("\n" + ctx.nextPrefix, replacementRange: sel)
+
+            // Ordered lists: renumber following siblings so inserting mid-list stays consistent.
+            if ctx.orderedNumber != nil {
+                let text = textView.string
+                let newLine = MarkdownLogic.lineIndex(ofUTF16Offset: textView.selectedRange().location, in: text)
+                if let edit = MarkdownLogic.renumberEdit(in: text, fromLine: newLine) {
+                    let keep = textView.selectedRange()
+                    if textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) {
+                        textView.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+                        textView.setSelectedRange(keep)
+                        textView.didChangeText()
+                    }
                 }
-                let indent = marker.prefix { $0 == " " || $0 == "\t" }
-                textView.insertText("\n\(indent)- ", replacementRange: textView.selectedRange())
-                return true
             }
-
-            // Numbered
-            if let match = line.range(of: #"^(\s*)(\d+)\. "#, options: .regularExpression) {
-                let marker = String(line[match])
-                let digits = marker.filter(\.isNumber)
-                if line.trimmingCharacters(in: .whitespaces).count <= digits.count + 1 {
-                    replaceLineWithBlank(); return true
-                }
-                let next = (Int(digits) ?? 1) + 1
-                let indent = marker.prefix { $0 == " " || $0 == "\t" }
-                textView.insertText("\n\(indent)\(next). ", replacementRange: textView.selectedRange())
-                return true
-            }
-
-            // Blockquote
-            if line.hasPrefix("> ") {
-                if line == "> " { replaceLineWithBlank(); return true }
-                textView.insertText("\n> ", replacementRange: textView.selectedRange())
-                return true
-            }
-
-            return false
+            return true
         }
 
         /// Keeps the caret vertically centred (typewriter scrolling).
@@ -260,74 +356,115 @@ struct MarkdownTextEditor: NSViewRepresentable {
         // MARK: Syntax highlighting
 
         /// Highlighting runs on the shared text storage; coalesce so fast typing stays smooth.
-        func applyHighlighting(to textView: NSTextView) {
+        /// Only the edited paragraph(s) are restyled unless `full` is requested, or a code
+        /// fence appeared/disappeared (which changes styling further down the document).
+        func applyHighlighting(to textView: NSTextView, full: Bool = false) {
+            if full { needsFullPass = true }
             guard !highlightScheduled else { return }
             highlightScheduled = true
             DispatchQueue.main.async { [weak self, weak textView] in
-                self?.highlightScheduled = false
-                guard let self, let textView, let storage = textView.textStorage else { return }
-                self.highlight(storage)
+                guard let self else { return }
+                self.highlightScheduled = false
+                guard let textView, let storage = textView.textStorage else { return }
+                self.runHighlight(storage)
             }
         }
 
-        private func highlight(_ storage: NSTextStorage) {
-            let full = NSRange(location: 0, length: storage.length)
+        private func runHighlight(_ storage: NSTextStorage) {
+            let ns = storage.string as NSString
+            let fullRange = NSRange(location: 0, length: ns.length)
+            let codeRanges = MarkdownLogic.codeBlockRanges(in: storage.string)
+            if codeRanges != lastCodeRanges { needsFullPass = true }
+            lastCodeRanges = codeRanges
+
+            var target = fullRange
+            if !needsFullPass, let dirty = dirtyRange, NSMaxRange(dirty) <= ns.length, dirty.length < 20_000 {
+                target = ns.lineRange(for: dirty)
+            } else if !needsFullPass, dirtyRange == nil {
+                return
+            }
+            needsFullPass = false
+            dirtyRange = nil
+            styleSignature = signature(for: parent)
+            highlight(storage, in: target, codeRanges: codeRanges)
+        }
+
+        private func highlight(_ storage: NSTextStorage, in range: NSRange, codeRanges: [NSRange]) {
             let baseFont = parent.font
+            let pal = parent.palette
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = parent.lineSpacing
+
+            let text = storage.string
+            let ns = text as NSString
+            let mono = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
 
             storage.beginEditing()
             storage.setAttributes([
                 .font: baseFont,
-                .foregroundColor: NSColor.labelColor,
+                .foregroundColor: pal.text,
                 .paragraphStyle: paragraph,
-            ], range: full)
+            ], range: range)
 
-            let text = storage.string
-            let ns = text as NSString
+            // Code blocks: mono, no other styling inside.
+            for cr in codeRanges {
+                let inter = NSIntersectionRange(cr, range)
+                if inter.length > 0 {
+                    storage.addAttributes([.font: mono, .foregroundColor: pal.code], range: inter)
+                }
+            }
+
+            func inCode(_ r: NSRange) -> Bool {
+                codeRanges.contains { NSIntersectionRange($0, r).length > 0 }
+            }
 
             func style(_ pattern: String, _ attrs: [NSAttributedString.Key: Any], group: Int = 0) {
-                guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
-                regex.enumerateMatches(in: text, range: full) { match, _, _ in
+                guard let regex = Self.regex(pattern) else { return }
+                regex.enumerateMatches(in: text, range: range) { match, _, _ in
                     guard let match, group < match.numberOfRanges else { return }
                     let r = match.range(at: group)
-                    if r.location != NSNotFound && NSMaxRange(r) <= ns.length {
+                    if r.location != NSNotFound && NSMaxRange(r) <= ns.length && !inCode(r) {
                         storage.addAttributes(attrs, range: r)
                     }
                 }
             }
 
-            let accent = NSColor.controlAccentColor
-            let muted = NSColor.secondaryLabelColor
-            let mono = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
-
-            // Headings — scale the font by level.
+            // Headings — scale the font by level (most specific last so it wins).
             style(#"^#\s.*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 10, weight: .bold)])
             style(#"^##\s.*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 6, weight: .bold)])
             style(#"^###\s.*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 3, weight: .semibold)])
-            style(#"^#{1,6}\s"#, [.foregroundColor: accent.withAlphaComponent(0.6)])
+            style(#"^#{1,6}\s"#, [.foregroundColor: pal.accent.withAlphaComponent(0.6)])
 
             // Emphasis
             style(#"\*\*[^*\n]+\*\*"#, [.font: boldVariant(of: baseFont)])
             style(#"(?<!\*)\*[^*\n]+\*(?!\*)"#, [.font: italicVariant(of: baseFont)])
-            style(#"~~[^~\n]+~~"#, [.strikethroughStyle: NSUnderlineStyle.single.rawValue, .foregroundColor: muted])
+            style(#"(?<![\w_])_[^_\n]+_(?![\w_])"#, [.font: italicVariant(of: baseFont)])
+            style(#"~~[^~\n]+~~"#, [.strikethroughStyle: NSUnderlineStyle.single.rawValue, .foregroundColor: pal.muted])
 
-            // Code
-            style(#"`[^`\n]+`"#, [.font: mono, .foregroundColor: NSColor.systemOrange])
-            style(#"^```[\s\S]*?^```"#, [.font: mono, .foregroundColor: NSColor.systemOrange])
+            // Inline code
+            style(#"`[^`\n]+`"#, [.font: mono, .foregroundColor: pal.code])
 
             // Structure
-            style(#"^\s*[-*+]\s"#, [.foregroundColor: accent])
-            style(#"^\s*\d+\.\s"#, [.foregroundColor: accent])
-            style(#"^\s*- \[[ xX]\]"#, [.foregroundColor: accent, .font: boldVariant(of: baseFont)])
-            style(#"^>\s.*$"#, [.foregroundColor: muted, .font: italicVariant(of: baseFont)])
-            style(#"^(---|\*\*\*|___)\s*$"#, [.foregroundColor: NSColor.tertiaryLabelColor])
+            style(#"^[ \t]*[-*+]\s"#, [.foregroundColor: pal.accent])
+            style(#"^[ \t]*\d+[.)]\s"#, [.foregroundColor: pal.accent])
+            style(#"^[ \t]*[-*+] \[[xX]\].*$"#, [.foregroundColor: pal.muted])
+            style(#"^[ \t]*[-*+] \[[ xX]\]"#, [.foregroundColor: pal.accent, .font: boldVariant(of: baseFont)])
+            style(#"^(?:[ \t]*>)+.*$"#, [.foregroundColor: pal.muted, .font: italicVariant(of: baseFont)])
+            style(#"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$"#, [.foregroundColor: pal.muted.withAlphaComponent(0.6)])
 
             // Links & tags
-            style(#"\[[^\]\n]*\]\([^)\n]*\)"#, [.foregroundColor: NSColor.systemBlue])
-            style(#"(?<![\w/])#[A-Za-z0-9_-]+"#, [.foregroundColor: NSColor.systemPurple])
+            style(#"\[[^\]\n]*\]\([^)\n]*\)"#, [.foregroundColor: pal.link])
+            style(#"(?<![\w/])#[A-Za-z0-9_-]+"#, [.foregroundColor: pal.tag])
 
             storage.endEditing()
+        }
+
+        private static var regexCache: [String: NSRegularExpression] = [:]
+        private static func regex(_ pattern: String) -> NSRegularExpression? {
+            if let r = regexCache[pattern] { return r }
+            guard let r = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return nil }
+            regexCache[pattern] = r
+            return r
         }
 
         private func boldVariant(of font: NSFont) -> NSFont {
@@ -362,6 +499,19 @@ extension NSTextView {
             } else {
                 replaceAndSelect(result, in: selection, selectLength: (result as NSString).length)
             }
+            didChangeText()
+            return
+        }
+
+        if command == .toggleTask {
+            let lineRange = ns.lineRange(for: selection)
+            let block = ns.substring(with: lineRange)
+            let hadTrailing = block.hasSuffix("\n")
+            var lines = block.components(separatedBy: "\n")
+            if hadTrailing { lines.removeLast() }
+            let out = lines.map { $0.trimmingCharacters(in: .whitespaces).isEmpty ? $0 : MarkdownLogic.cycledTaskLine($0) }
+                .joined(separator: "\n") + (hadTrailing ? "\n" : "")
+            replaceAndSelect(out, in: lineRange, selectLength: (out as NSString).length - (hadTrailing ? 1 : 0))
             didChangeText()
             return
         }

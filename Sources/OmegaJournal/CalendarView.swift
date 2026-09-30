@@ -171,10 +171,10 @@ struct CalendarView: View {
     private var workspaceTitle: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("Calendar")
-                .font(.system(size: 25, weight: .bold, design: .serif))
+                .font(.system(size: 115, weight: .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text("Reflect on your writing rhythm without leaving the workspace.")
-                .font(.system(size: 12))
+                .font(.system(size: 112))
                 .foregroundColor(theme.secondaryTextColor)
         }
     }
@@ -224,7 +224,7 @@ struct CalendarView: View {
             }
 
             Text(anchorMonth.formatted(.dateTime.month(.wide).year()))
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 113, weight: .semibold))
                 .foregroundColor(theme.titleTextColor)
                 .lineLimit(1)
                 .fixedSize()
@@ -255,10 +255,10 @@ struct CalendarView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Reflective scope")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 112, weight: .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text(vm.analyticsVisibilityLabel)
-                    .font(.system(size: 11))
+                    .font(.system(size: 111))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -273,7 +273,7 @@ struct CalendarView: View {
             } else {
                 Button(action: requestPrivateInclusion) {
                     Label("Unlock to include", systemImage: "lock.open")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 111, weight: .semibold))
                         .foregroundColor(theme.accentColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -328,11 +328,11 @@ struct CalendarView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 115, weight: .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                     .lineLimit(1)
                 Text(label)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 110.5))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 0)
@@ -364,15 +364,15 @@ struct CalendarView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Month at a glance")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 115, weight: .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Select any day to inspect its writing.")
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Text("\(monthEntries.count) \(entryWord(for: monthEntries.count))")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 111, weight: .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -380,7 +380,7 @@ struct CalendarView: View {
                 HStack(spacing: 8) {
                     ForEach(orderedWeekdaySymbols, id: \.self) { symbol in
                         Text(symbol.uppercased())
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 110, weight: .semibold))
                             .foregroundColor(theme.secondaryTextColor)
                             .frame(maxWidth: .infinity)
                             .accessibilityHidden(true)
@@ -434,15 +434,15 @@ struct CalendarView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Agenda")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 115, weight: .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Writing days in \(anchorMonth.formatted(.dateTime.month(.wide).year())).")
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Text("\(agendaDays.count) \(agendaDays.count == 1 ? "day" : "days")")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 111, weight: .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -467,10 +467,10 @@ struct CalendarView: View {
                 .font(.system(size: 22, weight: .light))
                 .foregroundColor(theme.secondaryTextColor)
             Text("No entries in this month’s reflective scope.")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 112, weight: .medium))
                 .foregroundColor(theme.titleTextColor)
             Text("Choose a date in the inspector to begin writing.")
-                .font(.system(size: 11))
+                .font(.system(size: 111))
                 .foregroundColor(theme.secondaryTextColor)
         }
         .frame(maxWidth: .infinity)
@@ -486,15 +486,15 @@ struct CalendarView: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(day.formatted(.dateTime.weekday(.wide)))
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 111, weight: .semibold))
                             .foregroundColor(theme.secondaryTextColor)
                         Text(day.formatted(.dateTime.month(.abbreviated).day().year()))
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 114, weight: .semibold))
                             .foregroundColor(theme.titleTextColor)
                     }
                     Spacer()
                     Text("\(entries.count) \(entryWord(for: entries.count))")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 111, weight: .medium))
                         .foregroundColor(isSelected ? theme.accentColor : theme.secondaryTextColor)
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
@@ -514,7 +514,7 @@ struct CalendarView: View {
 
             if entries.isEmpty {
                 Text("No entries on this selected date.")
-                    .font(.system(size: 11))
+                    .font(.system(size: 111))
                     .foregroundColor(theme.secondaryTextColor)
                     .padding(.leading, 12)
             } else {
@@ -537,14 +537,14 @@ struct CalendarView: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("DAY INSPECTOR")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .tracking(0.8)
                         .foregroundColor(theme.secondaryTextColor)
                     Text(selectedDay.formatted(date: .complete, time: .omitted))
-                        .font(.system(size: 16, weight: .bold, design: .serif))
+                        .font(.system(size: 116, weight: .bold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                     Text("\(entries.count) \(entryWord(for: entries.count)) in this reflective scope")
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.secondaryTextColor)
                 }
 
@@ -552,7 +552,7 @@ struct CalendarView: View {
 
                 Button(action: createEntryForSelectedDay) {
                     Label("New Entry", systemImage: "square.and.pencil")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 111, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -578,12 +578,12 @@ struct CalendarView: View {
 
             HStack {
                 Text("Entries")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 112, weight: .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Spacer()
                 if !entries.isEmpty {
                     Text("Open to read or edit")
-                        .font(.system(size: 10))
+                        .font(.system(size: 110))
                         .foregroundColor(theme.secondaryTextColor)
                 }
             }
@@ -591,10 +591,10 @@ struct CalendarView: View {
             if entries.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Nothing written on this day yet.")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 112, weight: .medium))
                         .foregroundColor(theme.titleTextColor)
                     Text("Start a dated entry without leaving Calendar.")
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 .padding(.vertical, 4)
@@ -622,11 +622,11 @@ struct CalendarView: View {
                 .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(theme.accentColor.opacity(0.12)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(value)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(size: 112, weight: .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                     .lineLimit(1)
                 Text(label)
-                    .font(.system(size: 9.5))
+                    .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 0)
@@ -788,7 +788,7 @@ private struct PillActionButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 112, weight: .semibold))
                 .foregroundColor(theme.accentColor)
                 .lineLimit(1)
                 .fixedSize()
@@ -848,12 +848,12 @@ private struct CalendarDayCell: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(calendar.component(.day, from: day))")
-                        .font(.system(size: 14, weight: isToday ? .bold : .semibold, design: .rounded))
+                        .font(.system(size: 114, weight: isToday ? .bold : .semibold, design: .rounded))
                         .foregroundColor(isFuture ? theme.secondaryTextColor.opacity(0.55) : theme.titleTextColor)
                     Spacer(minLength: 4)
                     if !safeEntries.isEmpty {
                         Text("\(safeEntries.count)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .font(.system(size: 110, weight: .bold, design: .rounded))
                             .foregroundColor(theme.accentColor)
                     }
                 }
@@ -862,7 +862,7 @@ private struct CalendarDayCell: View {
 
                 if safeEntries.isEmpty {
                     Text(isFuture ? "Future" : "No entry")
-                        .font(.system(size: 10))
+                        .font(.system(size: 110))
                         .foregroundColor(theme.secondaryTextColor.opacity(isFuture ? 0.5 : 0.82))
                 } else {
                     HStack(spacing: 5) {
@@ -872,7 +872,7 @@ private struct CalendarDayCell: View {
                                 .frame(width: 7, height: 7)
                         }
                         Text(entryLabel)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 110, weight: .medium))
                             .foregroundColor(theme.secondaryTextColor)
                             .lineLimit(1)
                     }
@@ -947,7 +947,7 @@ struct CalendarEntryRow: View {
     private var entryContent: some View {
         HStack(spacing: 10) {
             Text(entry.mood.emoji)
-                .font(.system(size: 17))
+                .font(.system(size: 117))
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -959,12 +959,12 @@ struct CalendarEntryRow: View {
                             .accessibilityHidden(true)
                     }
                     Text(entry.displayTitle)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 112, weight: .semibold))
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
                 }
                 Text("\(entry.createdAt.formatted(date: .omitted, time: .shortened)) · \(entry.wordCount) words")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 110.5))
                     .foregroundColor(theme.secondaryTextColor)
                     .lineLimit(1)
             }
@@ -986,10 +986,10 @@ struct CalendarEntryRow: View {
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Private entry")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 112, weight: .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text("Unlock to view")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 110.5))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()

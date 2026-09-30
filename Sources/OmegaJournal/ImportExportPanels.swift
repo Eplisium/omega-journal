@@ -15,12 +15,12 @@ enum ImportExportPanels {
 
     static func exportMarkdown(vm: JournalViewModel) {
         Task {
-            let entries = await entriesForExport(vm: vm)
+            let (entries, omitted) = await entriesForExport(vm: vm)
             guard !entries.isEmpty else {
                 vm.showToast("Nothing to export — the journal is empty", isError: true)
                 return
             }
-            save(vm: vm, suggested: "OmegaJournal-\(stamp()).md", type: .plainText) { url in
+            save(vm: vm, suggested: "OmegaJournal-\(stamp()).md", type: .plainText, omittedHidden: omitted) { url in
                 try ExportManager.exportMarkdown(entries, to: url)
             }
         }
@@ -28,12 +28,12 @@ enum ImportExportPanels {
 
     static func exportJSON(vm: JournalViewModel) {
         Task {
-            let entries = await entriesForExport(vm: vm)
+            let (entries, omitted) = await entriesForExport(vm: vm)
             guard !entries.isEmpty else {
                 vm.showToast("Nothing to export — the journal is empty", isError: true)
                 return
             }
-            save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json) { url in
+            save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json, omittedHidden: omitted) { url in
                 try ExportManager.exportJSON(entries, to: url)
             }
         }
@@ -42,8 +42,8 @@ enum ImportExportPanels {
     @MainActor
     static func exportPDF(vm: JournalViewModel) {
         Task {
-            let entries = await entriesForExport(vm: vm)
-            save(vm: vm, suggested: "OmegaJournal-\(stamp()).pdf", type: .pdf) { url in
+            let (entries, omitted) = await entriesForExport(vm: vm)
+            save(vm: vm, suggested: "OmegaJournal-\(stamp()).pdf", type: .pdf, omittedHidden: omitted) { url in
                 try ExportManager.exportPDF(entries, to: url)
             }
         }
@@ -52,18 +52,20 @@ enum ImportExportPanels {
     /// Unlocks hidden entries for a full export; if auth is cancelled, hidden
     /// entries are omitted. Includes archived and trashed entries so backups
     /// capture the complete lifecycle state.
-    private static func entriesForExport(vm: JournalViewModel) async -> [JournalEntry] {
+    /// Returns the entries plus how many hidden entries were left out.
+    private static func entriesForExport(vm: JournalViewModel) async -> (entries: [JournalEntry], omittedHidden: Int) {
         var all = vm.entries + vm.archivedEntries + vm.trashedEntries
         var seen = Set<String>()
         all.removeAll { !seen.insert($0.id).inserted }
         let hasHidden = all.contains(where: \.isHidden)
         if hasHidden && !BiometricAuth.shared.isAuthenticated {
             if await BiometricAuth.shared.authenticate() {
-                return all
+                return (all, 0)
             }
-            return all.filter { !$0.isHidden }
+            let visible = all.filter { !$0.isHidden }
+            return (visible, all.count - visible.count)
         }
-        return all
+        return (all, 0)
     }
 
     /// Exports only the currently selected entry.
@@ -81,7 +83,7 @@ enum ImportExportPanels {
     }
 
     @MainActor
-    private static func save(vm: JournalViewModel, suggested: String, type: UTType, write: @escaping (URL) throws -> Void) {
+    private static func save(vm: JournalViewModel, suggested: String, type: UTType, omittedHidden: Int = 0, write: @escaping (URL) throws -> Void) {
         let panel = NSSavePanel()
         panel.title = "Export Journal"
         panel.nameFieldStringValue = suggested
@@ -92,7 +94,11 @@ enum ImportExportPanels {
         guard panel.runModal() == .OK, let url = panel.url else { return } // cancelled — no toast
         do {
             try write(url)
-            vm.showToast("Exported to \(url.lastPathComponent)")
+            if omittedHidden > 0 {
+                vm.showToast("Exported to \(url.lastPathComponent) — \(omittedHidden) hidden \(omittedHidden == 1 ? "entry was" : "entries were") NOT included (authentication cancelled)", isError: true)
+            } else {
+                vm.showToast("Exported to \(url.lastPathComponent)")
+            }
         } catch let error as CocoaError where error.code == .fileWriteNoPermission {
             vm.showToast("Export failed: “\(url.deletingLastPathComponent().lastPathComponent)” is not writable. Try your Documents or Desktop folder.", isError: true)
         } catch {
@@ -118,6 +124,10 @@ enum ImportExportPanels {
 
         for url in jsonURLs { vm.importJSON(from: url) }
         if !mdURLs.isEmpty { vm.importMarkdown(from: mdURLs) }
+        let ignored = urls.count - jsonURLs.count - mdURLs.count
+        if ignored > 0, !(jsonURLs.isEmpty && mdURLs.isEmpty) {
+            vm.showToast("\(ignored) unsupported \(ignored == 1 ? "file was" : "files were") ignored", isError: true)
+        }
         if jsonURLs.isEmpty && mdURLs.isEmpty {
             vm.showToast("No importable files selected", isError: true)
         }

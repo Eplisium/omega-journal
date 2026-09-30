@@ -50,6 +50,18 @@ final class ThemeManager: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Text/icon color for content drawn on top of the accent color, chosen by
+    /// the accent's relative luminance so light accents don't get white text.
+    var onAccentColor: Color { ThemeManager.onAccent(for: accentColor) }
+
+    static func onAccent(for color: Color) -> Color {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .black
+        func lin(_ c: CGFloat) -> CGFloat { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin(ns.redComponent) + 0.7152 * lin(ns.greenComponent) + 0.0722 * lin(ns.blueComponent)
+        // Contrast vs white = 1.05/(l+.05); vs black = (l+.05)/.05 — pick the better.
+        return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? .black : .white
+    }
+
     private var cancellables = Set<AnyCancellable>()
 
     func applyTheme(named name: String) {
@@ -91,11 +103,11 @@ final class ThemeManager: ObservableObject {
     private static func textColors(for scheme: ColorScheme) -> (title: Color, body: Color, secondary: Color) {
         switch scheme {
         case .dark:
-            (.white, Color.white.opacity(0.9), Color.white.opacity(0.55))
+            (.white, Color.white.opacity(0.9), Color.white.opacity(0.65))
         case .light:
-            (Color.black.opacity(0.9), Color.black.opacity(0.78), Color.black.opacity(0.52))
+            (Color.black.opacity(0.9), Color.black.opacity(0.78), Color.black.opacity(0.65))
         @unknown default:
-            (.white, Color.white.opacity(0.9), Color.white.opacity(0.55))
+            (.white, Color.white.opacity(0.9), Color.white.opacity(0.65))
         }
     }
 

@@ -88,8 +88,8 @@ struct JournalEntry: Identifiable, Hashable {
 // MARK: - Entry Filter
 
 /// Declarative description of everything the entry list is currently filtering on.
-struct EntryFilter: Equatable {
-    enum DateRange: String, CaseIterable, Identifiable {
+struct EntryFilter: Equatable, Codable {
+    enum DateRange: String, CaseIterable, Identifiable, Codable {
         case any = "Any time"
         case today = "Today"
         case last7 = "Last 7 days"

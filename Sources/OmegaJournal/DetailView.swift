@@ -9,6 +9,7 @@ struct DetailView: View {
     @ObservedObject var vm: JournalViewModel
     @Binding var selection: SidebarItem?
     @ObservedObject private var theme = ThemeManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -26,7 +27,7 @@ struct DetailView: View {
                 .zIndex(5)
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: vm.toast)
+        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: vm.toast)
     }
 
     @ViewBuilder
@@ -61,18 +62,18 @@ struct DetailView: View {
                             )
                             .frame(width: 74, height: 74)
                         Text("Ω")
-                            .font(.system(size: 34, weight: .light, design: .serif))
+                            .font(.system(size: 114, weight: .light, design: .serif))
                             .foregroundColor(theme.accentColor)
                     }
 
                     Text(greeting)
-                        .font(.system(size: 22, weight: .semibold, design: .serif))
+                        .font(.system(size: 112, weight: .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
 
                     Text(vm.entries.isEmpty
                          ? "Your journal is empty. Let's change that."
                          : "\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words · \(vm.writingStreak) day streak")
-                        .font(.system(size: 12))
+                        .font(.system(size: 112))
                         .foregroundColor(theme.secondaryTextColor)
                 }
 
@@ -83,19 +84,19 @@ struct DetailView: View {
                             .font(.system(size: 10))
                             .foregroundColor(theme.accentColor)
                         Text("TODAY'S PROMPT")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .tracking(0.7)
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     Text(PromptGenerator.today())
-                        .font(.system(size: 15, weight: .medium, design: .serif))
+                        .font(.system(size: 115, weight: .medium, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Button { vm.createEntryFromPrompt() } label: {
                             Text("Write about this")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white)
+                                .font(.system(size: 111, weight: .medium))
+                                .foregroundColor(theme.onAccentColor)
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 5)
                                 .background(Capsule().fill(theme.accentColor))
@@ -121,28 +122,28 @@ struct DetailView: View {
                 }
 
                 // On this day
-                if !vm.reflectiveOnThisDay.isEmpty {
+                if !vm.entries.isEmpty && !vm.reflectiveOnThisDay.isEmpty {
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 5) {
                             Image(systemName: "clock.arrow.circlepath")
                                 .font(.system(size: 10))
                                 .foregroundColor(theme.accentColor)
                             Text("ON THIS DAY")
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(.system(size: 11, weight: .semibold))
                                 .tracking(0.7)
                                 .foregroundColor(theme.secondaryTextColor)
                         }
                         ForEach(vm.reflectiveOnThisDay.prefix(3)) { entry in
                             Button { vm.select(entry) } label: {
                                 HStack(spacing: 8) {
-                                    Text(entry.mood.emoji).font(.system(size: 13))
+                                    Text(entry.mood.emoji).font(.system(size: 113))
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(entry.displayTitle)
-                                            .font(.system(size: 12, weight: .medium))
+                                            .font(.system(size: 112, weight: .medium))
                                             .foregroundColor(theme.titleTextColor)
                                             .lineLimit(1)
                                         Text(entry.createdAt.formatted(.dateTime.year()))
-                                            .font(.system(size: 10))
+                                            .font(.system(size: 110))
                                             .foregroundColor(theme.secondaryTextColor)
                                     }
                                     Spacer()
@@ -191,10 +192,10 @@ struct DetailView: View {
                     .font(.system(size: 15, weight: .light))
                     .foregroundColor(theme.accentColor)
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 110, weight: .medium))
                     .foregroundColor(theme.bodyTextColor)
                 Text(shortcut)
-                    .font(.system(size: 8.5, design: .rounded))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundColor(theme.secondaryTextColor)
             }
             .frame(width: 84, height: 68)
@@ -221,7 +222,7 @@ private struct ToastView: View {
                 .font(.system(size: 12))
                 .foregroundColor(toast.isError ? .orange : .green)
             Text(toast.message)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 112, weight: .medium))
                 .foregroundColor(theme.titleTextColor)
             if let label = toast.actionLabel {
                 Button(label, action: onAction)

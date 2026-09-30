@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import OmegaJournalCore
 
 // MARK: - Read View
 
@@ -29,11 +30,16 @@ struct ReadView: View {
                             .foregroundColor(theme.secondaryTextColor)
                             .italic()
                     } else {
-                        Text(MarkdownRenderer.render(entry.body))
+                        Text(renderedBody)
                             .foregroundColor(theme.bodyTextColor)
                             .textSelection(.enabled)
                             .lineSpacing(5)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .environment(\.openURL, OpenURLAction { url in
+                                guard let line = MarkdownLogic.taskLine(from: url) else { return .systemAction }
+                                toggleTask(atLine: line)
+                                return .handled
+                            })
                     }
 
                     if !entry.attachments.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
@@ -62,6 +68,33 @@ struct ReadView: View {
         }
     }
 
+    // MARK: Body rendering & tasks
+
+    private var renderedBody: AttributedString {
+        MarkdownRenderer.render(entry.body, style: MarkdownRenderStyle(
+            linkColor: theme.accentColor, codeColor: theme.accentColor,
+            mutedColor: theme.secondaryTextColor, interactiveTasks: !isTrash))
+    }
+
+    /// Toggles a task checkbox. Uses `setMood` with the unchanged mood as the only existing
+    /// VM API that flushes pending autosave first (flushBeforeImmediateMutation), then saves
+    /// the whole entry immediately and refreshes every collection. A debounced `autoSave`
+    /// here would hold a stale snapshot that could revert a following pin/archive.
+    /// TODO(track owning JournalViewModel): add a dedicated `updateBody(_:for:)` doing the same.
+    private func toggleTask(atLine line: Int) {
+        guard !isTrash, let newBody = MarkdownLogic.togglingTask(inBody: entry.body, lineIndex: line) else { return }
+        var updated = entry
+        updated.body = newBody
+        vm.setMood(updated.mood, for: updated)
+    }
+
+    /// Black or white, whichever contrasts better with the accent color.
+    private var onAccentColor: Color {
+        let ns = NSColor(theme.accentColor).usingColorSpace(.sRGB) ?? .systemPurple
+        return MarkdownLogic.prefersDarkText(onRed: Double(ns.redComponent), green: Double(ns.greenComponent), blue: Double(ns.blueComponent))
+            ? .black : .white
+    }
+
     // MARK: Toolbar
 
     private var toolbar: some View {
@@ -88,22 +121,28 @@ struct ReadView: View {
                 ActionButton(icon: "trash.slash", color: .red, active: true, tooltip: "Delete Forever", isDestructive: true) {
                     showPermanentDeleteConfirmation = true
                 }
+                    .accessibilityLabel("Delete Forever")
             } else {
                 ActionButton(icon: "pencil", color: theme.accentColor, active: true, tooltip: "Edit (⌘E)") {
                     vm.startEditing(entry)
                 }
+                    .accessibilityLabel("Edit (⌘E)")
                 ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: theme.accentColor, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin" : "Pin") {
                     vm.togglePin(entry)
                 }
+                    .accessibilityLabel(entry.isPinned ? "Unpin" : "Pin")
                 ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite, tooltip: entry.isFavorite ? "Unfavorite" : "Favorite") {
                     vm.toggleFavorite(entry)
                 }
+                    .accessibilityLabel(entry.isFavorite ? "Unfavorite" : "Favorite")
                 ActionButton(icon: "doc.on.doc", color: theme.accentColor, active: false, tooltip: "Duplicate") {
                     vm.duplicate(entry)
                 }
+                    .accessibilityLabel("Duplicate")
                 ActionButton(icon: "doc.on.clipboard", color: theme.accentColor, active: false, tooltip: "Copy as Markdown") {
                     vm.copyAsMarkdown(entry)
                 }
+                    .accessibilityLabel("Copy as Markdown")
 
                 Spacer()
 
@@ -124,6 +163,7 @@ struct ReadView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .accessibilityLabel("Mood: \(entry.mood.label). Change mood")
 
                 ActionButton(icon: "square.and.arrow.up", color: theme.accentColor, active: false, tooltip: "Export this entry") {
                     Task {
@@ -131,20 +171,25 @@ struct ReadView: View {
                         ImportExportPanels.exportCurrentEntry(vm: vm)
                     }
                 }
+                    .accessibilityLabel("Export this entry")
                 ActionButton(icon: entry.isArchived ? "tray.and.arrow.up" : "archivebox", color: theme.accentColor, active: entry.isArchived, tooltip: entry.isArchived ? "Unarchive" : "Archive") {
                     vm.toggleArchive(entry)
                 }
+                    .accessibilityLabel(entry.isArchived ? "Unarchive" : "Archive")
                 ActionButton(icon: entry.isHidden ? "lock.open" : "lock", color: theme.accentColor, active: entry.isHidden, tooltip: entry.isHidden ? "Unhide" : "Hide") {
                     vm.toggleHidden(entry)
                 }
+                    .accessibilityLabel(entry.isHidden ? "Unhide" : "Hide")
                 if entry.isHidden && biometricAuth.isAuthenticated {
                     ActionButton(icon: "lock.fill", color: theme.accentColor, active: true, tooltip: "Lock hidden entries (⌘L)") {
                         vm.lockHiddenEntries()
                     }
+                        .accessibilityLabel("Lock hidden entries (⌘L)")
                 }
                 ActionButton(icon: "trash", color: .red, active: false, tooltip: "Move to Trash", isDestructive: true) {
                     vm.deleteEntry(entry)
                 }
+                    .accessibilityLabel("Move to Trash")
             }
         }
         .padding(.horizontal, 14)
@@ -168,7 +213,7 @@ struct ReadView: View {
             }
 
             if !entry.tags.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
-                HStack(spacing: 5) {
+                FlowLayout(spacing: 5) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Text("#\(tag)")
                             .font(.system(size: 10, weight: .medium))
@@ -176,6 +221,7 @@ struct ReadView: View {
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2.5)
                             .background(Capsule().fill(theme.accentColor.opacity(0.14)))
+                            .accessibilityLabel("Tag \(tag)")
                     }
                 }
             }
@@ -229,12 +275,13 @@ struct ReadView: View {
                     Text("Unlock")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(onAccentColor)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
                 .background(Capsule().fill(theme.accentColor))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Unlock entry with \(biometricAuth.biometricType)")
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
@@ -301,6 +348,7 @@ struct ReadView: View {
                     }
                     .buttonStyle(.plain)
                     .omegaTooltip("Open")
+                    .accessibilityLabel("Open attachment \(attachment.filename)")
 
                     Button {
                         vm.deleteAttachment(attachment)
@@ -311,6 +359,7 @@ struct ReadView: View {
                     }
                     .buttonStyle(.plain)
                     .omegaTooltip("Remove")
+                    .accessibilityLabel("Remove attachment \(attachment.filename)")
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor.opacity(0.4)))

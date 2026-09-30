@@ -8,6 +8,7 @@ struct ActionButton: View {
     let isDestructive: Bool
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(icon: String, color: Color, active: Bool, tooltip: String = "", isDestructive: Bool = false, action: @escaping () -> Void) {
         self.icon = icon
@@ -54,11 +55,12 @@ struct ActionButton: View {
                                 lineWidth: 1
                             )
                     )
-                    .scaleEffect(hover ? 1.08 : 1.0)
+                    .scaleEffect(hover && !reduceMotion ? 1.08 : 1.0)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(tooltip.isEmpty ? icon : tooltip)
             .onHover { hover = $0 }
-            .animation(.easeInOut(duration: 0.15), value: hover)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: hover)
         }
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import OmegaJournalCore
 
 // MARK: - Writing Goals
 
@@ -76,6 +77,13 @@ final class GoalManager: ObservableObject {
     static let shared = GoalManager()
 
     @Published var goals: [WritingGoal] = []
+    /// How streaks are counted. Persisted; defaults to the forgiving daily mode.
+    @Published private(set) var streakMode: StreakMode = .dailyWithRest
+    /// Writing days per week needed to keep a weekly streak (1...7).
+    @Published private(set) var weeklyStreakTarget: Int = 3
+
+    static let streakModeKey = "streak_mode"
+    static let weeklyStreakTargetKey = "streak_weeklyTarget"
 
     private let db = DatabaseManager.shared
 
@@ -83,7 +91,25 @@ final class GoalManager: ObservableObject {
         loadGoals()
     }
 
+    func setStreakMode(_ mode: StreakMode) {
+        streakMode = mode
+        db.setSetting(Self.streakModeKey, value: mode.rawValue)
+    }
+
+    func setWeeklyStreakTarget(_ target: Int) {
+        weeklyStreakTarget = max(1, min(target, 7))
+        db.setSetting(Self.weeklyStreakTargetKey, value: "\(weeklyStreakTarget)")
+    }
+
+    func streakSummary(writingDays: Set<Date>, today: Date = Date()) -> StreakSummary {
+        StreakCalculator.summary(
+            writingDays: writingDays, mode: streakMode,
+            weeklyTarget: weeklyStreakTarget, today: today)
+    }
+
     func loadGoals() {
+        if let mode = StreakMode(rawValue: db.getSetting(Self.streakModeKey)) { streakMode = mode }
+        if let t = Int(db.getSetting(Self.weeklyStreakTargetKey)) { weeklyStreakTarget = max(1, min(t, 7)) }
         migrateLegacyGoalKeys()
         let dailyWordsTarget = savedTarget(for: .dailyWords)
         let dailyEntriesTarget = savedTarget(for: .dailyEntries)

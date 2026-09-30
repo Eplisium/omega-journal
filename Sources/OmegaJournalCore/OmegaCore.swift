@@ -270,3 +270,209 @@ public enum OmegaAnalytics {
         }
     }
 }
+
+// MARK: - Tag normalization
+
+extension OmegaCore {
+    /// Trims, strips leading `#`, removes commas (the text-column separator),
+    /// collapses inner whitespace, drops empties, and dedupes case-insensitively
+    /// (first spelling wins, order preserved).
+    public static func normalizeTags(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for tag in raw {
+            var t = tag.replacingOccurrences(of: ",", with: " ")
+            t = t.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            while t.hasPrefix("#") { t.removeFirst() }
+            t = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            if seen.insert(t.lowercased()).inserted { out.append(t) }
+        }
+        return out
+    }
+}
+
+// MARK: - Non-punitive streaks
+
+/// How a writing streak is measured.
+public enum StreakMode: String, CaseIterable, Sendable {
+    /// Consecutive days, forgiving one missed day in any 7-day window.
+    case dailyWithRest
+    /// Consecutive calendar weeks that reached a target number of writing days.
+    case weekly
+}
+
+public struct StreakSummary: Equatable, Sendable {
+    public let current: Int
+    public let longest: Int
+    /// What `current`/`longest` count: "day" or "week".
+    public let unit: String
+    /// True when today has no entry yet but the streak is still safe.
+    public let writtenToday: Bool
+    /// Days since the most recent writing day (nil when there is none).
+    public let daysSinceLastEntry: Int?
+
+    public init(current: Int, longest: Int, unit: String, writtenToday: Bool, daysSinceLastEntry: Int?) {
+        self.current = current
+        self.longest = longest
+        self.unit = unit
+        self.writtenToday = writtenToday
+        self.daysSinceLastEntry = daysSinceLastEntry
+    }
+}
+
+public enum StreakCalculator {
+    /// Grace rule: at most one missed day in any 7 consecutive days is forgiven.
+    /// A missed day does not add to the count; it only fails to break it. Today
+    /// without an entry is "not yet", never a miss.
+    public static func dailyStreak(
+        writingDays: Set<Date>,
+        today: Date = Date(),
+        calendar: Calendar = .current,
+        graceWindow: Int = 7
+    ) -> Int {
+        let days = Set(writingDays.map { calendar.startOfDay(for: $0) })
+        guard let earliest = days.min() else { return 0 }
+        let todayStart = calendar.startOfDay(for: today)
+        var date = todayStart
+        var count = 0
+        var lastMissOffset: Int?   // steps back from today of the most recent (newer) miss
+        var step = 0
+        while date >= earliest {
+            if days.contains(date) {
+                count += 1
+            } else if date == todayStart {
+                // Today is still open.
+            } else {
+                if let last = lastMissOffset, step - last < graceWindow { break }
+                lastMissOffset = step
+            }
+            guard let prev = calendar.date(byAdding: .day, value: -1, to: date) else { break }
+            date = prev
+            step += 1
+        }
+        return count
+    }
+
+    public static func longestDailyStreak(
+        writingDays: Set<Date>,
+        calendar: Calendar = .current,
+        graceWindow: Int = 7
+    ) -> Int {
+        let days = Set(writingDays.map { calendar.startOfDay(for: $0) })
+        guard let earliest = days.min(), let latest = days.max() else { return 0 }
+        var date = earliest
+        var count = 0, best = 0
+        var sinceMiss: Int?   // days since last forgiven miss inside this streak
+        while date <= latest {
+            if days.contains(date) {
+                count += 1
+                best = max(best, count)
+                if let s = sinceMiss { sinceMiss = s + 1 }
+            } else if count > 0 {
+                if let s = sinceMiss, s < graceWindow - 1 {
+                    count = 0
+                    sinceMiss = nil
+                } else {
+                    sinceMiss = 0
+                }
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: date) else { break }
+            date = next
+        }
+        return best
+    }
+
+    /// Consecutive weeks (ending at the current week, which is still open and
+    /// never breaks the streak) with at least `target` distinct writing days.
+    public static func weeklyStreak(
+        writingDays: Set<Date>,
+        target: Int,
+        today: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Int {
+        let counts = weekCounts(writingDays, calendar: calendar)
+        guard target > 0, !counts.isEmpty,
+              let currentWeek = calendar.dateInterval(of: .weekOfYear, for: today)?.start,
+              let earliest = counts.keys.min() else { return 0 }
+        var week = currentWeek
+        var streak = 0
+        if (counts[week] ?? 0) >= target { streak += 1 }
+        while let prev = calendar.date(byAdding: .weekOfYear, value: -1, to: week), prev >= earliest {
+            week = prev
+            if (counts[week] ?? 0) >= target { streak += 1 } else { break }
+        }
+        return streak
+    }
+
+    public static func longestWeeklyStreak(
+        writingDays: Set<Date>,
+        target: Int,
+        calendar: Calendar = .current
+    ) -> Int {
+        let counts = weekCounts(writingDays, calendar: calendar)
+        guard target > 0, let first = counts.keys.min(), let last = counts.keys.max() else { return 0 }
+        var week = first, run = 0, best = 0
+        while week <= last {
+            if (counts[week] ?? 0) >= target { run += 1; best = max(best, run) } else { run = 0 }
+            guard let next = calendar.date(byAdding: .weekOfYear, value: 1, to: week) else { break }
+            week = next
+        }
+        return best
+    }
+
+    private static func weekCounts(_ days: Set<Date>, calendar: Calendar) -> [Date: Int] {
+        var counts: [Date: Int] = [:]
+        for day in Set(days.map { calendar.startOfDay(for: $0) }) {
+            if let start = calendar.dateInterval(of: .weekOfYear, for: day)?.start {
+                counts[start, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    public static func summary(
+        writingDays: Set<Date>,
+        mode: StreakMode,
+        weeklyTarget: Int = 3,
+        today: Date = Date(),
+        calendar: Calendar = .current
+    ) -> StreakSummary {
+        let days = Set(writingDays.map { calendar.startOfDay(for: $0) })
+        let todayStart = calendar.startOfDay(for: today)
+        let since = days.filter { $0 <= todayStart }.max().flatMap {
+            calendar.dateComponents([.day], from: $0, to: todayStart).day
+        }
+        switch mode {
+        case .dailyWithRest:
+            return StreakSummary(
+                current: dailyStreak(writingDays: days, today: today, calendar: calendar),
+                longest: longestDailyStreak(writingDays: days, calendar: calendar),
+                unit: "day", writtenToday: days.contains(todayStart), daysSinceLastEntry: since)
+        case .weekly:
+            return StreakSummary(
+                current: weeklyStreak(writingDays: days, target: weeklyTarget, today: today, calendar: calendar),
+                longest: longestWeeklyStreak(writingDays: days, target: weeklyTarget, calendar: calendar),
+                unit: "week", writtenToday: days.contains(todayStart), daysSinceLastEntry: since)
+        }
+    }
+}
+
+/// Gentle, non-guilt-inducing copy. Views should display these strings as-is.
+public enum StreakCopy {
+    public static func welcomeBack(daysAway: Int?) -> String {
+        guard let d = daysAway else { return "Welcome. Your first entry starts the story." }
+        switch d {
+        case ...0: return "Nice to see you today."
+        case 1: return "Welcome back. Pick up wherever you like."
+        case 2...6: return "Welcome back. No pressure. Even a sentence counts."
+        default: return "Welcome back. Your journal was here waiting. Start small."
+        }
+    }
+
+    public static func streakLine(_ s: StreakSummary) -> String {
+        if s.current == 0 { return "A fresh start is always available." }
+        let noun = s.current == 1 ? s.unit : s.unit + "s"
+        return "\(s.current) \(noun) of showing up"
+    }
+}

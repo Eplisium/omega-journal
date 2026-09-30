@@ -1,170 +1,209 @@
 import Foundation
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Markdown Renderer
-// Simple markdown → AttributedString parser for journal entries.
-// Supports: headers (#), bold (**), italic (*), code (`), links, lists, blockquotes
+//
+// Markdown → AttributedString for journal entries. Block structure comes from
+// `MarkdownLogic.parseBlocks` (pure, unit-tested); inline styling uses Foundation's
+// `AttributedString(markdown:)` so cost is linear — no per-character appends.
+//
+// Supports: headings, bold/italic (`*x*`, `_x_`), strikethrough, inline code, fenced
+// code blocks, nested bullet/ordered (`1.` and `1)`) lists, task lists, nested
+// blockquotes, simple tables, horizontal rules, links (validated) and bare-URL autolinks.
+
+struct MarkdownRenderStyle {
+    var linkColor: Color = .accentColor
+    var codeColor: Color = .orange
+    var mutedColor: Color = .secondary
+    /// When true, ☐/☑ glyphs carry an `omega-task://toggle/<line>` link so the host can toggle them.
+    var interactiveTasks = false
+
+    static let `default` = MarkdownRenderStyle()
+}
 
 enum MarkdownRenderer {
-    static func render(_ markdown: String) -> AttributedString {
+    static func render(_ markdown: String, style: MarkdownRenderStyle = .default) -> AttributedString {
         var result = AttributedString()
-        let lines = markdown.components(separatedBy: "\n")
-
-        for (i, line) in lines.enumerated() {
-            if i > 0 {
-                result += AttributedString("\n")
-            }
-            result += renderLine(line)
+        var first = true
+        for item in MarkdownLogic.parseBlocks(markdown) {
+            if !first { result.append(AttributedString("\n")) }
+            first = false
+            result.append(renderBlock(item, style: style))
         }
         return result
     }
 
-    private static func renderLine(_ line: String) -> AttributedString {
-        // Headers
-        if line.hasPrefix("### ") {
-            return renderStyled(String(line.dropFirst(4)), size: 16, weight: .semibold)
-        }
-        if line.hasPrefix("## ") {
-            return renderStyled(String(line.dropFirst(3)), size: 20, weight: .bold)
-        }
-        if line.hasPrefix("# ") {
-            return renderStyled(String(line.dropFirst(2)), size: 24, weight: .bold)
-        }
+    // MARK: Blocks
 
-        // Blockquote
-        if line.hasPrefix("> ") {
-            var attr = renderInline(String(line.dropFirst(2)))
-            attr.foregroundColor = .secondary
-            attr.font = .system(size: 15, design: .serif).italic()
+    private static func renderBlock(_ item: MarkdownBlockItem, style: MarkdownRenderStyle) -> AttributedString {
+        switch item.block {
+        case .blank:
+            return AttributedString("")
+
+        case let .heading(level, text):
+            switch level {
+            case 1: return inline(text, size: 24, weight: .bold, style: style)
+            case 2: return inline(text, size: 20, weight: .bold, style: style)
+            case 3: return inline(text, size: 16, weight: .semibold, style: style)
+            default: return inline(text, size: 15, weight: .semibold, style: style)
+            }
+
+        case let .paragraph(text):
+            return inline(text, size: 16, weight: .regular, style: style)
+
+        case let .quote(depth, text):
+            var bar = AttributedString(String(repeating: "\u{258E} ", count: depth))
+            bar.foregroundColor = style.mutedColor.opacity(0.7)
+            var body = inline(text, size: 15, weight: .regular, style: style, italic: true)
+            body.foregroundColor = style.mutedColor
+            return bar + body
+
+        case let .bullet(level, text):
+            let glyphs = ["\u{2022}", "\u{25E6}", "\u{25AA}"]
+            var marker = AttributedString(indent(level) + glyphs[level % glyphs.count] + "  ")
+            marker.foregroundColor = style.mutedColor
+            marker.font = .system(size: 16, design: .serif)
+            return marker + inline(text, size: 16, weight: .regular, style: style)
+
+        case let .ordered(level, number, delimiter, text):
+            var marker = AttributedString(indent(level) + number + delimiter + " ")
+            marker.foregroundColor = style.mutedColor
+            marker.font = .system(size: 16, design: .serif)
+            return marker + inline(text, size: 16, weight: .regular, style: style)
+
+        case let .task(level, done, text):
+            var box = AttributedString(indent(level) + (done ? "\u{2611}" : "\u{2610}"))
+            box.font = .system(size: 16, design: .serif)
+            box.foregroundColor = done ? style.mutedColor : style.linkColor
+            if style.interactiveTasks, let url = MarkdownLogic.taskURL(line: item.line) {
+                box.link = url
+            }
+            var body = inline(text, size: 16, weight: .regular, style: style)
+            if done {
+                body.strikethroughStyle = .single
+                body.foregroundColor = style.mutedColor
+            }
+            return box + AttributedString("  ") + body
+
+        case let .codeFence(_, lines):
+            var out = AttributedString(lines.isEmpty ? " " : lines.map { $0.isEmpty ? " " : $0 }.joined(separator: "\n"))
+            out.font = .system(size: 14, design: .monospaced)
+            out.foregroundColor = style.codeColor
+            out.backgroundColor = style.codeColor.opacity(0.08)
+            return out
+
+        case .rule:
+            var attr = AttributedString(String(repeating: "\u{2500}", count: 24))
+            attr.foregroundColor = style.mutedColor.opacity(0.4)
             return attr
-        }
 
-        // Unordered list
-        if line.hasPrefix("- ") || line.hasPrefix("* ") {
-            var attr = AttributedString("  \u{2022}  ")
-            attr.foregroundColor = .secondary
-            attr += renderInline(String(line.dropFirst(2)))
-            return attr
+        case let .table(header, alignments, rows):
+            return renderTable(header: header, alignments: alignments, rows: rows, style: style)
         }
-
-        // Ordered list (simple detection)
-        if let range = line.range(of: #"^\d+\.\s"#, options: .regularExpression) {
-            let num = String(line[range])
-            let text = String(line[range.upperBound...])
-            var attr = AttributedString("  \(num)")
-            attr.foregroundColor = .secondary
-            attr += renderInline(text)
-            return attr
-        }
-
-        // Horizontal rule
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.count >= 3 && trimmed.allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" }) {
-            var attr = AttributedString("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}")
-            attr.foregroundColor = .secondary.opacity(0.4)
-            return attr
-        }
-
-        return renderInline(line)
     }
 
-    private static func renderInline(_ text: String) -> AttributedString {
-        // Use a simple state machine instead of regex to avoid */** ambiguity
-        var result = AttributedString()
-        let chars = Array(text)
-        var i = 0
-
-        while i < chars.count {
-            // Bold: **text**
-            if i + 1 < chars.count && chars[i] == "*" && chars[i + 1] == "*" {
-                if let end = findClosing(from: i + 2, in: chars, marker: "**") {
-                    let boldText = String(chars[(i + 2)..<end])
-                    var bold = AttributedString(boldText)
-                    bold.font = .system(size: 16, weight: .bold, design: .serif)
-                    result += bold
-                    i = end + 2
-                    continue
-                }
-            }
-
-            // Italic: *text*
-            if chars[i] == "*" {
-                if let end = findClosing(from: i + 1, in: chars, marker: "*") {
-                    let italicText = String(chars[(i + 1)..<end])
-                    var italic = AttributedString(italicText)
-                    italic.font = .system(size: 16, design: .serif).italic()
-                    result += italic
-                    i = end + 1
-                    continue
-                }
-            }
-
-            // Inline code: `text`
-            if chars[i] == "`" {
-                if let end = findClosing(from: i + 1, in: chars, marker: "`") {
-                    let codeText = String(chars[(i + 1)..<end])
-                    var code = AttributedString(codeText)
-                    code.font = .system(size: 14, design: .monospaced)
-                    code.foregroundColor = .orange
-                    code.backgroundColor = Color.orange.opacity(0.1)
-                    result += code
-                    i = end + 1
-                    continue
-                }
-            }
-
-            // Link: [text](url)
-            if chars[i] == "[" {
-                if let closeBracket = findChar(from: i + 1, in: chars, char: "]"),
-                   closeBracket + 1 < chars.count && chars[closeBracket + 1] == "(",
-                   let closeParen = findChar(from: closeBracket + 2, in: chars, char: ")") {
-                    let linkText = String(chars[(i + 1)..<closeBracket])
-                    let urlStr = String(chars[(closeBracket + 2)..<closeParen])
-                    var link = AttributedString(linkText)
-                    link.link = URL(string: urlStr)
-                    link.foregroundColor = .blue
-                    link.underlineStyle = .single
-                    result += link
-                    i = closeParen + 1
-                    continue
-                }
-            }
-
-            // Plain character
-            var plain = AttributedString(String(chars[i]))
-            plain.font = .system(size: 16, design: .serif)
-            result += plain
-            i += 1
-        }
-
-        return result
+    private static func indent(_ level: Int) -> String {
+        String(repeating: "    ", count: max(0, level)) + "  "
     }
 
-    private static func findClosing(from start: Int, in chars: [Character], marker: String) -> Int? {
-        let markerChars = Array(marker)
-        for i in start..<chars.count {
-            var match = true
-            for (j, mc) in markerChars.enumerated() {
-                if i + j >= chars.count || chars[i + j] != mc {
-                    match = false
-                    break
+    // MARK: Tables
+
+    private static func plainText(_ s: String) -> String {
+        // Strip inline markers so column widths reflect what is displayed.
+        String(inline(s, size: 14, weight: .regular, style: .default).characters)
+    }
+
+    private static func renderTable(header: [String], alignments: [MarkdownBlockItem.Alignment],
+                                    rows: [[String]], style: MarkdownRenderStyle) -> AttributedString {
+        let headerText = header.map(plainText)
+        let rowText = rows.map { $0.map(plainText) }
+        var widths = headerText.map { $0.count }
+        for r in rowText { for (i, c) in r.enumerated() where i < widths.count { widths[i] = max(widths[i], c.count) } }
+
+        func pad(_ s: String, _ i: Int) -> String {
+            let gap = max(0, widths[i] - s.count)
+            switch alignments[i] {
+            case .leading: return s + String(repeating: " ", count: gap)
+            case .trailing: return String(repeating: " ", count: gap) + s
+            case .center:
+                let l = gap / 2
+                return String(repeating: " ", count: l) + s + String(repeating: " ", count: gap - l)
+            }
+        }
+        func line(_ cells: [String]) -> String {
+            "\u{2502} " + cells.enumerated().map { pad($0.element, $0.offset) }.joined(separator: " \u{2502} ") + " \u{2502}"
+        }
+        let rule = "\u{251C}" + widths.map { String(repeating: "\u{2500}", count: $0 + 2) }.joined(separator: "\u{253C}") + "\u{2524}"
+
+        var out = AttributedString(line(headerText) + "\n" + rule)
+        out.font = .system(size: 13, weight: .semibold, design: .monospaced)
+        var body = AttributedString(rowText.map { "\n" + line($0) }.joined())
+        body.font = .system(size: 13, design: .monospaced)
+        out.append(body)
+        return out
+    }
+
+    // MARK: Inline
+
+    /// Linear-time inline rendering: one markdown parse, then a single pass over runs.
+    static func inline(_ text: String, size: CGFloat, weight: Font.Weight, style: MarkdownRenderStyle,
+                       italic: Bool = false) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible)
+        var attr = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+
+        // Snapshot runs first; mutating while iterating invalidates indices.
+        var edits: [(Range<AttributedString.Index>, InlinePresentationIntent?, URL?)] = []
+        for run in attr.runs { edits.append((run.range, run.inlinePresentationIntent, run.link)) }
+
+        for (range, intent, link) in edits {
+            let i = intent ?? []
+            if i.contains(.code) {
+                attr[range].font = .system(size: max(12, size - 2), design: .monospaced)
+                attr[range].foregroundColor = style.codeColor
+                attr[range].backgroundColor = style.codeColor.opacity(0.1)
+            } else {
+                var f = Font.system(size: size, weight: i.contains(.stronglyEmphasized) ? .bold : weight, design: .serif)
+                if italic || i.contains(.emphasized) { f = f.italic() }
+                attr[range].font = f
+            }
+            if i.contains(.strikethrough) { attr[range].strikethroughStyle = .single }
+            if let link {
+                if MarkdownLogic.safeLinkURL(link.absoluteString) != nil {
+                    attr[range].foregroundColor = style.linkColor
+                    attr[range].underlineStyle = .single
+                } else {
+                    attr[range].link = nil   // invalid/unsafe destination: show plain text
                 }
             }
-            if match { return i }
         }
-        return nil
-    }
-
-    private static func findChar(from start: Int, in chars: [Character], char: Character) -> Int? {
-        for i in start..<chars.count {
-            if chars[i] == char { return i }
-        }
-        return nil
-    }
-
-    private static func renderStyled(_ text: String, size: CGFloat, weight: Font.Weight) -> AttributedString {
-        var attr = renderInline(text)
-        attr.font = .system(size: size, weight: weight, design: .serif)
+        autolink(&attr, style: style)
         return attr
+    }
+
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// Turns bare http(s) URLs into links (skipping text that is already a link or code).
+    private static func autolink(_ attr: inout AttributedString, style: MarkdownRenderStyle) {
+        let s = String(attr.characters)
+        guard s.contains("://") || s.contains("www."), let detector else { return }
+        let ns = s as NSString
+        for m in detector.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+            guard let url = m.url, MarkdownLogic.safeLinkURL(url.absoluteString) != nil,
+                  url.scheme?.hasPrefix("http") == true,
+                  let sr = Range(m.range, in: s) else { continue }
+            let lo = s.distance(from: s.startIndex, to: sr.lowerBound)
+            let hi = s.distance(from: s.startIndex, to: sr.upperBound)
+            let start = attr.index(attr.startIndex, offsetByCharacters: lo)
+            let end = attr.index(attr.startIndex, offsetByCharacters: hi)
+            let range = start..<end
+            let already = attr[range].runs.contains { $0.link != nil || $0.inlinePresentationIntent?.contains(.code) == true }
+            if already { continue }
+            attr[range].link = url
+            attr[range].foregroundColor = style.linkColor
+            attr[range].underlineStyle = .single
+        }
     }
 }

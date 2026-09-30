@@ -14,6 +14,9 @@ final class BiometricAuth: ObservableObject {
 
     private init() {}
 
+    /// Independent instance for tests (the shared one is touched by other suites).
+    init(forTesting: Void) {}
+
     /// Returns true if biometric auth is available on this device.
     var isAvailable: Bool {
         let context = LAContext()
@@ -80,17 +83,43 @@ final class BiometricAuth: ObservableObject {
         return Int(raw) ?? 5
     }
 
+    /// Test seam: overrides the idle interval (seconds) instead of the setting.
+    var idleSecondsOverride: TimeInterval?
+    /// Minimum spacing between re-arms from `noteActivity()` so per-keystroke
+    /// signals don't churn tasks and settings reads.
+    var activityThrottle: TimeInterval = 1.0
+    private var lastArm = Date.distantPast
+
+    private var idleInterval: TimeInterval {
+        idleSecondsOverride ?? TimeInterval(idleMinutes * 60)
+    }
+
     /// Arms (or re-arms) the idle relock timer. Called on unlock and on any
     /// documented user activity signal; a no-op while locked or disabled.
     func scheduleIdleRelock() {
         idleTimer?.cancel()
-        guard isAuthenticated, idleMinutes > 0 else { return }
+        guard isAuthenticated, idleInterval > 0 else { return }
+        lastArm = Date()
+        let interval = idleInterval
         idleTimer = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(self?.idleMinutes ?? 5) * 60 * 1_000_000_000)
-            guard !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            guard !Task.isCancelled, self?.isAuthenticated == true else { return }
             NotificationCenter.default.post(name: .lockHiddenEntries, object: nil)
         }
     }
+
+    /// Call on user activity (typing, clicking, scrolling) while hidden
+    /// entries are unlocked: pushes the idle relock deadline out. Cheap and
+    /// throttled; a no-op while locked.
+    func noteActivity() {
+        guard isAuthenticated else { return }
+        guard Date().timeIntervalSince(lastArm) >= activityThrottle else { return }
+        scheduleIdleRelock()
+    }
+
+    #if DEBUG
+    func setAuthenticatedForTesting(_ value: Bool) { isAuthenticated = value }
+    #endif
 
     /// Cancels the pending idle relock without changing auth state (activity
     /// happened; the caller re-arms via `scheduleIdleRelock`).

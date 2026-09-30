@@ -13,6 +13,7 @@ struct CommandPaletteView: View {
     @State private var query = ""
     @State private var highlighted = 0
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: Command model
 
@@ -160,13 +161,13 @@ struct CommandPaletteView: View {
                         .foregroundColor(theme.accentColor)
                     TextField("Type a command or search entries…", text: $query)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 15))
+                        .font(.system(size: 115))
                         .foregroundColor(theme.titleTextColor)
                         .focused($focused)
                         .onSubmit { runHighlighted() }
                         .onChange(of: query) { _, _ in highlighted = 0 }
                     Text("esc")
-                        .font(.system(size: 9, design: .rounded))
+                        .font(.system(size: 11, design: .rounded))
                         .foregroundColor(theme.secondaryTextColor)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -187,7 +188,7 @@ struct CommandPaletteView: View {
                             }
                             if results.isEmpty {
                                 Text("No matching commands")
-                                    .font(.system(size: 12))
+                                    .font(.system(size: 112))
                                     .foregroundColor(theme.secondaryTextColor)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 24)
@@ -197,7 +198,7 @@ struct CommandPaletteView: View {
                     }
                     .frame(maxHeight: 380)
                     .onChange(of: highlighted) { _, new in
-                        withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(new, anchor: .center) }
+                        if reduceMotion { proxy.scrollTo(new, anchor: .center) } else { withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(new, anchor: .center) } }
                     }
                 }
 
@@ -209,7 +210,7 @@ struct CommandPaletteView: View {
                     hint("esc", "close")
                     Spacer()
                     Text("\(results.count) results")
-                        .font(.system(size: 9))
+                        .font(.system(size: 11))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 .padding(.horizontal, 14)
@@ -229,10 +230,16 @@ struct CommandPaletteView: View {
         }
         .onAppear { focused = true; highlighted = 0 }
         .onExitCommand { vm.showCommandPalette = false }
-        .background(KeyCaptureView(
-            onUp: { highlighted = max(0, highlighted - 1) },
-            onDown: { highlighted = min(results.count - 1, highlighted + 1) }
-        ))
+        .onKeyPress(.upArrow) {
+            highlighted = max(0, highlighted - 1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            highlighted = max(0, min(results.count - 1, highlighted + 1))
+            return .handled
+        }
+        .accessibilityAddTraits(.isModal)
+        .accessibilityLabel("Command palette")
     }
 
     private func resultRow(_ cmd: Command, index: Int) -> some View {
@@ -248,17 +255,17 @@ struct CommandPaletteView: View {
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cmd.title)
-                        .font(.system(size: 12.5, weight: isOn ? .semibold : .regular))
+                        .font(.system(size: 112.5, weight: isOn ? .semibold : .regular))
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
                     Text(cmd.subtitle)
-                        .font(.system(size: 10))
+                        .font(.system(size: 110))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(1)
                 }
                 Spacer()
                 Text(cmd.group)
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.7))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1.5)
@@ -278,13 +285,13 @@ struct CommandPaletteView: View {
     private func hint(_ key: String, _ label: String) -> some View {
         HStack(spacing: 3) {
             Text(key)
-                .font(.system(size: 9, design: .rounded))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundColor(theme.bodyTextColor)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(RoundedRectangle(cornerRadius: 3).fill(theme.secondaryTextColor.opacity(0.15)))
             Text(label)
-                .font(.system(size: 9))
+                .font(.system(size: 11))
                 .foregroundColor(theme.secondaryTextColor)
         }
     }
@@ -294,53 +301,5 @@ struct CommandPaletteView: View {
         let cmd = results[highlighted]
         vm.showCommandPalette = false
         DispatchQueue.main.async { cmd.run() }
-    }
-}
-
-// MARK: - Arrow key capture
-//
-// SwiftUI has no first-class arrow-key handler for a non-focused list, so we install a
-// local NSEvent monitor while the palette is on screen.
-
-private struct KeyCaptureView: NSViewRepresentable {
-    let onUp: () -> Void
-    let onDown: () -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        context.coordinator.install(onUp: onUp, onDown: onDown)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.install(onUp: onUp, onDown: onDown)
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.remove()
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator {
-        private var monitor: Any?
-
-        func install(onUp: @escaping () -> Void, onDown: @escaping () -> Void) {
-            remove()
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                switch event.keyCode {
-                case 126: onUp(); return nil     // up arrow
-                case 125: onDown(); return nil   // down arrow
-                default: return event
-                }
-            }
-        }
-
-        func remove() {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
-        }
-
-        deinit { remove() }
     }
 }

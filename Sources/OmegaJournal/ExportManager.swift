@@ -46,7 +46,25 @@ enum ExportManager {
         let isHidden: Bool?
     }
 
+    /// Bump when the JSON layout changes. v3 = adds isHidden; v4 = adds formatVersion.
+    static let formatVersion = 4
+
+    /// Real app version from the bundle (falls back for `swift run`/tests).
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String
+        let build = info?["CFBundleVersion"] as? String
+        switch (short, build) {
+        case let (s?, b?) where s != b: return "\(s) (\(b))"
+        case let (s?, _): return s
+        case let (_, b?): return b
+        default: return "dev"
+        }
+    }
+
     struct JSONExport: Codable {
+        /// Absent in files written before v4.
+        var formatVersion: Int? = nil
         let exportDate: Date
         let appVersion: String
         let entryCount: Int
@@ -67,8 +85,9 @@ enum ExportManager {
             )
         }
         let export = JSONExport(
+            formatVersion: formatVersion,
             exportDate: Date(),
-            appVersion: "1.0",
+            appVersion: appVersion,
             entryCount: entries.count,
             entries: jsonEntries
         )
@@ -76,7 +95,7 @@ enum ExportManager {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(export)
-        try data.write(to: url)
+        try data.write(to: url, options: .atomic)
     }
 
     // MARK: PDF Export
@@ -96,7 +115,7 @@ enum ExportManager {
         textView.frame = fullRect
 
         let pdfData = textView.dataWithPDF(inside: fullRect)
-        try pdfData.write(to: url)
+        try pdfData.write(to: url, options: .atomic)
     }
 
     private static func buildPDFContent(_ entries: [JournalEntry]) -> NSAttributedString {

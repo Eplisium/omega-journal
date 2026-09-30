@@ -10,6 +10,8 @@ struct EntryListView: View {
     @ObservedObject private var biometricAuth = BiometricAuth.shared
 
     @FocusState private var searchFocused: Bool
+    @FocusState private var listFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showFilters = false
     @State private var bulkTagText = ""
     @State private var showBulkTagField = false
@@ -89,11 +91,19 @@ struct EntryListView: View {
             listBody
         }
         .background(theme.backgroundColor)
-        .animation(.easeInOut(duration: 0.18), value: showFilters)
-        .animation(.easeInOut(duration: 0.18), value: vm.isBulkSelecting)
-        .animation(.easeInOut(duration: 0.2), value: biometricAuth.isAuthenticated)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showFilters)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: vm.isBulkSelecting)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: biometricAuth.isAuthenticated)
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             searchFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .selectNextEntry)) { _ in moveSelection(1) }
+        .onReceive(NotificationCenter.default.publisher(for: .selectPreviousEntry)) { _ in moveSelection(-1) }
+        .dropDestination(for: URL.self) { urls, _ in
+            let markdown = ShellImportFilter.markdownFiles(in: urls)
+            guard !markdown.isEmpty else { return false }
+            vm.importMarkdown(from: markdown)
+            return true
         }
         .onChange(of: displayedIDs) { _, ids in
             vm.retainBulkSelection(in: ids)
@@ -130,17 +140,17 @@ struct EntryListView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(selection?.title ?? "All Entries")
-                    .font(.system(size: 17, weight: .semibold, design: .serif))
+                    .font(.system(size: 117, weight: .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text(isSearchingCurrentCollection
                      ? "Search results in \(selection?.title ?? "your Journal")"
                      : "Your private writing library")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 110.5))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 8)
             Text("\(displayed.count)")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(.system(size: 111, weight: .semibold, design: .rounded))
                 .foregroundColor(theme.accentColor)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -162,7 +172,7 @@ struct EntryListView: View {
             Text(biometricAuth.isAuthenticated
                  ? "Hidden content is visible — lock if someone walks by."
                  : "Content is hidden — authenticate to reveal.")
-                .font(.system(size: 10))
+                .font(.system(size: 110))
                 .foregroundColor(theme.secondaryTextColor)
             Spacer()
             if biometricAuth.isAuthenticated {
@@ -173,9 +183,9 @@ struct EntryListView: View {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 10))
                         Text("Lock")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 110, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.onAccentColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(theme.accentColor))
@@ -190,9 +200,9 @@ struct EntryListView: View {
                         Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
                             .font(.system(size: 10))
                         Text("Unlock")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 110, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.onAccentColor)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(theme.accentColor))
@@ -216,7 +226,7 @@ struct EntryListView: View {
                     .foregroundColor(theme.secondaryTextColor)
                 TextField("Search entries…", text: $vm.searchText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.system(size: 112))
                     .foregroundColor(theme.titleTextColor)
                     .focused($searchFocused)
                     .onChange(of: vm.searchText) { _, _ in vm.searchTextChanged() }
@@ -245,20 +255,20 @@ struct EntryListView: View {
 
             HStack(spacing: 6) {
                 Text(displayed.isEmpty ? "No entries" : "\(displayed.count) \(displayed.count == 1 ? "entry" : "entries")")
-                    .font(.system(size: 10))
+                    .font(.system(size: 110))
                     .foregroundColor(theme.secondaryTextColor)
 
                 Spacer()
 
                 Button {
-                    withAnimation { showFilters.toggle() }
+                    withAnimation(reduceMotion ? nil : .default) { showFilters.toggle() }
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "line.3.horizontal.decrease.circle\(vm.filter.isActive ? ".fill" : "")")
                             .font(.system(size: 11))
                         if vm.filter.activeCount > 0 {
                             Text("\(vm.filter.activeCount)")
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
                         }
                     }
                     .foregroundColor(vm.filter.isActive ? theme.accentColor : theme.secondaryTextColor)
@@ -269,7 +279,7 @@ struct EntryListView: View {
                 sortSegmentedControl
 
                 Button {
-                    withAnimation {
+                    withAnimation(reduceMotion ? nil : .default) {
                         vm.isBulkSelecting.toggle()
                         if !vm.isBulkSelecting { vm.clearBulkSelection() }
                     }
@@ -317,8 +327,8 @@ struct EntryListView: View {
     private func segment(_ label: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 10, weight: active ? .semibold : .regular))
-                .foregroundColor(active ? .white : theme.secondaryTextColor)
+                .font(.system(size: 110, weight: active ? .semibold : .regular))
+                .foregroundColor(active ? theme.onAccentColor : theme.secondaryTextColor)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 3.5)
                 .background(
@@ -335,19 +345,19 @@ struct EntryListView: View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
                 Text("\(vm.bulkSelection.count) selected")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 111, weight: .medium))
                     .foregroundColor(theme.titleTextColor)
 
                 Button("All") {
                     vm.bulkSelection = Set(displayed.map(\.id))
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 10))
+                .font(.system(size: 110))
                 .foregroundColor(theme.accentColor)
 
                 Button("None") { vm.bulkSelection.removeAll() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 10))
+                    .font(.system(size: 110))
                     .foregroundColor(theme.secondaryTextColor)
 
                 Spacer()
@@ -361,7 +371,7 @@ struct EntryListView: View {
                 HStack(spacing: 6) {
                     TextField("Tag name…", text: $bulkTagText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.titleTextColor)
                         .onSubmit {
                             vm.bulkAddTag(bulkTagText)
@@ -393,7 +403,7 @@ struct EntryListView: View {
         case .favorite:
             bulkButton("star", "Favorite") { vm.bulkFavorite() }
         case .tag:
-            bulkButton("number", "Tag") { withAnimation { showBulkTagField.toggle() } }
+            bulkButton("number", "Tag") { withAnimation(reduceMotion ? nil : .default) { showBulkTagField.toggle() } }
         case .archive:
             bulkButton("archivebox", "Archive") { vm.bulkArchive() }
         case .unarchive:
@@ -426,11 +436,11 @@ struct EntryListView: View {
         HStack(spacing: 8) {
             Image(systemName: "info.circle").font(.system(size: 10))
             Text("Entries are deleted forever after \(DatabaseManager.trashRetentionDays) days.")
-                .font(.system(size: 10))
+                .font(.system(size: 110))
             Spacer()
             Button("Empty Trash") { showEmptyTrashConfirmation = true }
                 .buttonStyle(.plain)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 110, weight: .semibold))
                 .foregroundColor(.red)
         }
         .foregroundColor(theme.secondaryTextColor)
@@ -468,7 +478,33 @@ struct EntryListView: View {
                 .padding(.vertical, 8)
             }
             .scrollContentBackground(.hidden)
+            .focusable()
+            .focused($listFocused)
+            .focusEffectDisabled()
+            .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
+            .onKeyPress(.downArrow) { moveSelection(1); return .handled }
+            .onKeyPress(.return) {
+                guard !isTrash, let entry = vm.selectedEntry else { return .ignored }
+                vm.startEditing(entry)
+                return .handled
+            }
+            .onKeyPress(.delete) { deleteSelected() }
+            .onKeyPress(.deleteForward) { deleteSelected() }
         }
+    }
+
+    /// Moves selection through the visible (section-ordered) rows.
+    private func moveSelection(_ delta: Int) {
+        guard !vm.isBulkSelecting, vm.editingEntryId == nil else { return }
+        let ids = sections.flatMap { $0.entries.map(\.id) }
+        guard let next = ShellEntryNavigation.step(delta, from: vm.selectedEntryId, in: ids) else { return }
+        vm.selectedEntryId = next
+    }
+
+    private func deleteSelected() -> KeyPress.Result {
+        guard !isTrash, !vm.isBulkSelecting, vm.editingEntryId == nil, let entry = vm.selectedEntry else { return .ignored }
+        vm.deleteEntry(entry)
+        return .handled
     }
 
     private func sectionHeader(_ section: JournalViewModel.EntrySection) -> some View {
@@ -479,11 +515,11 @@ struct EntryListView: View {
                     .foregroundColor(theme.accentColor)
             }
             Text(section.title.uppercased())
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .tracking(0.7)
                 .foregroundColor(theme.secondaryTextColor)
             Text("\(section.entries.count)")
-                .font(.system(size: 9, design: .rounded))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundColor(theme.secondaryTextColor.opacity(0.6))
             Spacer()
         }
@@ -500,25 +536,25 @@ struct EntryListView: View {
                 .foregroundColor(theme.secondaryTextColor.opacity(0.4))
             VStack(spacing: 4) {
                 Text(emptyTitle)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 113, weight: .medium))
                     .foregroundColor(theme.bodyTextColor)
                 Text(emptySubtitle)
-                    .font(.system(size: 11))
+                    .font(.system(size: 111))
                     .foregroundColor(theme.secondaryTextColor)
                     .multilineTextAlignment(.center)
             }
             if vm.filter.isActive {
                 Button("Clear filters") { vm.filter = .empty }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 111, weight: .medium))
                     .foregroundColor(theme.accentColor)
             } else if !isTrash && selection != .archive {
                 Button {
                     vm.createEntry()
                 } label: {
                     Text("Write your first entry")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white)
+                        .font(.system(size: 111, weight: .medium))
+                        .foregroundColor(theme.onAccentColor)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(Capsule().fill(theme.accentColor))
@@ -602,7 +638,7 @@ private struct EntryRow: View {
                             .foregroundColor(theme.accentColor.opacity(isContentLocked ? 0.9 : 0.7))
                     }
                     Text(entry.displayTitle)
-                        .font(.system(size: 13, weight: .semibold, design: .serif))
+                        .font(.system(size: 113, weight: .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor.opacity(isContentLocked ? 0.72 : 1))
                         .lineLimit(1)
                     Spacer(minLength: 2)
@@ -616,32 +652,32 @@ private struct EntryRow: View {
 
                 if isContentLocked {
                     Text("Hidden · unlock to read")
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.secondaryTextColor.opacity(0.55))
                         .lineLimit(1)
                 } else {
                     Text(entry.preview)
-                        .font(.system(size: 11))
+                        .font(.system(size: 111))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
 
                 HStack(spacing: 6) {
-                    Text(entry.mood.emoji).font(.system(size: 9))
+                    Text(entry.mood.emoji).font(.system(size: 11))
                     Text(isTrash ? trashLabel : entry.createdAt.formatted(date: .abbreviated, time: .shortened).replacingOccurrences(of: " AM", with: " AM"))
-                        .font(.system(size: 9.5))
+                        .font(.system(size: 11))
                         .foregroundColor(theme.secondaryTextColor.opacity(0.8))
                     if entry.wordCount > 0 {
                         Text("· \(entry.wordCount)w")
-                            .font(.system(size: 9.5))
+                            .font(.system(size: 11))
                             .foregroundColor(theme.secondaryTextColor.opacity(0.6))
                     }
                     Spacer(minLength: 2)
                     if !isContentLocked {
                         ForEach(entry.tags.prefix(2), id: \.self) { tag in
                             Text("#\(tag)")
-                                .font(.system(size: 8.5, weight: .medium))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(theme.accentColor.opacity(0.9))
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -649,7 +685,7 @@ private struct EntryRow: View {
                         }
                         if entry.tags.count > 2 {
                             Text("+\(entry.tags.count - 2)")
-                                .font(.system(size: 8.5))
+                                .font(.system(size: 11))
                                 .foregroundColor(theme.secondaryTextColor.opacity(0.7))
                         }
                     }
@@ -677,8 +713,9 @@ private struct EntryRow: View {
             if isBulkSelecting {
                 vm.toggleBulkSelection(entry.id)
             } else {
-                // Clicking the selected entry closes it; clicking another opens it.
-                vm.toggleSelection(entry)
+                // Clicking never deselects: the selection stays put so the
+                // reader pane doesn't vanish on an accidental re-click.
+                vm.select(entry)
             }
         }
         .contextMenu { contextMenu }
@@ -777,14 +814,14 @@ private struct FilterBar: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("FILTERS")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .tracking(0.7)
                     .foregroundColor(theme.secondaryTextColor)
                 Spacer()
                 if vm.filter.isActive {
                     Button("Reset") { vm.filter = .empty }
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 110, weight: .medium))
                         .foregroundColor(theme.accentColor)
                 }
             }
@@ -797,7 +834,7 @@ private struct FilterBar: View {
                         if on { vm.filter.moods.remove(mood) } else { vm.filter.moods.insert(mood) }
                     } label: {
                         Text(mood.emoji)
-                            .font(.system(size: 12))
+                            .font(.system(size: 112))
                             .frame(width: 24, height: 22)
                             .background(
                                 RoundedRectangle(cornerRadius: 5)
@@ -820,7 +857,7 @@ private struct FilterBar: View {
                     }
                 }
                 .labelsHidden()
-                .font(.system(size: 10))
+                .font(.system(size: 110))
                 .frame(width: 118)
             }
 
@@ -831,12 +868,12 @@ private struct FilterBar: View {
                 toggle("Files", "paperclip", $vm.filter.withAttachmentsOnly)
                 Spacer()
                 Text("Min words")
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(theme.secondaryTextColor)
                 Stepper("", value: $vm.filter.minWords, in: 0...2000, step: 50)
                     .labelsHidden()
                 Text("\(vm.filter.minWords)")
-                    .font(.system(size: 10, design: .rounded))
+                    .font(.system(size: 110, design: .rounded))
                     .foregroundColor(theme.bodyTextColor)
                     .frame(width: 26, alignment: .leading)
             }
@@ -851,7 +888,7 @@ private struct FilterBar: View {
                                 if on { vm.filter.tags.remove(item.tag) } else { vm.filter.tags.insert(item.tag) }
                             } label: {
                                 Text("#\(item.tag)")
-                                    .font(.system(size: 9.5, weight: on ? .semibold : .regular))
+                                    .font(.system(size: 11, weight: on ? .semibold : .regular))
                                     .foregroundColor(on ? theme.accentColor : theme.secondaryTextColor)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2.5)
@@ -874,7 +911,7 @@ private struct FilterBar: View {
         Button { binding.wrappedValue.toggle() } label: {
             HStack(spacing: 3) {
                 Image(systemName: icon).font(.system(size: 8))
-                Text(label).font(.system(size: 9.5, weight: binding.wrappedValue ? .semibold : .regular))
+                Text(label).font(.system(size: 11, weight: binding.wrappedValue ? .semibold : .regular))
             }
             .foregroundColor(binding.wrappedValue ? theme.accentColor : theme.secondaryTextColor)
             .padding(.horizontal, 6)

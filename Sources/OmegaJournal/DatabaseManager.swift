@@ -35,6 +35,7 @@ final class DatabaseManager {
     /// swallow-and-continue behaviour that tests rely on is preserved.
     func reportError(_ message: String) {
         print("OmegaJournal: \(message)")
+        lastErrorMessage = message
         if let onError {
             onError(message)
         } else {
@@ -46,15 +47,18 @@ final class DatabaseManager {
 
     /// Runs one UPDATE-style statement with bound parameters, checking the
     /// step result and reporting failures. Returns whether the write landed.
+    @discardableResult
     private func execChecked(_ sql: String, context: String, bind: (OpaquePointer?) -> Void) -> Bool {
         guard let stmt = try? prepare(sql) else {
             reportError("\(context) failed to prepare")
+            flagTransactionFailure()
             return false
         }
         defer { sqlite3_finalize(stmt) }
         bind(stmt)
         if sqlite3_step(stmt) != SQLITE_DONE {
             reportError("\(context): \(String(cString: sqlite3_errmsg(db)))")
+            flagTransactionFailure()
             return false
         }
         return true
@@ -65,12 +69,26 @@ final class DatabaseManager {
     private var attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    private static let currentSchemaVersion = 8
+    static let currentSchemaVersion = 9
 
     /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
     static let trashRetentionDays = 30
 
-    private init() {
+    /// Set when the database could not be opened, is newer than this app, or a
+    /// migration failed / key is unavailable. The app stays launchable; while
+    /// `isReadOnly` every write is refused by SQLite (`PRAGMA query_only`).
+    private(set) var startupError: String?
+    /// True when writes are blocked (schema newer than app, failed migration…).
+    private(set) var isReadOnly = false
+    private var openFailed = false
+    /// Non-nil once the encryption key was found missing/unusable.
+    private(set) var encryptionKeyError: String?
+    /// Last error text reported (for the throwing save variant).
+    private(set) var lastErrorMessage: String?
+
+    private let isPrimaryInstance: Bool
+
+    private static func defaultPaths() -> (db: String, attachments: String, isTest: Bool) {
         let fileManager = FileManager.default
         if let testPath = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"], !testPath.isEmpty {
             // An explicit, test-only override keeps lifecycle integration tests
@@ -78,31 +96,84 @@ final class DatabaseManager {
             let databaseURL = URL(fileURLWithPath: testPath)
             let testRoot = databaseURL.deletingLastPathComponent()
             try? fileManager.createDirectory(at: testRoot, withIntermediateDirectories: true)
-            dbPath = databaseURL.path
-            attachmentsDir = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH"]
+            let att = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH"]
                 ?? testRoot.appendingPathComponent("attachments", isDirectory: true).path
-        } else {
-            let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let appDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
-            try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
-            dbPath = appDir.appendingPathComponent("omega_journal.sqlite3").path
-            attachmentsDir = appDir.appendingPathComponent("attachments", isDirectory: true).path
+            return (databaseURL.path, att, true)
         }
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
+        try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
+        return (appDir.appendingPathComponent("omega_journal.sqlite3").path,
+                appDir.appendingPathComponent("attachments", isDirectory: true).path, false)
+    }
+
+    private init() {
+        let paths = Self.defaultPaths()
+        dbPath = paths.db
+        attachmentsDir = paths.attachments
+        isPrimaryInstance = true
+        if !paths.isTest {
+            // Decrypted attachment copies never outlive the session.
+            JournalCrypto.installTemporaryFileCleanup()
+        }
+        bootstrap()
+    }
+
+    /// Opens an independent database at an explicit path (tests, tooling).
+    /// The shared instance remains the only one the app uses.
+    init(databasePath: String, attachmentsPath: String) {
+        dbPath = databasePath
+        attachmentsDir = attachmentsPath
+        isPrimaryInstance = false
+        try? FileManager.default.createDirectory(
+            at: URL(fileURLWithPath: databasePath).deletingLastPathComponent(), withIntermediateDirectories: true)
+        bootstrap()
+    }
+
+    private func bootstrap() {
         try? FileManager.default.createDirectory(atPath: attachmentsDir, withIntermediateDirectories: true)
         openDatabase()
+        guard !openFailed else { return }
+        JournalCrypto.registerEncryptedDataProbe(owner: self) { [weak self] in self?.hasEncryptedRows() ?? false }
         runMigrations()
+        guard !isReadOnly else { return }
         reconcileTagStorage()
         purgeExpiredTrash()
         autoBackup()
     }
 
     private func openDatabase() {
+        openFailed = false
+        isReadOnly = false
+        startupError = nil
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             let msg = String(cString: sqlite3_errmsg(db))
-            fatalError("Failed to open database: \(msg)")
+            openFailed = true
+            isReadOnly = true
+            startupError = "Failed to open database: \(msg)"
+            reportError(startupError!)
+            return
         }
+        exec("PRAGMA busy_timeout=5000;")
         exec("PRAGMA journal_mode=WAL;")
+        exec("PRAGMA synchronous=NORMAL;")
         exec("PRAGMA foreign_keys=ON;")
+    }
+
+    /// Refuses further writes on this connection and records why.
+    private func enterReadOnlyMode(_ reason: String) {
+        isReadOnly = true
+        startupError = reason
+        _ = sqlite3_exec(db, "PRAGMA query_only=ON;", nil, nil, nil)
+        reportError(reason)
+    }
+
+    /// True when any row holds an encrypted body — used to refuse minting a
+    /// replacement key that would orphan that data.
+    func hasEncryptedRows() -> Bool {
+        guard let stmt = try? prepare("SELECT 1 FROM entries WHERE body_enc IS NOT NULL LIMIT 1;") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW
     }
 
     // MARK: - SQL Helpers
@@ -182,24 +253,45 @@ final class DatabaseManager {
     }
 
     private func beginTransaction() {
-        if transactionDepth == 0 { exec("BEGIN IMMEDIATE TRANSACTION;") }
+        if transactionDepth == 0 {
+            pendingFileRemovals.removeAll()
+            if !exec("BEGIN IMMEDIATE TRANSACTION;") { transactionFailed = true }
+        }
         transactionDepth += 1
     }
+
+    /// Files to delete once the OUTERMOST transaction has committed. Removing
+    /// them inside the transaction would destroy data a rollback then restores
+    /// rows for.
+    private var pendingFileRemovals: [String] = []
 
     /// Must be balanced with `beginTransaction` — wrap bodies in
     /// `defer { endTransaction() }` so early returns cannot strand an open
     /// transaction (an open one would buffer every later write uncommitted).
-    private func endTransaction() {
-        guard transactionDepth > 0 else { return }
+    /// Returns true when nothing failed: at the outermost level that means
+    /// COMMIT succeeded; when nested it means no failure has been flagged yet.
+    @discardableResult
+    private func endTransaction() -> Bool {
+        guard transactionDepth > 0 else { return true }
         transactionDepth -= 1
-        if transactionDepth == 0 {
-            if transactionFailed {
-                exec("ROLLBACK;")
-            } else {
-                exec("COMMIT;")
+        guard transactionDepth == 0 else { return !transactionFailed }
+        var committed = false
+        if transactionFailed {
+            _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+        } else {
+            committed = sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK
+            if !committed {
+                reportError("Commit failed: \(String(cString: sqlite3_errmsg(db)))")
+                _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
             }
-            transactionFailed = false
         }
+        transactionFailed = false
+        let files = pendingFileRemovals
+        pendingFileRemovals.removeAll()
+        if committed {
+            for path in files { try? FileManager.default.removeItem(atPath: path) }
+        }
+        return committed
     }
 
     // MARK: - Test hooks
@@ -240,6 +332,30 @@ final class DatabaseManager {
 
     var attachmentsDirectoryForTesting: String { attachmentsDir }
 
+    /// Overwrites a row's ciphertext (simulates corruption / wrong key).
+    func corruptBodyForTesting(id: String) {
+        execChecked("UPDATE entries SET body_enc = ? WHERE id = ?;", context: "corrupt") { stmt in
+            bindBlob(stmt, index: 1, value: Data(repeating: 0xAB, count: 64))
+            bindText(stmt, index: 2, value: id)
+        }
+    }
+
+    func rawBodyEncForTesting(id: String) -> Data? {
+        guard let stmt = try? prepare("SELECT body_enc FROM entries WHERE id = ?;") else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, index: 1, value: id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return blobAt(stmt, index: 0)
+    }
+
+    func scalarIntForTesting(_ sql: String) -> Int {
+        guard let stmt = try? prepare(sql) else { return -1 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : -1
+    }
+
+    func setSchemaVersionForTesting(_ v: Int) { _ = setSchemaVersion(v) }
+
     func setAttachmentsDirectoryForTesting(_ path: String) {
         attachmentsDir = path
     }
@@ -247,44 +363,95 @@ final class DatabaseManager {
 
     // MARK: - Migrations
 
+    private func columnExists(_ table: String, _ column: String) -> Bool {
+        guard let stmt = try? prepare("PRAGMA table_info(\(table));") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 1), String(cString: c) == column { return true }
+        }
+        return false
+    }
+
+    /// Idempotent ADD COLUMN: SQLite has no IF NOT EXISTS for it, and a
+    /// failing exec would (rightly) poison the surrounding transaction.
+    private func addColumnIfMissing(_ table: String, _ column: String, _ definition: String) -> Bool {
+        if columnExists(table, column) { return true }
+        return exec("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
+    }
+
+    var schemaVersion: Int { getSchemaVersion() }
+
     private func runMigrations() {
-        // Create schema_version table if it doesn't exist
-        exec("""
+        guard exec("""
             CREATE TABLE IF NOT EXISTS schema_version (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 version INTEGER NOT NULL DEFAULT 0
             );
-        """)
-
-        // Insert initial version row if missing
-        exec("INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 0);")
+        """), exec("INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 0);") else {
+            enterReadOnlyMode("Could not initialise schema tracking — journal opened read-only.")
+            return
+        }
 
         let current = getSchemaVersion()
+        let target = Self.currentSchemaVersion
 
-        if current < 1 {
-            migrateToV1()
+        // A database written by a newer build must not be downgraded or have
+        // older migrations re-run against it.
+        if current > target {
+            enterReadOnlyMode("This journal was created by a newer version of Omega Journal (schema \(current), this app supports \(target)). It was opened read-only; update the app to edit it.")
+            return
         }
-        if current < 2 {
-            migrateToV2()
+        if current == target { return }
+
+        let migrations: [(version: Int, run: () -> Bool)] = [
+            (1, migrateToV1), (2, migrateToV2), (3, migrateToV3), (4, migrateToV4),
+            (5, migrateToV5), (6, migrateToV6), (7, migrateToV7), (8, migrateToV8),
+            (9, migrateToV9),
+        ]
+
+        // Snapshot existing user data before any change. A brand-new database
+        // (version 0, no entries table) has nothing to protect.
+        if current > 0 || tableExists("entries") {
+            if !snapshotBeforeMigration(fromVersion: current) {
+                if entryRowCountIfAny() > 0 {
+                    enterReadOnlyMode("Could not take a safety snapshot before upgrading the journal — migration skipped and journal opened read-only. Free disk space and relaunch.")
+                    return
+                }
+            }
         }
-        if current < 3 {
-            migrateToV3()
+
+        var ranV8 = false
+        for m in migrations where current < m.version {
+            beginTransaction()
+            var ok = m.run()
+            if ok { ok = setSchemaVersion(m.version) }
+            if !ok { flagTransactionFailure() }
+            let committed = endTransaction()
+            if !ok || !committed {
+                enterReadOnlyMode("Upgrading the journal to schema V\(m.version) failed and was rolled back; your data is unchanged. The journal opened read-only. A pre-upgrade snapshot is in the backups folder.")
+                return
+            }
+            if m.version == 8 { ranV8 = true }
         }
-        if current < 4 {
-            migrateToV4()
+        if ranV8 {
+            // The pre-migration plaintext pages stay in the file as free space
+            // after the UPDATEs — VACUUM rewrites the database so the old bodies
+            // are physically gone. VACUUM cannot run inside a transaction.
+            exec("VACUUM;")
         }
-        if current < 5 {
-            migrateToV5()
-        }
-        if current < 6 {
-            migrateToV6()
-        }
-        if current < 7 {
-            migrateToV7()
-        }
-        if current < 8 {
-            migrateToV8()
-        }
+    }
+
+    private func tableExists(_ name: String) -> Bool {
+        guard let stmt = try? prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?;") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, index: 1, value: name)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
+    private func entryRowCountIfAny() -> Int {
+        guard tableExists("entries"), let stmt = try? prepare("SELECT COUNT(*) FROM entries;") else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
     }
 
     private func getSchemaVersion() -> Int {
@@ -296,21 +463,24 @@ final class DatabaseManager {
         return 0
     }
 
-    private func setSchemaVersion(_ version: Int) {
-        // A silent failure here would leave schema_version stale, so the next
-        // launch would re-run migrations against already-migrated data.
+    /// Records the version. A silent failure would leave schema_version stale,
+    /// so the caller treats `false` as a failed migration (rolled back).
+    private func setSchemaVersion(_ version: Int) -> Bool {
         guard let stmt = try? prepare("UPDATE schema_version SET version = ? WHERE id = 1;") else {
-            fatalError("Could not prepare schema_version update — migration state is untrackable")
+            reportError("Could not prepare schema_version update")
+            return false
         }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(version))
         guard sqlite3_step(stmt) == SQLITE_DONE else {
-            fatalError("Could not record schema version \(version): \(String(cString: sqlite3_errmsg(db)))")
+            reportError("Could not record schema version \(version): \(String(cString: sqlite3_errmsg(db)))")
+            return false
         }
+        return true
     }
 
     /// V1: Base tables (entries + settings)
-    private func migrateToV1() {
+    private func migrateToV1() -> Bool {
         exec("""
             CREATE TABLE IF NOT EXISTS entries (
                 id TEXT PRIMARY KEY,
@@ -328,12 +498,11 @@ final class DatabaseManager {
                 value TEXT NOT NULL
             );
         """)
-        setSchemaVersion(1)
     }
 
     /// V2: Tags table + junction table, migrate existing comma-separated tags
-    private func migrateToV2() {
-        exec("""
+    private func migrateToV2() -> Bool {
+        guard exec("""
             CREATE TABLE IF NOT EXISTS tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL
@@ -343,12 +512,10 @@ final class DatabaseManager {
                 tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
                 PRIMARY KEY (entry_id, tag_id)
             );
-        """)
+        """) else { return false }
 
         // Migrate existing comma-separated tags to the junction table
-        guard let stmt = try? prepare("SELECT id, tags FROM entries WHERE tags != '';") else {
-            setSchemaVersion(2); return
-        }
+        guard let stmt = try? prepare("SELECT id, tags FROM entries WHERE tags != '';") else { return false }
         defer { sqlite3_finalize(stmt) }
 
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -363,28 +530,27 @@ final class DatabaseManager {
                 )
             }
         }
-        setSchemaVersion(2)
+        return !transactionFailed
     }
 
     /// V3: Full-text search index
-    private func migrateToV3() {
-        exec("""
+    private func migrateToV3() -> Bool {
+        guard exec("""
             CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
                 entry_id UNINDEXED,
                 title, body, tags
             );
-        """)
+        """) else { return false }
 
-        // Populate FTS from existing entries
-        exec("""
+        // Populate FTS from existing entries (idempotent: clear first).
+        return exec("DELETE FROM entries_fts;") && exec("""
             INSERT INTO entries_fts(entry_id, title, body, tags)
             SELECT id, title, '', tags FROM entries;
         """)
-        setSchemaVersion(3)
     }
 
     /// V4: Attachments table
-    private func migrateToV4() {
+    private func migrateToV4() -> Bool {
         exec("""
             CREATE TABLE IF NOT EXISTS attachments (
                 id TEXT PRIMARY KEY,
@@ -395,16 +561,13 @@ final class DatabaseManager {
             );
             CREATE INDEX IF NOT EXISTS idx_attachments_entry ON attachments(entry_id);
         """)
-        setSchemaVersion(4)
     }
 
     /// V5: Soft-delete (trash) + archive flags, entry templates, and performance indexes.
-    private func migrateToV5() {
-        // `ALTER TABLE ... ADD COLUMN` fails if the column already exists; exec() logs and
-        // continues, which is the behaviour we want for an idempotent migration.
-        exec("ALTER TABLE entries ADD COLUMN deleted_at REAL;")
-        exec("ALTER TABLE entries ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;")
-        exec("""
+    private func migrateToV5() -> Bool {
+        guard addColumnIfMissing("entries", "deleted_at", "REAL"),
+              addColumnIfMissing("entries", "is_archived", "INTEGER NOT NULL DEFAULT 0"),
+              exec("""
             CREATE TABLE IF NOT EXISTS templates (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -416,19 +579,17 @@ final class DatabaseManager {
             CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_entries_deleted ON entries(deleted_at);
             CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag_id);
-        """)
+        """) else { return false }
         seedDefaultTemplates()
-        setSchemaVersion(5)
+        return !transactionFailed
     }
 
     /// V6: `word_count` column so goals and sort-by-words don't need to load bodies.
     /// Backfills every existing row from its body text.
-    private func migrateToV6() {
-        exec("ALTER TABLE entries ADD COLUMN word_count INTEGER NOT NULL DEFAULT 0;")
+    private func migrateToV6() -> Bool {
+        guard addColumnIfMissing("entries", "word_count", "INTEGER NOT NULL DEFAULT 0") else { return false }
         // Backfill: split body on whitespace and count tokens, matching JournalEntry.wordCount.
-        guard let stmt = try? prepare("SELECT id, body FROM entries;") else {
-            setSchemaVersion(6); return
-        }
+        guard let stmt = try? prepare("SELECT id, body FROM entries;") else { return false }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = String(cString: sqlite3_column_text(stmt, 0))
@@ -437,52 +598,66 @@ final class DatabaseManager {
             execParameterized("UPDATE entries SET word_count = ? WHERE id = ?;",
                               String(count), id)
         }
-        exec("CREATE INDEX IF NOT EXISTS idx_entries_word_count ON entries(word_count DESC);")
-        setSchemaVersion(6)
+        return exec("CREATE INDEX IF NOT EXISTS idx_entries_word_count ON entries(word_count DESC);")
+            && !transactionFailed
     }
 
     /// V7: Hidden entries — `is_hidden` flag. Content is gated in the UI; main scopes still include them.
-    private func migrateToV7() {
-        exec("ALTER TABLE entries ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;")
-        exec("CREATE INDEX IF NOT EXISTS idx_entries_hidden ON entries(is_hidden);")
-        setSchemaVersion(7)
+    private func migrateToV7() -> Bool {
+        addColumnIfMissing("entries", "is_hidden", "INTEGER NOT NULL DEFAULT 0")
+            && exec("CREATE INDEX IF NOT EXISTS idx_entries_hidden ON entries(is_hidden);")
     }
 
     /// V8: Encrypt entry bodies at rest. Adds `body_enc` (AES-GCM blob);
     /// plaintext `body` is migrated to it and then blanked, so the SQLite
-    /// file and its auto-backups no longer carry journal text. FTS and LIKE
-    /// can no longer see bodies — search re-adds decrypted-body matching in
-    /// Swift (see fetchAllEntries/fetchScopes). Idempotent: blank bodies are
-    /// skipped, so a re-run never double-encrypts.
-    private func migrateToV8() {
-        exec("ALTER TABLE entries ADD COLUMN body_enc BLOB;")
-        encryptPendingBodies()
-        setSchemaVersion(8)
-        // The pre-migration plaintext pages stay in the file as free space
-        // after the UPDATEs — VACUUM rewrites the database so the old bodies
-        // are physically gone, not just logically.
-        exec("VACUUM;")
+    /// file and its auto-backups no longer carry journal text. Idempotent:
+    /// blank bodies are skipped, so a re-run never double-encrypts. Returns
+    /// false (rolling the whole step back, version NOT bumped) unless EVERY
+    /// pending row was converted. The follow-up VACUUM runs after commit in
+    /// `runMigrations`.
+    private func migrateToV8() -> Bool {
+        guard addColumnIfMissing("entries", "body_enc", "BLOB") else { return false }
+        return encryptPendingBodies()
+    }
+
+    /// V9: stable FTS row mapping so per-save index maintenance deletes by
+    /// rowid instead of scanning the whole FTS table (`entry_id` is UNINDEXED,
+    /// so `DELETE … WHERE entry_id = ?` was a full scan on every save).
+    /// `entries.rowid` isn't usable — VACUUM may renumber it — hence the
+    /// explicit map. Idempotent: the index is rebuilt from scratch.
+    private func migrateToV9() -> Bool {
+        guard exec("""
+            CREATE TABLE IF NOT EXISTS entries_fts_map (
+                fts_rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id TEXT NOT NULL UNIQUE
+            );
+        """) else { return false }
+        return reindexFTS()
     }
 
     /// Encrypts every entry whose `body_enc` is NULL and whose plaintext
-    /// `body` is non-empty, then clears the plaintext column. Runs inside the
-    /// V8 migration and can be re-invoked (encryption upgrade path).
-    private func encryptPendingBodies() {
+    /// `body` is non-empty, then clears the plaintext column. Returns true only
+    /// if all such rows were converted (or there were none).
+    @discardableResult
+    private func encryptPendingBodies() -> Bool {
         beginTransaction()
         defer { endTransaction() }
         guard let stmt = try? prepare("SELECT id, body FROM entries WHERE body_enc IS NULL AND body != '';"),
               let upd = try? prepare("UPDATE entries SET body_enc = ?, body = '' WHERE id = ?;")
         else {
             reportError("Body encryption migration could not prepare")
-            return
+            flagTransactionFailure()
+            return false
         }
         defer { sqlite3_finalize(stmt); sqlite3_finalize(upd) }
         var pairs: [(id: String, sealed: Data)] = []
+        var allOK = true
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = String(cString: sqlite3_column_text(stmt, 0))
             let body = String(cString: sqlite3_column_text(stmt, 1))
             guard let sealed = try? JournalCrypto.encryptString(body) else {
-                reportError("Could not encrypt body for entry \(id) — plaintext kept")
+                reportError("Could not encrypt body for entry \(id) — migration will not complete")
+                allOK = false
                 continue
             }
             pairs.append((id, sealed))
@@ -494,8 +669,11 @@ final class DatabaseManager {
             if sqlite3_step(upd) != SQLITE_DONE {
                 reportError("Body encryption update failed for \(pair.id)")
                 flagTransactionFailure()
+                allOK = false
             }
         }
+        if !allOK { flagTransactionFailure() }
+        return allOK
     }
 
     // MARK: - Tag storage reconciliation
@@ -595,79 +773,233 @@ final class DatabaseManager {
 
     // MARK: - Auto Backup
 
-    private func autoBackup() {
-        let lastBackup = getSetting("lastBackupDate", defaultValue: "")
-        let formatter = ISO8601DateFormatter()
-        let today = formatter.string(from: Date())
-
-        // Backup at most once per calendar day — and only stamp the setting when
-        // the backup actually succeeded, so a failed attempt (unwritable disk,
-        // I/O error) is retried on the next launch instead of being skipped
-        // until tomorrow.
-        guard lastBackup != today else { return }
-        guard backupDatabase() != nil else {
-            // Failed attempts retry on the next launch; the user should know
-            // today's backup didn't happen.
-            reportError("Automatic backup failed — will retry on next launch")
-            return
-        }
-        setSetting("lastBackupDate", value: today)
+    var backupsDirectory: URL {
+        URL(fileURLWithPath: dbPath).deletingLastPathComponent()
+            .appendingPathComponent("backups", isDirectory: true)
     }
 
-    func backupDatabase() -> URL? {
-        // Keep backups next to the live database instead of assuming the standard
-        // Application Support path. For the real journal this is the same location
-        // as before; under test isolation it keeps backup files inside the temp
-        // directory rather than dropping them into the user's real backups folder
-        // (where they could evict a genuine backup from the keep-last-7 window).
-        let databaseURL = URL(fileURLWithPath: dbPath)
-        let backupDir = databaseURL.deletingLastPathComponent()
-            .appendingPathComponent("backups", isDirectory: true)
-        try? FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
+    /// Local-calendar day stamp used to gate the automatic backup.
+    static func backupDayStamp(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
-        let filename = "omega_journal_\(formatter.string(from: Date())).sqlite3"
-        let backupURL = backupDir.appendingPathComponent(filename)
-        try? FileManager.default.removeItem(at: backupURL) // VACUUM INTO requires a fresh target
+    static let dailyBackupPrefix = "omega_journal_"
+    static let dailyBackupsToKeep = 7
 
+    /// Backs up at most once per calendar day. Returns whether a backup ran
+    /// and succeeded. The day is only stamped after success, so a failed
+    /// attempt retries on the next launch.
+    @discardableResult
+    func autoBackup(now: Date = Date()) -> Bool {
+        let today = Self.backupDayStamp(now)
+        guard getSetting("lastBackupDate", defaultValue: "") != today else { return false }
+        guard backupDatabase(now: now) != nil else {
+            reportError("Automatic backup failed — will retry on next launch")
+            return false
+        }
+        setSetting("lastBackupDate", value: today)
+        return true
+    }
+
+    /// Writes a sealed VACUUM INTO snapshot of the live database to `url`.
+    /// NOTE: attachments are NOT included in database backups — they live as
+    /// individually sealed files in the attachments directory and are never
+    /// deleted by a restore.
+    private func snapshotDatabase(to url: URL) -> Bool {
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: url) // VACUUM INTO requires a fresh target
         // VACUUM INTO produces a clean hot snapshot (and compacts away freed
         // pages, so pre-encryption plaintext doesn't ride along in backup
-        // files). Requires no active transaction and the target must not exist
-        // — the timestamped filename guarantees that.
-        let escapedPath = backupURL.path.replacingOccurrences(of: "'", with: "''")
+        // files). Requires no active transaction.
+        let escapedPath = url.path.replacingOccurrences(of: "'", with: "''")
         guard exec("VACUUM INTO '\(escapedPath)';") else {
-            reportError("Backup failed: VACUUM INTO could not run")
-            try? FileManager.default.removeItem(at: backupURL)
-            return nil
+            try? FileManager.default.removeItem(at: url)
+            return false
         }
-
-        // Seal the backup file: the hot copy would otherwise be a plaintext
-        // snapshot of the database sitting beside the (body-encrypted) live DB.
+        // Seal the snapshot: the hot copy would otherwise be a plaintext
+        // copy of the database sitting beside the (body-encrypted) live DB.
         do {
-            let plain = try Data(contentsOf: backupURL)
-            try JournalCrypto.writeEncrypted(plain, to: backupURL)
+            let plain = try Data(contentsOf: url)
+            try JournalCrypto.writeEncrypted(plain, to: url)
         } catch {
             reportError("Backup encryption failed — removing partial backup: \(error.localizedDescription)")
-            try? FileManager.default.removeItem(at: backupURL)
+            try? FileManager.default.removeItem(at: url)
+            return false
+        }
+        return true
+    }
+
+    private static func fileStamp(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
+        return f.string(from: date)
+    }
+
+    func backupDatabase(now: Date = Date()) -> URL? {
+        // Keep backups next to the live database instead of assuming the standard
+        // Application Support path (keeps test backups inside the temp dir).
+        let backupDir = backupsDirectory
+        let backupURL = backupDir.appendingPathComponent("\(Self.dailyBackupPrefix)\(Self.fileStamp(now)).sqlite3")
+        guard snapshotDatabase(to: backupURL) else {
+            reportError("Backup failed: could not write snapshot")
             return nil
         }
-
-        // Clean up old backups (keep last 7)
-        cleanupOldBackups(in: backupDir, keep: 7)
+        cleanupOldBackups(in: backupDir, prefix: Self.dailyBackupPrefix, keep: Self.dailyBackupsToKeep)
         return backupURL
     }
 
-    private func cleanupOldBackups(in directory: URL, keep count: Int) {
+    /// Safety snapshot taken before pending migrations run.
+    private func snapshotBeforeMigration(fromVersion: Int) -> Bool {
+        let url = backupsDirectory.appendingPathComponent("pre-migration_v\(fromVersion)_\(Self.fileStamp(Date())).sqlite3")
+        guard snapshotDatabase(to: url) else { return false }
+        cleanupOldBackups(in: backupsDirectory, prefix: "pre-migration_", keep: 3)
+        return true
+    }
+
+    private func cleanupOldBackups(in directory: URL, prefix: String, keep count: Int) {
         guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles
+            at: directory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
         ) else { return }
 
-        let sorted = files.filter { $0.pathExtension == "sqlite3" }
-            .sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
+        let sorted = files.filter { $0.pathExtension == "sqlite3" && $0.lastPathComponent.hasPrefix(prefix) }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
 
         for file in sorted.dropFirst(count) {
             try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    // MARK: - Backup listing & restore
+
+    /// Every backup/snapshot file (daily, pre-migration, pre-restore), newest first.
+    func listBackups() -> [URL] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles
+        ) else { return [] }
+        func mtime(_ u: URL) -> Date {
+            (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        return files.filter { $0.pathExtension == "sqlite3" }
+            .sorted { (mtime($0), $0.lastPathComponent) > (mtime($1), $1.lastPathComponent) }
+    }
+
+    enum RestoreError: Error, LocalizedError {
+        case invalid(String)
+        case failed(String)
+        var errorDescription: String? {
+            switch self { case .invalid(let m), .failed(let m): return m }
+        }
+    }
+
+    /// Replaces the live database with the contents of a backup. Validates the
+    /// backup first (decrypts, integrity_check, known schema, version not
+    /// newer than this app), snapshots the current database, then swaps files.
+    /// On any failure the original database is put back and this throws.
+    /// The caller must reload all published state afterwards. Attachments are
+    /// not part of backups and are left untouched (rows in the restored
+    /// database whose files no longer exist simply have no data).
+    func restoreBackup(from url: URL) throws {
+        guard !openFailed else { throw RestoreError.failed("The database is not open.") }
+        guard transactionDepth == 0 else { throw RestoreError.failed("A write is in progress.") }
+        let fm = FileManager.default
+
+        // 1. Decrypt + stage.
+        let raw: Data
+        do { raw = try Data(contentsOf: url) } catch { throw RestoreError.invalid("Could not read the backup file.") }
+        let plain: Data
+        if raw.starts(with: Data("SQLite format 3\0".utf8)) {
+            plain = raw
+        } else if let opened = try? JournalCrypto.decrypt(raw) {
+            plain = opened
+        } else {
+            throw RestoreError.invalid("The backup could not be decrypted (wrong key or corrupted file).")
+        }
+        let dir = URL(fileURLWithPath: dbPath).deletingLastPathComponent()
+        let staging = dir.appendingPathComponent("restore-staging-\(UUID().uuidString).sqlite3")
+        defer {
+            for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: staging.path + suffix) }
+        }
+        do { try plain.write(to: staging, options: .atomic) } catch { throw RestoreError.failed("Could not stage the backup: \(error.localizedDescription)") }
+
+        // 2. Validate.
+        try Self.validateDatabaseFile(at: staging.path, maxVersion: Self.currentSchemaVersion)
+
+        // 3. Snapshot the current database first (bypass query_only if set).
+        _ = sqlite3_exec(db, "PRAGMA query_only=OFF;", nil, nil, nil)
+        let snapshotURL = backupsDirectory.appendingPathComponent("pre-restore_\(Self.fileStamp(Date())).sqlite3")
+        let snapped = snapshotDatabase(to: snapshotURL)
+        if isReadOnly { _ = sqlite3_exec(db, "PRAGMA query_only=ON;", nil, nil, nil) }
+        guard snapped else { throw RestoreError.failed("Could not snapshot the current journal; restore cancelled.") }
+        cleanupOldBackups(in: backupsDirectory, prefix: "pre-restore_", keep: 5)
+
+        // 4. Swap.
+        let aside = dbPath + ".pre-restore"
+        for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
+        sqlite3_close(db)
+        db = nil
+        do {
+            try fm.moveItem(atPath: dbPath, toPath: aside)
+        } catch {
+            openDatabase()
+            throw RestoreError.failed("Could not move the current database aside: \(error.localizedDescription)")
+        }
+        for suffix in ["-wal", "-shm"] { try? fm.removeItem(atPath: dbPath + suffix) }
+
+        func rollback(_ message: String) -> RestoreError {
+            sqlite3_close(db)
+            db = nil
+            for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: dbPath + suffix) }
+            try? fm.moveItem(atPath: aside, toPath: dbPath)
+            openDatabase()
+            _ = getSchemaVersion() >= 0
+            return RestoreError.failed(message)
+        }
+
+        do { try fm.moveItem(atPath: staging.path, toPath: dbPath) }
+        catch { throw rollback("Could not put the backup in place: \(error.localizedDescription)") }
+
+        openDatabase()
+        if openFailed { throw rollback("The restored database could not be opened; original restored.") }
+        runMigrations()
+        if isReadOnly {
+            let reason = startupError ?? "unknown"
+            throw rollback("The restored database could not be upgraded (\(reason)); original restored.")
+        }
+        for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
+        encryptionKeyError = nil
+        reconcileTagStorage()
+    }
+
+    /// Opens a database file read-only and checks it looks like a journal.
+    private static func validateDatabaseFile(at path: String, maxVersion: Int) throws {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let h = handle else {
+            sqlite3_close(handle)
+            throw RestoreError.invalid("The backup is not a valid database.")
+        }
+        defer { sqlite3_close(h) }
+        func firstText(_ sql: String) -> String? {
+            var st: OpaquePointer?
+            guard sqlite3_prepare_v2(h, sql, -1, &st, nil) == SQLITE_OK else { sqlite3_finalize(st); return nil }
+            defer { sqlite3_finalize(st) }
+            guard sqlite3_step(st) == SQLITE_ROW, let c = sqlite3_column_text(st, 0) else { return nil }
+            return String(cString: c)
+        }
+        guard firstText("PRAGMA integrity_check;") == "ok" else {
+            throw RestoreError.invalid("The backup failed its integrity check.")
+        }
+        guard let v = firstText("SELECT version FROM schema_version WHERE id = 1;"), let version = Int(v) else {
+            throw RestoreError.invalid("The backup is not an Omega Journal database.")
+        }
+        guard version <= maxVersion else {
+            throw RestoreError.invalid("The backup was made by a newer version of Omega Journal.")
+        }
+        guard version >= 1, firstText("SELECT COUNT(*) FROM entries;") != nil else {
+            throw RestoreError.invalid("The backup has no journal entries table.")
         }
     }
 
@@ -685,7 +1017,7 @@ final class DatabaseManager {
     // Column 2 is `body_enc` (the AES-GCM blob) since V8 — rowToEntry
     // decrypts it. The legacy `body` text column is always empty on disk.
     private static let entryColumns =
-        "e.id, e.title, e.body_enc, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden"
+        "e.id, e.title, e.body_enc, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden, e.body"
 
     private func scopeClause(_ scope: EntryScope) -> String {
         switch scope {
@@ -847,17 +1179,48 @@ final class DatabaseManager {
         return entries
     }
 
+    /// Entries whose stored ciphertext could not be decrypted on their last
+    /// read (wrong/missing key, corruption). Their bodies show as empty in
+    /// the model but the stored ciphertext is preserved by `saveEntry`.
+    private(set) var unreadableEntryIds: Set<String> = []
+
+    func isEntryUnreadable(_ id: String) -> Bool { unreadableEntryIds.contains(id) }
+
+    private func decryptBody(_ sealed: Data) -> Result<String, Error> {
+        do { return .success(try JournalCrypto.decryptString(sealed)) }
+        catch {
+            if let keyError = error as? JournalCrypto.KeyError { noteKeyError(keyError) }
+            return .failure(error)
+        }
+    }
+
+    private func noteKeyError(_ error: JournalCrypto.KeyError) {
+        guard encryptionKeyError == nil else { return }
+        encryptionKeyError = error.localizedDescription
+        reportError(error.localizedDescription)
+    }
+
     private func rowToEntry(_ stmt: OpaquePointer?) -> JournalEntry {
         let id = String(cString: sqlite3_column_text(stmt, 0))
         let title = String(cString: sqlite3_column_text(stmt, 1))
-        // V8: the body is the AES-GCM blob in column 2 (`body_enc`); the
-        // legacy plaintext column is always ''. A failed decryption surfaces
-        // as an empty body rather than a crash — matching a corrupted row.
+        // V8: the body is the AES-GCM blob in column 2 (`body_enc`). When it is
+        // NULL (a row the encryption migration hasn't converted) fall back to
+        // the legacy plaintext `body` (column 13) so text is never hidden.
+        // A failed decryption yields an empty body AND marks the entry
+        // unreadable: saveEntry then refuses to overwrite the ciphertext.
         let body: String
         if let sealed = blobAt(stmt, index: 2) {
-            body = (try? JournalCrypto.decryptString(sealed)) ?? ""
+            switch decryptBody(sealed) {
+            case .success(let text):
+                body = text
+                unreadableEntryIds.remove(id)
+            case .failure:
+                body = ""
+                unreadableEntryIds.insert(id)
+            }
         } else {
-            body = ""
+            unreadableEntryIds.remove(id)
+            body = sqlite3_column_text(stmt, 13).map { String(cString: $0) } ?? ""
         }
         let mood = sqlite3_column_int(stmt, 3)
         let tagsStr = String(cString: sqlite3_column_text(stmt, 4))
@@ -891,20 +1254,61 @@ final class DatabaseManager {
         )
     }
 
-    func saveEntry(_ entry: JournalEntry) {
+    /// Saves an entry. Source-compatible with callers that ignore the result;
+    /// returns whether the write committed. Failures are also reported via
+    /// `onError`.
+    @discardableResult
+    func saveEntry(_ entry: JournalEntry) -> Bool {
         // The row write, tag sync, and FTS update must land together — a crash
         // between them would leave the entry text, its sidebar tags, and its
         // search results disagreeing with each other.
         beginTransaction()
-        defer { endTransaction() }
+        performSave(entry)
+        return endTransaction()
+    }
 
+    /// Throwing variant of `saveEntry` for callers that want the reason.
+    func saveEntryChecked(_ entry: JournalEntry) throws {
+        lastErrorMessage = nil
+        if !saveEntry(entry) {
+            throw SQLiteError.message(lastErrorMessage ?? "Save failed")
+        }
+    }
+
+    /// Stored ciphertext for the row, and whether it is currently decryptable.
+    private func existingBodyState(id: String) -> (exists: Bool, unreadable: Bool) {
+        guard let stmt = try? prepare("SELECT body_enc FROM entries WHERE id = ?;") else { return (false, false) }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, index: 1, value: id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return (false, false) }
+        guard let sealed = blobAt(stmt, index: 0) else { return (true, false) }
+        if case .failure = decryptBody(sealed) { return (true, true) }
+        return (true, false)
+    }
+
+    private func performSave(_ entry: JournalEntry) {
         let wordCount = entry.body.isEmpty ? 0 : entry.body.split(whereSeparator: { $0.isWhitespace }).count
-        // Bodies are encrypted at rest (V8): the `body` column stays empty on
-        // disk, the ciphertext lives in `body_enc`. FTS still indexes the
-        // plaintext so search keeps working — the FTS table is part of the
-        // encrypted story being "bodies not recoverable from the DB file";
-        // see rebuildFTS for the residual-surface note.
-        let sql = """
+        let existing = existingBodyState(id: entry.id)
+        // Never replace ciphertext we cannot read: an unreadable body loads as
+        // "" and re-saving that would destroy the only copy. Metadata changes
+        // still go through; the body/word_count columns are left untouched.
+        let preserveBody = existing.unreadable
+        if preserveBody {
+            unreadableEntryIds.insert(entry.id)
+            if !entry.body.isEmpty {
+                reportError("This entry's stored text can't be decrypted, so the new text was NOT saved (the original is preserved). Restore the encryption key or a backup.")
+            }
+        }
+        let sql = preserveBody ? """
+        INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title=excluded.title, mood=excluded.mood,
+            tags=excluded.tags, updated_at=excluded.updated_at,
+            is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
+            is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
+            is_hidden=excluded.is_hidden;
+        """ : """
         INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -924,6 +1328,7 @@ final class DatabaseManager {
         do {
             sealedBody = try JournalCrypto.encryptString(entry.body)
         } catch {
+            if let keyError = error as? JournalCrypto.KeyError { noteKeyError(keyError) }
             reportError("Could not encrypt entry body — save aborted: \(error.localizedDescription)")
             flagTransactionFailure()
             return
@@ -993,15 +1398,16 @@ final class DatabaseManager {
     func hardDeleteEntry(id: String) {
         beginTransaction()
         defer { endTransaction() }
+        // Attachment files are removed only AFTER the outermost COMMIT (see
+        // deleteAttachment / pendingFileRemovals): a rolled-back delete must
+        // not have already destroyed the files its restored rows point at.
         for attachment in fetchAttachments(entryId: id) {
             deleteAttachment(id: attachment.id)
         }
         execChecked("DELETE FROM entries WHERE id = ?;", context: "Delete entry failed") { stmt in
             bindText(stmt, index: 1, value: id)
         }
-        execChecked("DELETE FROM entries_fts WHERE entry_id = ?;", context: "Delete entry search index failed") { stmt in
-            bindText(stmt, index: 1, value: id)
-        }
+        removeFTS(entryId: id)
     }
 
     /// Legacy name — now a soft delete so nothing is lost by accident.
@@ -1045,22 +1451,69 @@ final class DatabaseManager {
 
     // MARK: - FTS Sync
 
+    /// rowid of the entry's FTS row via `entries_fts_map` (V9). Deleting by
+    /// rowid is an index lookup; the UNINDEXED `entry_id` column would need a
+    /// full FTS scan on every save.
+    private func ftsRowid(for entryId: String, create: Bool) -> Int64? {
+        if let stmt = try? prepare("SELECT fts_rowid FROM entries_fts_map WHERE entry_id = ?;") {
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, index: 1, value: entryId)
+            if sqlite3_step(stmt) == SQLITE_ROW { return sqlite3_column_int64(stmt, 0) }
+        }
+        guard create else { return nil }
+        guard execChecked("INSERT INTO entries_fts_map (entry_id) VALUES (?);", context: "FTS map insert failed", bind: { bindText($0, index: 1, value: entryId) }) else { return nil }
+        return sqlite3_last_insert_rowid(db)
+    }
+
+    private func removeFTS(entryId: String) {
+        guard let rowid = ftsRowid(for: entryId, create: false) else {
+            // Not mapped (never indexed) — nothing to remove.
+            return
+        }
+        execChecked("DELETE FROM entries_fts WHERE rowid = ?;", context: "Delete entry search index failed") { stmt in
+            sqlite3_bind_int64(stmt, 1, rowid)
+        }
+        execChecked("DELETE FROM entries_fts_map WHERE entry_id = ?;", context: "Delete entry search map failed") { stmt in
+            bindText(stmt, index: 1, value: entryId)
+        }
+    }
+
     private func updateFTS(_ entry: JournalEntry) {
-        // Delete old FTS entry, insert new
-        if let delStmt = try? prepare("DELETE FROM entries_fts WHERE entry_id = ?;") {
-            defer { sqlite3_finalize(delStmt) }
-            bindText(delStmt, index: 1, value: entry.id)
-            sqlite3_step(delStmt)
+        guard let rowid = ftsRowid(for: entry.id, create: true) else {
+            flagTransactionFailure()
+            return
         }
         // FTS stores only title/tags — indexing body would put plaintext back
         // on disk. Body search is handled by decryptBodyMatches in Swift.
-        let insSQL = "INSERT INTO entries_fts(entry_id, title, body, tags) VALUES (?, '', ?, ?);"
-        guard let insStmt = try? prepare(insSQL) else { return }
-        defer { sqlite3_finalize(insStmt) }
-        bindText(insStmt, index: 1, value: entry.id)
-        bindText(insStmt, index: 2, value: entry.title)
-        bindText(insStmt, index: 3, value: entry.tags.joined(separator: ","))
-        sqlite3_step(insStmt)
+        guard execChecked("DELETE FROM entries_fts WHERE rowid = ?;", context: "FTS delete failed", bind: { sqlite3_bind_int64($0, 1, rowid) }),
+              execChecked("INSERT INTO entries_fts(rowid, entry_id, title, body, tags) VALUES (?, ?, ?, '', ?);", context: "FTS insert failed", bind: { stmt in
+                sqlite3_bind_int64(stmt, 1, rowid)
+                bindText(stmt, index: 2, value: entry.id)
+                bindText(stmt, index: 3, value: entry.title)
+                bindText(stmt, index: 4, value: entry.tags.joined(separator: ","))
+              })
+        else { return }
+    }
+
+    /// Rebuilds the whole index (and the id→rowid map) from `entries`.
+    /// Returns false if any step failed (caller's transaction is flagged).
+    @discardableResult
+    private func reindexFTS() -> Bool {
+        beginTransaction()
+        defer { endTransaction() }
+        guard exec("DELETE FROM entries_fts;"),
+              exec("DELETE FROM entries_fts_map;"),
+              exec("INSERT INTO entries_fts_map (entry_id) SELECT id FROM entries;"),
+              exec("""
+                INSERT INTO entries_fts(rowid, entry_id, title, body, tags)
+                SELECT m.fts_rowid, e.id, e.title, '', e.tags
+                FROM entries e JOIN entries_fts_map m ON m.entry_id = e.id;
+              """)
+        else {
+            reportError("FTS rebuild failed")
+            return false
+        }
+        return true
     }
 
     // MARK: - Tags (junction table)
@@ -1246,41 +1699,11 @@ final class DatabaseManager {
         }
     }
 
-    /// Rebuilds the FTS index inside a transaction — the delete+insert pair must
-    /// never be observed half-applied.
-
-
     /// Rebuilds the FTS index inside a transaction — the delete+insert pair
-    /// must never be observed half-applied. Since V8 the `entries` table no
-    /// longer stores plaintext bodies, so the index is fed from decrypted
-    /// bodies in Swift.
+    /// must never be observed half-applied. Since V8 bodies are ciphertext, so
+    /// the index only carries title and tags.
     private func rebuildFTS() {
-        beginTransaction()
-        defer { endTransaction() }
-        exec("DELETE FROM entries_fts;")
-        guard let stmt = try? prepare("SELECT id, title, tags, body_enc FROM entries;") else {
-            reportError("FTS rebuild could not read entries")
-            return
-        }
-        defer { sqlite3_finalize(stmt) }
-        guard let insert = try? prepare("INSERT INTO entries_fts(entry_id, title, body, tags) VALUES (?, '', ?, ?);") else {
-            reportError("FTS rebuild could not prepare insert")
-            return
-        }
-        defer { sqlite3_finalize(insert) }
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let id = String(cString: sqlite3_column_text(stmt, 0))
-            let title = String(cString: sqlite3_column_text(stmt, 1))
-            let tags = String(cString: sqlite3_column_text(stmt, 2))
-            sqlite3_reset(insert)
-            bindText(insert, index: 1, value: id)
-            bindText(insert, index: 2, value: title)
-            bindText(insert, index: 3, value: tags)
-            if sqlite3_step(insert) != SQLITE_DONE {
-                reportError("FTS rebuild insert failed for \(id)")
-                flagTransactionFailure()
-            }
-        }
+        reindexFTS()
     }
 
     // MARK: - Attachments
@@ -1358,18 +1781,16 @@ final class DatabaseManager {
     }
 
     func deleteAttachment(id: String) {
-        // Delete file
         let dir = (attachmentsDir as NSString).appendingPathComponent(id)
-        try? FileManager.default.removeItem(atPath: dir)
-
-        // Delete record
-        let sql = "DELETE FROM attachments WHERE id = ?;"
-        guard let stmt = try? prepare(sql) else { return }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: id)
-        guard sqlite3_step(stmt) == SQLITE_DONE else {
-            print("Attachment row delete failed: \(String(cString: sqlite3_errmsg(db)))")
-            return
+        // Row first; the file only goes once the row deletion is durable. Inside
+        // a transaction the removal waits for the outermost COMMIT.
+        guard execChecked("DELETE FROM attachments WHERE id = ?;", context: "Attachment row delete failed", bind: {
+            self.bindText($0, index: 1, value: id)
+        }) else { return }
+        if transactionDepth > 0 {
+            pendingFileRemovals.append(dir)
+        } else {
+            try? FileManager.default.removeItem(atPath: dir)
         }
     }
 
@@ -1459,13 +1880,14 @@ final class DatabaseManager {
         return defaultValue
     }
 
-    func setSetting(_ key: String, value: String) {
-        let sql = "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
-        guard let stmt = try? prepare(sql) else { return }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: key)
-        bindText(stmt, index: 2, value: value)
-        sqlite3_step(stmt)
+    /// Stores a setting. Returns whether the write landed (callers may ignore).
+    @discardableResult
+    func setSetting(_ key: String, value: String) -> Bool {
+        execChecked("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
+                    context: "Saving setting '\(key)' failed") { stmt in
+            bindText(stmt, index: 1, value: key)
+            bindText(stmt, index: 2, value: value)
+        }
     }
 
     // MARK: - Export Helpers
@@ -1480,5 +1902,8 @@ final class DatabaseManager {
 
     var databasePath: String { dbPath }
 
-    deinit { sqlite3_close(db) }
+    deinit {
+        JournalCrypto.unregisterEncryptedDataProbe(owner: self)
+        sqlite3_close(db)
+    }
 }

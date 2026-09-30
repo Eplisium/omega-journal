@@ -21,6 +21,16 @@ struct EditorView: View {
     @State private var isTypewriter = false
     @State private var fontSize: Double
     @FocusState private var titleFocused: Bool
+    @FocusState private var tagFieldFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // Cached counts — recomputed only when the body changes, never per render.
+    @State private var wordCount: Int
+    @State private var charCount: Int
+    @State private var selectionWords = 0
+    /// Debounced copy of the body for the preview pane.
+    @State private var previewText: String
+    @State private var previewAttributed = AttributedString()
 
     init(vm: JournalViewModel, entry: JournalEntry) {
         self.vm = vm
@@ -30,10 +40,39 @@ struct EditorView: View {
         _mood = State(initialValue: entry.mood)
         _tags = State(initialValue: entry.tags)
         _fontSize = State(initialValue: Double(DatabaseManager.shared.getSetting("editorFontSize", defaultValue: "15")) ?? 15)
+        _wordCount = State(initialValue: MarkdownLogic.wordCount(entry.body))
+        _charCount = State(initialValue: entry.body.utf16.count)
+        _previewText = State(initialValue: entry.body)
     }
 
-    private var wordCount: Int {
-        body_.isEmpty ? 0 : body_.split(whereSeparator: { $0.isWhitespace }).count
+    private static let fontSizes: [Double] = [13, 15, 17, 19, 22]
+
+    private func stepFontSize(_ delta: Int) {
+        let sizes = Self.fontSizes
+        let idx = sizes.enumerated().min { abs($0.element - fontSize) < abs($1.element - fontSize) }?.offset ?? 1
+        fontSize = sizes[max(0, min(sizes.count - 1, idx + delta))]
+    }
+
+    private var palette: MarkdownEditorPalette {
+        MarkdownEditorPalette(
+            text: NSColor(theme.bodyTextColor),
+            muted: NSColor(theme.secondaryTextColor),
+            accent: NSColor(theme.accentColor),
+            code: NSColor(theme.accentColor).blended(withFraction: 0.35, of: .systemOrange) ?? .systemOrange,
+            link: NSColor(theme.accentColor),
+            tag: NSColor(theme.accentColor).withAlphaComponent(0.85))
+    }
+
+    private var renderStyle: MarkdownRenderStyle {
+        MarkdownRenderStyle(linkColor: theme.accentColor, codeColor: theme.accentColor, mutedColor: theme.secondaryTextColor)
+    }
+
+    /// Esc closes transient UI first; a stray Esc never leaves the editor.
+    private func handleEscape() -> Bool {
+        if controller.isFindBarVisible { controller.hideFindBar(); return true }
+        if vm.isZenMode { withAnimation(reduceMotion ? nil : .default) { vm.isZenMode = false }; return true }
+        if showTagField { showTagField = false; tagInput = ""; controller.focus(); return true }
+        return false
     }
 
     private var readingTime: String {
@@ -57,7 +96,25 @@ struct EditorView: View {
             statusBar
         }
         .background(theme.backgroundColor)
-        .onChange(of: body_) { _, _ in persist() }
+        .onChange(of: body_) { _, new in
+            wordCount = MarkdownLogic.wordCount(new)
+            charCount = new.utf16.count
+            persist()
+        }
+        .task(id: body_) {
+            // Debounce the (relatively expensive) preview render while typing in split mode.
+            if previewText != body_ {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if Task.isCancelled { return }
+            }
+            previewText = body_
+            previewAttributed = MarkdownRenderer.render(body_, style: renderStyle)
+        }
+        .onChange(of: theme.accentColor) { _, _ in
+            previewAttributed = MarkdownRenderer.render(previewText, style: renderStyle)
+        }
+        .onExitCommand { _ = handleEscape() }
+        .background(shortcutButtons)
         .onChange(of: title) { _, _ in persist() }
         .onChange(of: mood) { _, _ in persist() }
         .onChange(of: tags) { _, _ in persist() }
@@ -87,7 +144,8 @@ struct EditorView: View {
                 .foregroundColor(theme.accentColor)
             }
             .buttonStyle(.plain)
-            .keyboardShortcut(.escape, modifiers: [])
+            .accessibilityLabel("Done editing")
+            .help("Done (⌘↩)")
 
             Divider().frame(height: 16).opacity(0.25)
 
@@ -106,48 +164,66 @@ struct EditorView: View {
                                 RoundedRectangle(cornerRadius: 6)
                                     .strokeBorder(mood == m ? m.color.opacity(0.65) : .clear, lineWidth: 1)
                             )
-                            .scaleEffect(mood == m ? 1.05 : 1.0)
+                            .scaleEffect(mood == m && !reduceMotion ? 1.05 : 1.0)
                     }
                     .buttonStyle(.plain)
                     .omegaTooltip(m.label)
+                    .accessibilityLabel("Mood: \(m.label)")
+                    .accessibilityAddTraits(mood == m ? .isSelected : [])
                 }
             }
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: mood)
+            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: mood)
 
             Spacer()
 
             // Editor mode switcher
             Picker("", selection: $vm.editorMode) {
                 ForEach(JournalViewModel.EditorMode.allCases) { m in
-                    Image(systemName: m.icon).tag(m)
+                    Image(systemName: m.icon).accessibilityLabel(m.rawValue).tag(m)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 108)
             .omegaTooltip("Write / Split / Preview")
+            .accessibilityLabel("Editor mode")
 
-            ActionButton(icon: "textformat.size", color: theme.accentColor, active: false, tooltip: "Text size") {}
-                .overlay {
-                    Menu {
-                        ForEach([13.0, 15.0, 17.0, 19.0, 22.0], id: \.self) { size in
-                            Button("\(Int(size)) pt") { fontSize = size }
-                        }
-                        Divider()
-                        Toggle("Typewriter Scrolling", isOn: $isTypewriter)
-                    } label: { Color.clear }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .opacity(0.02)
+            Menu {
+                ForEach(Self.fontSizes, id: \.self) { size in
+                    Button {
+                        fontSize = size
+                    } label: {
+                        if Int(fontSize) == Int(size) { Label("\(Int(size)) pt", systemImage: "checkmark") }
+                        else { Text("\(Int(size)) pt") }
+                    }
                 }
+                Divider()
+                Button("Larger") { stepFontSize(1) }
+                Button("Smaller") { stepFontSize(-1) }
+                Divider()
+                Toggle("Typewriter Scrolling", isOn: $isTypewriter)
+            } label: {
+                Image(systemName: "textformat.size")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Text size & typewriter scrolling")
+            .accessibilityLabel("Text size")
 
             ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
                 attachFile()
             }
+            .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
 
             ActionButton(icon: "arrow.up.left.and.arrow.down.right", color: theme.accentColor, active: false, tooltip: "Zen Mode (⌃⌘F)") {
-                withAnimation { vm.isZenMode = true }
+                withAnimation(reduceMotion ? nil : .default) { vm.isZenMode = true }
             }
+            .accessibilityLabel("Enter Zen mode")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
@@ -164,10 +240,10 @@ struct EditorView: View {
                 sep
                 group([.bulletList, .numberedList, .checkbox, .quote])
                 sep
-                group([.link, .codeBlock, .divider])
+                group([.link, .codeBlock, .divider, .toggleTask])
                 sep
 
-                Button { showTagField.toggle() } label: {
+                Button { showTagField.toggle(); if showTagField { tagFieldFocused = true } } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "number").font(.system(size: 10))
                         Text("Tags").font(.system(size: 10, weight: .medium))
@@ -178,6 +254,7 @@ struct EditorView: View {
                     .background(Capsule().fill(theme.accentColor.opacity(0.14)))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(showTagField ? "Hide tag field" : "Add tag")
 
                 ForEach(tags, id: \.self) { tag in
                     HStack(spacing: 3) {
@@ -186,7 +263,9 @@ struct EditorView: View {
                             Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Remove tag \(tag)")
                     }
+                    .accessibilityElement(children: .contain)
                     .foregroundColor(theme.accentColor)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
@@ -199,7 +278,20 @@ struct EditorView: View {
                         .font(.system(size: 10))
                         .frame(width: 70)
                         .foregroundColor(theme.titleTextColor)
+                        .focused($tagFieldFocused)
+                        .accessibilityLabel("New tag")
                         .onSubmit { commitTag() }
+
+                    ForEach(tagSuggestions, id: \.self) { s in
+                        Button { tagInput = s; commitTag() } label: {
+                            Text("#\(s)").font(.system(size: 10))
+                                .foregroundColor(theme.secondaryTextColor)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(Capsule().strokeBorder(theme.secondaryTextColor.opacity(0.4), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Suggested tag \(s)")
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -208,6 +300,22 @@ struct EditorView: View {
             .padding(.vertical, 6)
         }
         .background(theme.cardColor.opacity(0.3))
+    }
+
+    private var tagSuggestions: [String] {
+        MarkdownLogic.tagSuggestions(prefix: tagInput, from: vm.allTags.map(\.tag), excluding: tags)
+    }
+
+    /// Hidden buttons that carry editor-local shortcuts (font size, task toggle).
+    private var shortcutButtons: some View {
+        ZStack {
+            Button("Larger Text") { stepFontSize(1) }.keyboardShortcut("=", modifiers: .command)
+            Button("Smaller Text") { stepFontSize(-1) }.keyboardShortcut("-", modifiers: .command)
+            Button("Toggle Task Done") { controller.apply(.toggleTask) }.keyboardShortcut("d", modifiers: [.command, .shift])
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     private var sep: some View {
@@ -225,6 +333,7 @@ struct EditorView: View {
             }
             .buttonStyle(.plain)
             .omegaTooltip(cmd.label)
+            .accessibilityLabel(cmd.label)
         }
     }
 
@@ -252,15 +361,15 @@ struct EditorView: View {
                 HStack {
                     Spacer()
                     Button {
-                        withAnimation { vm.isZenMode = false }
+                        withAnimation(reduceMotion ? nil : .default) { vm.isZenMode = false }
                     } label: {
                         Image(systemName: "arrow.down.right.and.arrow.up.left")
                             .font(.system(size: 12))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)
-                    .keyboardShortcut(.escape, modifiers: [])
                     .omegaTooltip("Exit Zen Mode")
+                    .accessibilityLabel("Exit Zen mode")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
@@ -271,6 +380,7 @@ struct EditorView: View {
                 .font(.system(size: vm.isZenMode ? 28 : 22, weight: .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .focused($titleFocused)
+                .accessibilityLabel("Entry title")
                 .padding(.horizontal, vm.isZenMode ? 20 : 18)
                 .padding(.top, vm.isZenMode ? 10 : 18)
                 .padding(.bottom, 6)
@@ -281,8 +391,22 @@ struct EditorView: View {
                 lineSpacing: 7,
                 isTypewriterMode: isTypewriter,
                 controller: controller,
-                onCommandReturn: { vm.stopEditing() }
+                palette: palette,
+                onCommandReturn: { vm.stopEditing() },
+                onEscape: { handleEscape() },
+                onSelectionWords: { selectionWords = $0 }
             )
+            .overlay(alignment: .topLeading) {
+                if body_.isEmpty {
+                    Text("Write something…")
+                        .font(.system(size: fontSize))
+                        .foregroundColor(theme.secondaryTextColor.opacity(0.6))
+                        .padding(.horizontal, 13)
+                        .padding(.top, 12)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .padding(.horizontal, vm.isZenMode ? 12 : 10)
             .padding(.bottom, 8)
         }
@@ -298,12 +422,12 @@ struct EditorView: View {
                         .font(.system(size: 24, weight: .bold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                 }
-                if body_.isEmpty {
+                if previewText.isEmpty {
                     Text("Nothing to preview yet.")
                         .font(.system(size: 13))
                         .foregroundColor(theme.secondaryTextColor)
                 } else {
-                    Text(MarkdownRenderer.render(body_))
+                    Text(previewAttributed)
                         .foregroundColor(theme.bodyTextColor)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,8 +446,11 @@ struct EditorView: View {
     private var statusBar: some View {
         HStack(spacing: 12) {
             Label("\(wordCount) words", systemImage: "text.word.spacing")
+            if selectionWords > 0 {
+                Text("(\(selectionWords) selected)")
+            }
             Text("·")
-            Text("\(body_.count) chars")
+            Text("\(charCount) chars")
             Text("·")
             Text(readingTime)
             if !entry.attachments.isEmpty {
@@ -366,18 +493,42 @@ struct EditorView: View {
         vm.autoSave(updated)
     }
 
+    /// Largest single attachment accepted (files are encrypted and stored in-app).
+    static let maxAttachmentBytes = 25 * 1024 * 1024
+
     private func attachFile() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.title = "Attach files to this entry"
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
-            guard let data = try? Data(contentsOf: url) else { continue }
-            let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-            vm.addAttachment(to: entry, data: data, filename: url.lastPathComponent, mimeType: type)
+        let urls = panel.urls
+        let limit = Self.maxAttachmentBytes
+        let target = entry
+        Task {
+            for url in urls {
+                // Read off the main thread so large files don't freeze the editor.
+                let loaded: Result<Data, AttachError> = await Task.detached(priority: .userInitiated) {
+                    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                    if size > limit { return .failure(.tooLarge(url.lastPathComponent)) }
+                    guard let data = try? Data(contentsOf: url) else { return .failure(.unreadable(url.lastPathComponent)) }
+                    if data.count > limit { return .failure(.tooLarge(url.lastPathComponent)) }
+                    return .success(data)
+                }.value
+                switch loaded {
+                case .success(let data):
+                    let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                    vm.addAttachment(to: target, data: data, filename: url.lastPathComponent, mimeType: type)
+                case .failure(.tooLarge(let name)):
+                    vm.showToast("\(name) is too large to attach (limit \(limit / 1_048_576) MB)", isError: true)
+                case .failure(.unreadable(let name)):
+                    vm.showToast("Couldn't read \(name)", isError: true)
+                }
+            }
         }
     }
+
+    private enum AttachError: Error { case tooLarge(String), unreadable(String) }
 }
 
 extension Notification.Name {

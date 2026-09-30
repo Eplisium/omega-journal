@@ -210,7 +210,7 @@ struct HeatmapView: View {
                             .font(.system(size: 12))
                             .foregroundColor(Color.white.opacity(0.45))
                         Text("Hover a day to see entries, moods, and titles")
-                            .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                            .font(.system(size: 111.5, weight: .medium, design: .rounded))
                             .foregroundColor(Color.white.opacity(0.62))
                         Spacer(minLength: 0)
                     }
@@ -234,11 +234,11 @@ struct HeatmapView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(dateStr)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(.system(size: 113, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                     if isToday {
                         Text("Today")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundColor(detailAccent)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -248,18 +248,18 @@ struct HeatmapView: View {
 
                 if count == 0 {
                     Text("No entries")
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 111.5))
                         .foregroundColor(Color.white.opacity(0.55))
                 } else {
                     HStack(spacing: 6) {
                         Text("\(count) \(count == 1 ? "entry" : "entries")")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .font(.system(size: 112, weight: .semibold, design: .rounded))
                             .foregroundColor(detailAccent)
                         if let moods = info?.moods, !moods.isEmpty {
                             Text("·").foregroundColor(Color.white.opacity(0.35))
                             HStack(spacing: 2) {
                                 ForEach(Array(moods.prefix(6).enumerated()), id: \.offset) { _, mood in
-                                    Text(mood.emoji).font(.system(size: 12))
+                                    Text(mood.emoji).font(.system(size: 112))
                                 }
                             }
                         }
@@ -281,14 +281,14 @@ struct HeatmapView: View {
                                 .frame(width: 4, height: 4)
                                 .padding(.top, 4)
                             Text(title)
-                                .font(.system(size: 11))
+                                .font(.system(size: 111))
                                 .foregroundColor(Color.white.opacity(0.8))
                                 .lineLimit(1)
                         }
                     }
                     if count > titles.count {
                         Text("+ \(count - titles.count) more…")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 110, weight: .medium))
                             .foregroundColor(Color.white.opacity(0.45))
                             .padding(.leading, 10)
                     }
@@ -329,10 +329,10 @@ struct HeatmapView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(value)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 113, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
                 Text(label)
-                    .font(.system(size: 10))
+                    .font(.system(size: 110))
                     .foregroundColor(.secondary)
             }
         }
@@ -369,11 +369,11 @@ struct HeatmapView: View {
                     let xOffset = CGFloat(label.weekIndex) * (cellSize + cellSpacing) + 8
                     HStack(spacing: 4) {
                         Text(label.name)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 110, weight: .semibold))
                             .foregroundColor(.secondary)
                         if label.showYear {
                             Text(Self.cal.component(.year, from: weeks[label.weekIndex].startDate).description)
-                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
                                 .foregroundColor(.secondary.opacity(0.55))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -390,7 +390,7 @@ struct HeatmapView: View {
         VStack(spacing: cellSpacing) {
             ForEach(0..<7, id: \.self) { di in
                 Text(di % 2 == 1 ? dayLabels[di] : "")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.secondary.opacity(0.7))
                     .frame(width: dayLabelWidth, height: cellSize, alignment: .trailing)
                     .padding(.trailing, 8)
@@ -453,7 +453,7 @@ struct HeatmapView: View {
     private var legendRow: some View {
         HStack(spacing: 8) {
             Text("Less")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 110, weight: .medium))
                 .foregroundColor(.secondary)
 
             HStack(spacing: 3) {
@@ -474,7 +474,7 @@ struct HeatmapView: View {
             }
 
             Text("More")
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 110, weight: .medium))
                 .foregroundColor(.secondary)
 
             Spacer()
@@ -484,7 +484,7 @@ struct HeatmapView: View {
                     .strokeBorder(accent, lineWidth: 1.5)
                     .frame(width: 12, height: 12)
                 Text("Today")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 110, weight: .medium))
                     .foregroundColor(.secondary)
             }
             .padding(.horizontal, 8)
