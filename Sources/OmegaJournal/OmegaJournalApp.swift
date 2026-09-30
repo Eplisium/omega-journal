@@ -50,6 +50,7 @@ struct OmegaJournalApp: App {
             formatButton("Bullet List", .bulletList, "8", [.command, .shift])
             formatButton("Numbered List", .numberedList, "7", [.command, .shift])
             formatButton("Checklist", .checkbox, "l", [.command, .shift])
+            formatButton("Toggle Task Done", .toggleTask, "d", [.command, .shift])
             formatButton("Quote", .quote, "'", [.command, .shift])
             Divider()
             formatButton("Link", .link, "k", [.command, .shift])

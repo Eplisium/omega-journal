@@ -50,6 +50,9 @@ final class JournalViewModel: ObservableObject {
     let db = DatabaseManager.shared
     private var searchDebounce: Task<Void, Never>?
     private var saveDebounce: Task<Void, Never>?
+    /// Editor save indicator: `.pending` while a debounced autosave is queued.
+    enum SaveState: Equatable { case idle, pending, saved }
+    @Published private(set) var saveState: SaveState = .idle
     private var undoStack: [UndoAction] = []
     /// Undo history is bounded: an unbounded stack of id arrays only grows.
     static let maxUndoDepth = 50
@@ -527,6 +530,7 @@ final class JournalViewModel: ObservableObject {
             }
         }
         editingEntryId = nil
+        saveState = .idle
         isZenMode = false
         refreshTagCounts()
         GoalManager.shared.loadGoals()
@@ -537,12 +541,14 @@ final class JournalViewModel: ObservableObject {
         var updated = entry
         updated.updatedAt = Date()
         updateEntry(updated, refreshSearch: false)
+        saveState = .pending
         saveDebounce?.cancel()
         saveDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 self.db.saveEntry(updated)
+                self.saveState = .saved
                 if self.searchResults != nil { self.refreshQuery() }
                 self.refreshTagCounts()
                 GoalManager.shared.loadGoals()
@@ -554,6 +560,19 @@ final class JournalViewModel: ObservableObject {
     func flushPendingSave() {
         saveDebounce?.cancel()
         if let e = editingEntry { db.saveEntry(e) }
+        if saveState == .pending { saveState = .saved }
+    }
+
+    /// Replaces an entry's body immediately (e.g. ticking a task in the reader).
+    /// Flushes any pending autosave first so a stale snapshot can't overwrite it.
+    func updateBody(_ body: String, for entry: JournalEntry) {
+        flushBeforeImmediateMutation()
+        var u = entry
+        u.body = body
+        u.updatedAt = Date()
+        db.saveEntry(u)
+        updateEntry(u)
+        refreshTagCounts()
     }
 
     // MARK: - Entry mutations

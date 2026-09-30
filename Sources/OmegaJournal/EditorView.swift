@@ -313,7 +313,6 @@ struct EditorView: View {
             Button("Smaller Text") { stepFontSize(-1) }.keyboardShortcut("-", modifiers: .command)
             Button("Find in Entry") { controller.showFind() }.keyboardShortcut("f", modifiers: [.command, .option])
             Button("Find and Replace in Entry") { controller.showFind(replace: true) }.keyboardShortcut("f", modifiers: [.command, .option, .shift])
-            Button("Toggle Task Done") { controller.apply(.toggleTask) }.keyboardShortcut("d", modifiers: [.command, .shift])
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -482,7 +481,9 @@ struct EditorView: View {
             if vm.isZenMode {
                 Text("⎋ exit zen").foregroundColor(theme.secondaryTextColor.opacity(0.7))
             } else {
-                Text("Autosaved").foregroundColor(theme.secondaryTextColor.opacity(0.7))
+                Text(vm.saveState == .pending ? "Saving…" : "Saved")
+                    .foregroundColor(theme.secondaryTextColor.opacity(0.7))
+                    .accessibilityLabel(vm.saveState == .pending ? "Saving" : "All changes saved")
             }
         }
         .font(.system(size: 10))

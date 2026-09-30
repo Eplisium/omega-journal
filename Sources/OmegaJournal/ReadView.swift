@@ -76,16 +76,10 @@ struct ReadView: View {
             mutedColor: theme.secondaryTextColor, interactiveTasks: !isTrash))
     }
 
-    /// Toggles a task checkbox. Uses `setMood` with the unchanged mood as the only existing
-    /// VM API that flushes pending autosave first (flushBeforeImmediateMutation), then saves
-    /// the whole entry immediately and refreshes every collection. A debounced `autoSave`
-    /// here would hold a stale snapshot that could revert a following pin/archive.
-    /// TODO(track owning JournalViewModel): add a dedicated `updateBody(_:for:)` doing the same.
+    /// Toggles a task checkbox via the VM's immediate-mutation path (flushes pending autosave first).
     private func toggleTask(atLine line: Int) {
         guard !isTrash, let newBody = MarkdownLogic.togglingTask(inBody: entry.body, lineIndex: line) else { return }
-        var updated = entry
-        updated.body = newBody
-        vm.setMood(updated.mood, for: updated)
+        vm.updateBody(newBody, for: entry)
     }
 
     /// Black or white, whichever contrasts better with the accent color.
