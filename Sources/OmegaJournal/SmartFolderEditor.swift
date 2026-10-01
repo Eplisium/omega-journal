@@ -58,6 +58,7 @@ struct SmartFolderEditor: View {
                 Picker("Date", selection: $folder.dateRange) {
                     ForEach(SmartFolder.DateRange.allCases, id: \.self) { Text($0.label).tag($0) }
                 }.frame(maxWidth: 220)
+                Toggle("Pin to top", isOn: $folder.isPinned)
                 Toggle("Has attachment", isOn: $folder.hasAttachment)
                 Stepper("Min words: \(folder.minWords)", value: $folder.minWords, in: 0...5000, step: 50)
             }

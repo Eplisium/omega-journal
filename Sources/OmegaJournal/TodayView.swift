@@ -14,6 +14,7 @@ struct TodayView: View {
 
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var goals = GoalManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var recentEntries: [JournalEntry] {
         Array(vm.calendarEntries.sorted { $0.createdAt > $1.createdAt }.prefix(3))
@@ -170,6 +171,32 @@ struct TodayView: View {
 
     /// One quiet line instead of three cards: the numbers stay, the visual weight goes.
     private var statLine: some View {
+        HStack(spacing: 14) {
+            streakRing
+            statText
+        }
+    }
+
+    private var streakRing: some View {
+        let s = vm.streakSummary
+        let progress = StreakRing.progress(current: s.current)
+        return ZStack {
+            Circle().stroke(theme.secondaryTextColor.opacity(0.18), lineWidth: 5)
+            Circle().trim(from: 0, to: progress)
+                .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion), value: progress)
+            VStack(spacing: -1) {
+                Text("\(s.current)").font(OmegaTheme.font(.bodyLarge, .bold, design: .rounded)).foregroundColor(theme.titleTextColor)
+                Text(s.unit == "week" ? "wk" : "day").font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor)
+            }
+        }
+        .frame(width: 54, height: 54)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Writing streak: \(s.current) \(s.unit)\(s.current == 1 ? "" : "s"). \(StreakRing.caption(current: s.current, unit: s.unit))")
+    }
+
+    private var statText: some View {
         Text("\(vm.entriesThisWeek) this week  ·  \(vm.entriesThisMonth) this month  ·  \(vm.totalWordCount.formatted()) words  ·  \(StreakCopy.streakLine(vm.streakSummary))")
             .font(OmegaTheme.font(.caption))
             .foregroundColor(theme.secondaryTextColor)

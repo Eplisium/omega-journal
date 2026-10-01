@@ -8,6 +8,8 @@ enum ReadingPreferences {
     static let maxWidthKey = "readingMaxWidth"
     static let fontDesignKey = "readingFontDesign"
     static let defaultMaxWidth: Double = 760
+    /// Show the entry's first image attachment as a cover above the title.
+    static let showCoverKey = "readingShowCover"
 
     static let widthRange: ClosedRange<Double> = 520...1100
     /// Stored raw values for `fontDesignKey`.

@@ -74,6 +74,12 @@ extension JournalViewModel {
         smartFolderCounts[folder.id] = nil
     }
 
+    func togglePinSmartFolder(_ folder: SmartFolder) {
+        guard let i = smartFolders.firstIndex(where: { $0.id == folder.id }) else { return }
+        smartFolders[i].isPinned.toggle()
+        persistSmartFolders()
+    }
+
     func smartFolder(id: String) -> SmartFolder? { smartFolders.first { $0.id == id } }
 
     /// Builds a folder from whatever the list is currently filtering on.

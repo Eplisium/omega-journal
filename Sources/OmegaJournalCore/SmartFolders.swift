@@ -37,6 +37,24 @@ public struct SmartFolder: Codable, Identifiable, Equatable, Sendable {
     public var dateRange: DateRange
     public var hasAttachment: Bool
     public var minWords: Int
+    /// Pinned folders get their own sidebar section near the top.
+    public var isPinned: Bool = false
+
+    private enum CodingKeys: String, CodingKey { case id, name, query, tags, moods, dateRange, hasAttachment, minWords, isPinned }
+
+    /// Older saved data has no `isPinned` (or other later fields) — decode leniently.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        query = try c.decodeIfPresent(String.self, forKey: .query) ?? ""
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        moods = try c.decodeIfPresent([Int].self, forKey: .moods) ?? []
+        dateRange = try c.decodeIfPresent(DateRange.self, forKey: .dateRange) ?? .any
+        hasAttachment = try c.decodeIfPresent(Bool.self, forKey: .hasAttachment) ?? false
+        minWords = try c.decodeIfPresent(Int.self, forKey: .minWords) ?? 0
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+    }
 
     public init(id: String = UUID().uuidString, name: String, query: String = "", tags: [String] = [], moods: [Int] = [],
                 dateRange: DateRange = .any, hasAttachment: Bool = false, minWords: Int = 0) {

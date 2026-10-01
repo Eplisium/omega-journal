@@ -14,6 +14,7 @@ struct ReadView: View {
     @State private var showPermanentDeleteConfirmation = false
     @State private var showHistory = false
     @State private var showGraph = false
+    @AppStorage(ReadingPreferences.showCoverKey) private var showCover = true
     @State private var showOutline = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
@@ -26,6 +27,7 @@ struct ReadView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    coverImage
                     header
                     if showOutline, !isContentLocked { outlineList(proxy) }
 
@@ -88,6 +90,32 @@ struct ReadView: View {
         } message: {
             Text("This cannot be undone. The entry and its attachments will be permanently removed.")
         }
+    }
+
+    // MARK: Cover
+
+    /// First image attachment, wide and cropped. Never shown for a locked hidden entry.
+    @ViewBuilder
+    private var coverImage: some View {
+        if showCover, !isContentLocked, let att = entry.attachments.first(where: \.isImage),
+           let image = coverNSImage(att) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .frame(height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: OmegaTheme.Radius.card, style: .continuous))
+                .accessibilityLabel("Cover image: \(att.filename)")
+        }
+    }
+
+    private func coverNSImage(_ att: Attachment) -> NSImage? {
+        let key = att.id + "#cover"
+        if let hit = AttachmentPreview.cached(key) { return hit }
+        guard let data = vm.db.readAttachmentData(att),
+              let img = AttachmentPreview.thumbnail(from: data, maxPixel: 1400) else { return nil }
+        AttachmentPreview.store(img, for: key)
+        return img
     }
 
     // MARK: Outline (table of contents)
@@ -243,6 +271,14 @@ struct ReadView: View {
                     }
                     .accessibilityLabel("Table of contents")
                 }
+                ActionButton(icon: "printer", color: theme.accentColor, active: false, tooltip: "Print this entry (⌘P)") {
+                    Task {
+                        guard await vm.revealIfNeeded(entry) else { return }
+                        ExportManager.printEntry(entry, accent: NSColor(theme.accentColor))
+                    }
+                }
+                .keyboardShortcut("p", modifiers: .command)
+                .accessibilityLabel("Print this entry")
                 ActionButton(icon: "square.and.arrow.up", color: theme.accentColor, active: false, tooltip: "Export this entry") {
                     Task {
                         guard await vm.revealIfNeeded(entry) else { return }

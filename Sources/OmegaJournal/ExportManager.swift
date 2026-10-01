@@ -248,14 +248,12 @@ enum ExportManager {
         try pdfData.write(to: url, options: .atomic)
     }
 
-    /// Themed single-entry PDF (accent-coloured heading, serif body). Hidden entries must be
-    /// unlocked by the caller before exporting.
-    @MainActor
-    static func exportEntryPDF(_ entry: JournalEntry, to url: URL, accent: NSColor = NSColor(red: 0.49, green: 0.30, blue: 0.93, alpha: 1)) throws {
-        let pageWidth: CGFloat = 612, pageHeight: CGFloat = 792, margin: CGFloat = 54
+    /// The themed, print-quality body shared by PDF export and printing.
+    static func entryPrintContent(_ entry: JournalEntry, accent: NSColor) -> NSAttributedString {
         let text = NSMutableAttributedString()
         let para = NSMutableParagraphStyle()
         para.lineSpacing = 4
+        para.paragraphSpacing = 6
         let ink = NSColor(red: 0.13, green: 0.10, blue: 0.22, alpha: 1)
         let soft = NSColor(red: 0.42, green: 0.38, blue: 0.52, alpha: 1)
         text.append(NSAttributedString(string: entry.displayTitle + "\n", attributes: [
@@ -265,6 +263,36 @@ enum ExportManager {
         text.append(NSAttributedString(string: meta + "\n\n", attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: soft]))
         text.append(NSAttributedString(string: entry.body.isEmpty ? "No content" : entry.body, attributes: [
             .font: NSFont(name: "Georgia", size: 13) ?? NSFont.systemFont(ofSize: 13), .foregroundColor: ink, .paragraphStyle: para]))
+        return text
+    }
+
+    /// Opens the system print panel for one entry (paginated, 0.75in margins, black on white).
+    /// Callers must have unlocked a hidden entry first.
+    @MainActor
+    static func printEntry(_ entry: JournalEntry, accent: NSColor = NSColor(red: 0.49, green: 0.30, blue: 0.93, alpha: 1)) {
+        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        info.leftMargin = 54; info.rightMargin = 54; info.topMargin = 54; info.bottomMargin = 54
+        info.isHorizontallyCentered = false
+        info.verticalPagination = .automatic
+        let width = info.paperSize.width - info.leftMargin - info.rightMargin
+        let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: width, height: 100))
+        tv.textStorage?.setAttributedString(entryPrintContent(entry, accent: accent))
+        tv.drawsBackground = false
+        tv.isVerticallyResizable = true
+        tv.textContainer?.widthTracksTextView = true
+        tv.sizeToFit()
+        let op = NSPrintOperation(view: tv, printInfo: info)
+        op.jobTitle = entry.displayTitle
+        op.showsPrintPanel = true
+        op.run()
+    }
+
+    /// Themed single-entry PDF (accent-coloured heading, serif body). Hidden entries must be
+    /// unlocked by the caller before exporting.
+    @MainActor
+    static func exportEntryPDF(_ entry: JournalEntry, to url: URL, accent: NSColor = NSColor(red: 0.49, green: 0.30, blue: 0.93, alpha: 1)) throws {
+        let pageWidth: CGFloat = 612, pageHeight: CGFloat = 792, margin: CGFloat = 54
+        let text = entryPrintContent(entry, accent: accent)
         let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: pageWidth - margin * 2, height: pageHeight))
         tv.textStorage?.setAttributedString(text)
         tv.drawsBackground = false

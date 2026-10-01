@@ -136,4 +136,27 @@ struct OrganizationCoreTests {
         #expect(EntryDragPayload.decode(EntryDragPayload.encode(["a", "b"])) == ["a", "b"])
         #expect(!ContentMasking.canShowContent(isHidden: true, hiddenLocked: true))
     }
+
+    @Test("streak ring milestones, progress and caption")
+    func streakRing() {
+        #expect(StreakRing.nextMilestone(after: 0) == 3)
+        #expect(StreakRing.nextMilestone(after: 3) == 7)
+        #expect(StreakRing.nextMilestone(after: 365) == 730)
+        #expect(StreakRing.progress(current: 0) == 0)
+        #expect(StreakRing.progress(current: 5) == 0.5)          // 3 → 7
+        #expect((0...1).contains(StreakRing.progress(current: 400)))
+        #expect(StreakRing.progress(current: -4) == 0)
+        #expect(StreakRing.caption(current: 6, unit: "day") == "1 more day to 7")
+        #expect(StreakRing.caption(current: 4, unit: "week") == "3 more weeks to 7")
+    }
+
+    @Test("pinned smart folders round-trip and old data without isPinned still decodes")
+    func pinnedFolders() throws {
+        var f = SmartFolder(name: "Pin", tags: ["a"])
+        f.isPinned = true
+        #expect(SmartFolderStore.decode(SmartFolderStore.encode([f])).first?.isPinned == true)
+        let legacy = #"[{"id":"x","name":"Old","query":"","tags":["t"],"moods":[],"dateRange":"any","hasAttachment":false,"minWords":0}]"#
+        let decoded = SmartFolderStore.decode(legacy)
+        #expect(decoded.count == 1 && decoded[0].isPinned == false && decoded[0].tags == ["t"])
+    }
 }

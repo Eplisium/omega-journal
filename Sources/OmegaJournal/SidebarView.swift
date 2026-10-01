@@ -59,6 +59,8 @@ struct SidebarView: View {
                         row(.onThisDay, badge: vm.reflectiveOnThisDay.count)
                     }
 
+                    if !vm.smartFolders.filter(\.isPinned).isEmpty { pinnedSection }
+
                     notebooksSection
 
                     smartFoldersSection
@@ -124,7 +126,7 @@ struct SidebarView: View {
     /// Keyboard navigation through the primary destinations.
     private var keyboardOrder: [SidebarItem] {
         var items: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .insights, .onThisDay]
-        items += vm.smartFolders.map { .smartFolder($0.id) }
+        items += (vm.smartFolders.filter(\.isPinned) + vm.smartFolders.filter { !$0.isPinned }).map { .smartFolder($0.id) }
         items += TagTree.flatten(vm.tagTree, collapsed: collapsedTags).map { .tag($0.path) }
         items += [.archive, .hidden, .trash]
         return items
@@ -182,6 +184,26 @@ struct SidebarView: View {
 
     // MARK: Smart folders
 
+    private var pinnedSection: some View {
+        section("PINNED") {
+            ForEach(vm.smartFolders.filter(\.isPinned)) { folder in
+                row(.smartFolder(folder.id), badge: vm.smartFolderCounts[folder.id] ?? 0)
+                    .contextMenu { folderMenu(folder) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderMenu(_ folder: SmartFolder) -> some View {
+        Button(folder.isPinned ? "Unpin from Top" : "Pin to Top") { vm.togglePinSmartFolder(folder) }
+        Button("Edit Smart Folder…") { smartFolderDraft = folder }
+        Divider()
+        Button("Delete Smart Folder", role: .destructive) {
+            if selection == .smartFolder(folder.id) { selection = .all }
+            vm.deleteSmartFolder(folder)
+        }
+    }
+
     private var smartFoldersSection: some View {
         disclosureSection("SMART FOLDERS", isExpanded: $smartExpanded, trailing: {
             sectionAddButton("New smart folder") { smartFolderDraft = SmartFolder(name: "") }
@@ -192,16 +214,9 @@ struct SidebarView: View {
                     .foregroundColor(theme.secondaryTextColor)
                     .padding(.horizontal, 8).padding(.vertical, 4)
             }
-            ForEach(vm.smartFolders) { folder in
+            ForEach(vm.smartFolders.filter { !$0.isPinned }) { folder in
                 row(.smartFolder(folder.id), badge: vm.smartFolderCounts[folder.id] ?? 0)
-                    .contextMenu {
-                        Button("Edit Smart Folder…") { smartFolderDraft = folder }
-                        Divider()
-                        Button("Delete Smart Folder", role: .destructive) {
-                            if selection == .smartFolder(folder.id) { selection = .all }
-                            vm.deleteSmartFolder(folder)
-                        }
-                    }
+                    .contextMenu { folderMenu(folder) }
             }
         }
     }

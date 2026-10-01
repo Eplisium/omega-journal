@@ -29,6 +29,8 @@ struct DetailView: View {
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: vm.toast)
+        .animation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion), value: vm.selectedEntryId)
+        .animation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion), value: vm.editingEntryId)
     }
 
     @ViewBuilder
@@ -39,6 +41,7 @@ struct DetailView: View {
         } else if let entry = vm.selectedEntry {
             ReadView(vm: vm, entry: entry, isTrash: selection == .trash)
                 .id(entry.id)
+                .transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: 6)))
         } else {
             welcomeScreen
         }

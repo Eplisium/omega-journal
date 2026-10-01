@@ -54,6 +54,7 @@ struct SettingsView: View {
     @AppStorage(GlobalHotkey.enabledKey) private var globalHotkeyEnabled = true
     @AppStorage(ReadingPreferences.maxWidthKey) private var readingMaxWidth = ReadingPreferences.defaultMaxWidth
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
+    @AppStorage(ReadingPreferences.showCoverKey) private var readingShowCover = true
     @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
 
     init(vm: JournalViewModel, initialSection: SettingsSection = .appearance) {
@@ -262,6 +263,10 @@ struct SettingsView: View {
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 240)
+                }
+                SettingsRowDivider()
+                SettingsRow(title: "Cover image", subtitle: "Show an entry's first image above its title") {
+                    Toggle("Show cover image", isOn: $readingShowCover).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsRowDivider()
                 SettingsRow(title: "Maximum width", subtitle: "\(Int(ReadingPreferences.clampedWidth(readingMaxWidth))) pt") {
