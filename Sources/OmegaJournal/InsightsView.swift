@@ -18,7 +18,7 @@ struct InsightsView: View {
             Text("Insights")
                 .font(OmegaTheme.titleFont)
             Text("Your journaling, visualized")
-                .font(.system(size: 13))
+                .font(OmegaTheme.font(.body))
                 .foregroundColor(.secondary)
         }
     }
@@ -74,9 +74,9 @@ struct InsightsView: View {
     private func sectionTitle(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(OmegaTheme.font(.bodyLarge, .semibold))
             Text(subtitle)
-                .font(.system(size: 12))
+                .font(OmegaTheme.font(.caption))
                 .foregroundColor(.secondary)
         }
     }
@@ -94,13 +94,13 @@ struct InsightStat: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .foregroundColor(color)
-                .font(.system(size: 20, weight: .medium))
+                .font(OmegaTheme.font(.title, .medium))
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .font(OmegaTheme.font(.meta, .bold, design: .rounded))
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(.secondary)
             }
             Spacer(minLength: 0)
@@ -167,20 +167,20 @@ struct InsightsGoalView: View {
                             .rotationEffect(.degrees(-90))
                         if goal.isComplete {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(OmegaTheme.font(.bodyLarge, .bold))
                                 .foregroundColor(.green)
                         } else {
                             Text("\(Int(goal.progress * 100))%")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .font(OmegaTheme.font(.meta, .bold, design: .rounded))
                                 .foregroundColor(.primary)
                         }
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(goal.type.rawValue)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(OmegaTheme.font(.caption, .semibold))
                             .foregroundColor(.primary)
                         Text(goal.displayProgress)
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(.secondary)
                     }
                 }

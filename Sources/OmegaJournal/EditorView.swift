@@ -133,8 +133,8 @@ struct EditorView: View {
                 vm.stopEditing()
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text("Done").font(.system(size: 12, weight: .medium))
+                    Image(systemName: "chevron.left").font(OmegaTheme.font(.meta, .semibold))
+                    Text("Done").font(OmegaTheme.font(.caption, .medium))
                 }
                 .foregroundColor(theme.accentColor)
             }
@@ -149,7 +149,7 @@ struct EditorView: View {
                 ForEach(Mood.allCases) { m in
                     Button { mood = m } label: {
                         Text(m.emoji)
-                            .font(.system(size: 14))
+                            .font(OmegaTheme.font(.bodyLarge))
                             .frame(width: 26, height: 24)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
@@ -199,7 +199,7 @@ struct EditorView: View {
                 Toggle("Typewriter Scrolling", isOn: $isTypewriter)
             } label: {
                 Image(systemName: "textformat.size")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(OmegaTheme.font(.bodyLarge, .medium))
                     .foregroundColor(.secondary)
                     .frame(width: 36, height: 36)
                     .contentShape(Rectangle())
@@ -240,8 +240,8 @@ struct EditorView: View {
 
                 Button { showTagField.toggle(); if showTagField { tagFieldFocused = true } } label: {
                     HStack(spacing: 3) {
-                        Image(systemName: "number").font(.system(size: 10))
-                        Text("Tags").font(.system(size: 10, weight: .medium))
+                        Image(systemName: "number").font(OmegaTheme.font(.meta))
+                        Text("Tags").font(OmegaTheme.font(.meta, .medium))
                     }
                     .foregroundColor(theme.accentColor)
                     .padding(.horizontal, 7)
@@ -253,9 +253,9 @@ struct EditorView: View {
 
                 ForEach(tags, id: \.self) { tag in
                     HStack(spacing: 3) {
-                        Text("#\(tag)").font(.system(size: 10))
+                        Text("#\(tag)").font(OmegaTheme.font(.meta))
                         Button { tags.removeAll { $0 == tag } } label: {
-                            Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                            Image(systemName: "xmark").font(OmegaTheme.font(.meta, .bold))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove tag \(tag)")
@@ -270,7 +270,7 @@ struct EditorView: View {
                 if showTagField {
                     TextField("tag", text: $tagInput)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 10))
+                        .font(OmegaTheme.font(.meta))
                         .frame(width: 70)
                         .foregroundColor(theme.titleTextColor)
                         .focused($tagFieldFocused)
@@ -279,7 +279,7 @@ struct EditorView: View {
 
                     ForEach(tagSuggestions, id: \.self) { s in
                         Button { tagInput = s; commitTag() } label: {
-                            Text("#\(s)").font(.system(size: 10))
+                            Text("#\(s)").font(OmegaTheme.font(.meta))
                                 .foregroundColor(theme.secondaryTextColor)
                                 .padding(.horizontal, 6).padding(.vertical, 3)
                                 .background(Capsule().strokeBorder(theme.secondaryTextColor.opacity(0.4), lineWidth: 1))
@@ -321,7 +321,7 @@ struct EditorView: View {
         ForEach(commands, id: \.label) { cmd in
             Button { controller.apply(cmd) } label: {
                 Image(systemName: cmd.icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.bodyTextColor)
                     .frame(width: 24, height: 22)
                     .contentShape(Rectangle())
@@ -359,7 +359,7 @@ struct EditorView: View {
                         withAnimation(reduceMotion ? nil : .default) { vm.isZenMode = false }
                     } label: {
                         Image(systemName: "arrow.down.right.and.arrow.up.left")
-                            .font(.system(size: 12))
+                            .font(OmegaTheme.font(.caption))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)
@@ -434,12 +434,12 @@ struct EditorView: View {
             VStack(alignment: .leading, spacing: 14) {
                 if !title.isEmpty {
                     Text(title)
-                        .font(.system(size: 24, weight: .bold, design: .serif))
+                        .font(OmegaTheme.font(.title, .bold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                 }
                 if previewText.isEmpty {
                     Text("Nothing to preview yet.")
-                        .font(.system(size: 13))
+                        .font(OmegaTheme.font(.body))
                         .foregroundColor(theme.secondaryTextColor)
                 } else {
                     MarkdownBodyView(markdown: previewText, style: renderStyle, textColor: theme.bodyTextColor)
@@ -478,7 +478,7 @@ struct EditorView: View {
                     .accessibilityLabel(vm.saveState == .pending ? "Saving" : "All changes saved")
             }
         }
-        .font(.system(size: 10))
+        .font(OmegaTheme.font(.meta))
         .foregroundColor(theme.secondaryTextColor)
         .labelStyle(.titleAndIcon)
         .padding(.horizontal, 14)

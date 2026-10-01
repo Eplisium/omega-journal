@@ -149,17 +149,17 @@ struct EntryListView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(selection?.title ?? "All Entries")
-                    .font(.system(size: 17, weight: .semibold, design: .serif))
+                    .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text(isSearchingCurrentCollection
                      ? "Search results in \(selection?.title ?? "your Journal")"
                      : "Your private writing library")
-                    .font(.system(size: 10.5))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 8)
             Text("\(displayed.count)")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
                 .foregroundColor(theme.accentColor)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -176,12 +176,12 @@ struct EntryListView: View {
     private var hiddenBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: biometricAuth.isAuthenticated ? "lock.open.fill" : "lock.fill")
-                .font(.system(size: 10))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.accentColor)
             Text(biometricAuth.isAuthenticated
                  ? "Hidden content is visible — lock if someone walks by."
                  : "Content is hidden — authenticate to reveal.")
-                .font(.system(size: 10))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
             Spacer()
             if biometricAuth.isAuthenticated {
@@ -190,9 +190,9 @@ struct EntryListView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 10))
+                            .font(OmegaTheme.font(.meta))
                         Text("Lock")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(OmegaTheme.font(.meta, .semibold))
                     }
                     .foregroundColor(theme.onAccentColor)
                     .padding(.horizontal, 10)
@@ -207,9 +207,9 @@ struct EntryListView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
-                            .font(.system(size: 10))
+                            .font(OmegaTheme.font(.meta))
                         Text("Unlock")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(OmegaTheme.font(.meta, .semibold))
                     }
                     .foregroundColor(theme.onAccentColor)
                     .padding(.horizontal, 10)
@@ -231,11 +231,11 @@ struct EntryListView: View {
         VStack(spacing: 8) {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                 TextField("Search entries…", text: $vm.searchText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.titleTextColor)
                     .focused($searchFocused)
                     .onChange(of: vm.searchText) { _, _ in vm.searchTextChanged() }
@@ -245,7 +245,7 @@ struct EntryListView: View {
                         vm.refreshQuery()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)
@@ -265,7 +265,7 @@ struct EntryListView: View {
 
             HStack(spacing: 6) {
                 Text(displayed.isEmpty ? "No entries" : "\(displayed.count) \(displayed.count == 1 ? "entry" : "entries")")
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
 
                 Spacer()
@@ -275,10 +275,10 @@ struct EntryListView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "line.3.horizontal.decrease.circle\(vm.filter.isActive ? ".fill" : "")")
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                         if vm.filter.activeCount > 0 {
                             Text("\(vm.filter.activeCount)")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
                         }
                     }
                     .foregroundColor(vm.filter.isActive ? theme.accentColor : theme.secondaryTextColor)
@@ -293,7 +293,7 @@ struct EntryListView: View {
                         showSaveSearch = true
                     } label: {
                         Image(systemName: "bookmark")
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)
@@ -310,7 +310,7 @@ struct EntryListView: View {
                     }
                 } label: {
                     Image(systemName: vm.isBulkSelecting ? "checkmark.circle.fill" : "checkmark.circle")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(vm.isBulkSelecting ? theme.accentColor : theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
@@ -323,7 +323,7 @@ struct EntryListView: View {
                         vm.lockHiddenEntries()
                     } label: {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.accentColor)
                     }
                     .buttonStyle(.plain)
@@ -354,7 +354,7 @@ struct EntryListView: View {
     private func segment(_ label: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 10, weight: active ? .semibold : .regular))
+                .font(OmegaTheme.font(.meta, active ? .semibold : .regular))
                 .foregroundColor(active ? theme.onAccentColor : theme.secondaryTextColor)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 3.5)
@@ -372,19 +372,19 @@ struct EntryListView: View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
                 Text("\(vm.bulkSelection.count) selected")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.titleTextColor)
 
                 Button("All") {
                     vm.bulkSelection = Set(displayed.map(\.id))
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 10))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.accentColor)
 
                 Button("None") { vm.bulkSelection.removeAll() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
 
                 Spacer()
@@ -398,7 +398,7 @@ struct EntryListView: View {
                 HStack(spacing: 6) {
                     TextField("Tag name…", text: $bulkTagText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.titleTextColor)
                         .onSubmit {
                             vm.bulkAddTag(bulkTagText)
@@ -411,7 +411,7 @@ struct EntryListView: View {
                         showBulkTagField = false
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.accentColor)
                 }
                 .padding(.horizontal, 8)
@@ -449,7 +449,7 @@ struct EntryListView: View {
     private func bulkButton(_ icon: String, _ help: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(destructive ? .red : theme.accentColor)
                 .frame(width: 22, height: 22)
         }
@@ -461,13 +461,13 @@ struct EntryListView: View {
 
     private var trashBanner: some View {
         HStack(spacing: 8) {
-            Image(systemName: "info.circle").font(.system(size: 10))
+            Image(systemName: "info.circle").font(OmegaTheme.font(.meta))
             Text("Entries are deleted forever after \(DatabaseManager.trashRetentionDays) days.")
-                .font(.system(size: 10))
+                .font(OmegaTheme.font(.meta))
             Spacer()
             Button("Empty Trash") { showEmptyTrashConfirmation = true }
                 .buttonStyle(.plain)
-                .font(.system(size: 10, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .foregroundColor(.red)
         }
         .foregroundColor(theme.secondaryTextColor)
@@ -538,15 +538,15 @@ struct EntryListView: View {
         HStack(spacing: 5) {
             if section.title == "Pinned" {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.accentColor)
             }
             Text(section.title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .tracking(0.7)
                 .foregroundColor(theme.secondaryTextColor)
             Text("\(section.entries.count)")
-                .font(.system(size: 11, design: .rounded))
+                .font(OmegaTheme.font(.meta, design: .rounded))
                 .foregroundColor(theme.secondaryTextColor.opacity(0.6))
             Spacer()
         }
@@ -559,28 +559,28 @@ struct EntryListView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: vm.searchText.isEmpty ? (selection?.icon ?? "book.closed") : "magnifyingglass")
-                .font(.system(size: 30, weight: .light))
+                .font(OmegaTheme.font(.display, .light))
                 .foregroundColor(theme.secondaryTextColor.opacity(0.4))
             VStack(spacing: 4) {
                 Text(emptyTitle)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(OmegaTheme.font(.body, .medium))
                     .foregroundColor(theme.bodyTextColor)
                 Text(emptySubtitle)
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .multilineTextAlignment(.center)
             }
             if vm.filter.isActive {
                 Button("Clear filters") { vm.filter = .empty }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.accentColor)
             } else if !isTrash && selection != .archive {
                 Button {
                     vm.createEntry()
                 } label: {
                     Text("Write your first entry")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.onAccentColor)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -646,7 +646,7 @@ private struct EntryRow: View {
         HStack(spacing: 9) {
             if isBulkSelecting {
                 Image(systemName: isBulkSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14))
+                    .font(OmegaTheme.font(.bodyLarge))
                     .foregroundColor(isBulkSelected ? theme.accentColor : theme.secondaryTextColor.opacity(0.5))
             }
 
@@ -658,54 +658,54 @@ private struct EntryRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     if entry.isPinned {
-                        Image(systemName: "pin.fill").font(.system(size: 10)).foregroundColor(theme.accentColor)
+                        Image(systemName: "pin.fill").font(OmegaTheme.font(.meta)).foregroundColor(theme.accentColor)
                     }
                     if entry.isHidden {
                         Image(systemName: isContentLocked ? "lock.fill" : "lock.open")
-                            .font(.system(size: 10))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.accentColor.opacity(isContentLocked ? 0.9 : 0.7))
                     }
                     Text(entry.displayTitle)
-                        .font(.system(size: 13, weight: .semibold, design: .serif))
+                        .font(OmegaTheme.font(.body, .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor.opacity(isContentLocked ? 0.72 : 1))
                         .lineLimit(1)
                     Spacer(minLength: 2)
                     if entry.isFavorite {
-                        Image(systemName: "star.fill").font(.system(size: 10)).foregroundColor(.yellow)
+                        Image(systemName: "star.fill").font(OmegaTheme.font(.meta)).foregroundColor(.yellow)
                     }
                     if !entry.attachments.isEmpty {
-                        Image(systemName: "paperclip").font(.system(size: 10)).foregroundColor(theme.secondaryTextColor)
+                        Image(systemName: "paperclip").font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor)
                     }
                 }
 
                 if isContentLocked {
                     Text("Hidden · unlock to read")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor.opacity(0.55))
                         .lineLimit(1)
                 } else {
                     Text(entry.preview)
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
 
                 HStack(spacing: 6) {
-                    Text(entry.mood.emoji).font(.system(size: 11))
+                    Text(entry.mood.emoji).font(OmegaTheme.font(.meta))
                     Text(isTrash ? trashLabel : entry.createdAt.formatted(date: .abbreviated, time: .shortened).replacingOccurrences(of: " AM", with: " AM"))
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor.opacity(0.8))
                     if entry.wordCount > 0 {
                         Text("· \(entry.wordCount)w")
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor.opacity(0.6))
                     }
                     Spacer(minLength: 2)
                     if !isContentLocked {
                         ForEach(entry.tags.prefix(2), id: \.self) { tag in
                             Text("#\(tag)")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(OmegaTheme.font(.meta, .medium))
                                 .foregroundColor(theme.accentColor.opacity(0.9))
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -713,7 +713,7 @@ private struct EntryRow: View {
                         }
                         if entry.tags.count > 2 {
                             Text("+\(entry.tags.count - 2)")
-                                .font(.system(size: 11))
+                                .font(OmegaTheme.font(.meta))
                                 .foregroundColor(theme.secondaryTextColor.opacity(0.7))
                         }
                     }
@@ -842,14 +842,14 @@ private struct FilterBar: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("FILTERS")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .tracking(0.7)
                     .foregroundColor(theme.secondaryTextColor)
                 Spacer()
                 if vm.filter.isActive {
                     Button("Reset") { vm.filter = .empty }
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.accentColor)
                 }
             }
@@ -862,7 +862,7 @@ private struct FilterBar: View {
                         if on { vm.filter.moods.remove(mood) } else { vm.filter.moods.insert(mood) }
                     } label: {
                         Text(mood.emoji)
-                            .font(.system(size: 12))
+                            .font(OmegaTheme.font(.caption))
                             .frame(width: 24, height: 22)
                             .background(
                                 RoundedRectangle(cornerRadius: 5)
@@ -885,7 +885,7 @@ private struct FilterBar: View {
                     }
                 }
                 .labelsHidden()
-                .font(.system(size: 10))
+                .font(OmegaTheme.font(.meta))
                 .frame(width: 118)
             }
 
@@ -896,12 +896,12 @@ private struct FilterBar: View {
                 toggle("Files", "paperclip", $vm.filter.withAttachmentsOnly)
                 Spacer()
                 Text("Min words")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                 Stepper("", value: $vm.filter.minWords, in: 0...2000, step: 50)
                     .labelsHidden()
                 Text("\(vm.filter.minWords)")
-                    .font(.system(size: 10, design: .rounded))
+                    .font(OmegaTheme.font(.meta, design: .rounded))
                     .foregroundColor(theme.bodyTextColor)
                     .frame(width: 26, alignment: .leading)
             }
@@ -916,7 +916,7 @@ private struct FilterBar: View {
                                 if on { vm.filter.tags.remove(item.tag) } else { vm.filter.tags.insert(item.tag) }
                             } label: {
                                 Text("#\(item.tag)")
-                                    .font(.system(size: 11, weight: on ? .semibold : .regular))
+                                    .font(OmegaTheme.font(.meta, on ? .semibold : .regular))
                                     .foregroundColor(on ? theme.accentColor : theme.secondaryTextColor)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2.5)
@@ -938,8 +938,8 @@ private struct FilterBar: View {
     private func toggle(_ label: String, _ icon: String, _ binding: Binding<Bool>) -> some View {
         Button { binding.wrappedValue.toggle() } label: {
             HStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 10))
-                Text(label).font(.system(size: 11, weight: binding.wrappedValue ? .semibold : .regular))
+                Image(systemName: icon).font(OmegaTheme.font(.meta))
+                Text(label).font(OmegaTheme.font(.meta, binding.wrappedValue ? .semibold : .regular))
             }
             .foregroundColor(binding.wrappedValue ? theme.accentColor : theme.secondaryTextColor)
             .padding(.horizontal, 6)

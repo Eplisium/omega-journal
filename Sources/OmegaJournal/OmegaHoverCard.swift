@@ -54,7 +54,7 @@ struct CustomTooltip: View {
     var body: some View {
         OmegaHoverCard(accent: color) {
             Text(text)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)

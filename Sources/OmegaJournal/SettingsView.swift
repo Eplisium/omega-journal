@@ -97,15 +97,15 @@ struct SettingsView: View {
                         )
                         .frame(width: 30, height: 30)
                     Text("Ω")
-                        .font(.system(size: 15, weight: .bold, design: .serif))
+                        .font(OmegaTheme.font(.bodyLarge, .bold, design: .serif))
                         .foregroundColor(theme.onAccentColor)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Settings")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(OmegaTheme.font(.body, .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Omega Journal")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
             }
@@ -134,16 +134,16 @@ struct SettingsView: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(section.rawValue)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(OmegaTheme.font(.heading, .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text(section.subtitle)
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(OmegaTheme.font(.meta, .bold))
                         .foregroundColor(theme.secondaryTextColor)
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(theme.secondaryTextColor.opacity(0.12)))
@@ -428,15 +428,15 @@ struct SettingsView: View {
                 if index > 0 { SettingsRowDivider() }
                 HStack(spacing: 10) {
                     Image(systemName: goal.type.icon)
-                        .font(.system(size: 13))
+                        .font(OmegaTheme.font(.body))
                         .foregroundColor(theme.accentColor)
                         .frame(width: 20)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(goal.type.rawValue)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(OmegaTheme.font(.caption, .medium))
                             .foregroundColor(theme.titleTextColor)
                         Text(goal.displayProgress)
-                            .font(.system(size: 10))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     Spacer(minLength: 12)
@@ -555,17 +555,17 @@ struct SettingsView: View {
                         )
                         .frame(width: 72, height: 72)
                     Text("Ω")
-                        .font(.system(size: 16, weight: .bold, design: .serif))
+                        .font(OmegaTheme.font(.heading, .bold, design: .serif))
                         .foregroundColor(theme.onAccentColor)
                 }
                 Text("Omega Journal")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(OmegaTheme.font(.heading, .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text("A fast, private, local-first journal for macOS.")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                 Text("Version \(appVersion)")
-                    .font(.system(size: 10, design: .rounded))
+                    .font(OmegaTheme.font(.meta, design: .rounded))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.8))
             }
             .frame(maxWidth: .infinity)
@@ -599,14 +599,14 @@ struct SettingsView: View {
     private func shortcut(_ keys: String, _ label: String) -> some View {
         HStack(spacing: 8) {
             Text(keys)
-                .font(.system(size: 10, design: .rounded))
+                .font(OmegaTheme.font(.meta, design: .rounded))
                 .foregroundColor(theme.bodyTextColor)
                 .fixedSize()
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 4).fill(theme.secondaryTextColor.opacity(0.13)))
             Text(label)
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -647,7 +647,7 @@ private struct SettingsCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .foregroundColor(theme.accentColor)
                     .frame(width: 22, height: 22)
                     .background(
@@ -655,7 +655,7 @@ private struct SettingsCard<Content: View>: View {
                             .fill(theme.accentColor.opacity(0.14))
                     )
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .tracking(0.5)
                     .foregroundColor(theme.secondaryTextColor)
             }
@@ -679,7 +679,7 @@ private struct SettingsCard<Content: View>: View {
 
             if let footnote {
                 Text(footnote)
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .padding(.leading, 2)
             }
@@ -715,17 +715,17 @@ private struct SettingsRow<Trailing: View>: View {
         HStack(spacing: 10) {
             if let icon {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.accentColor)
                     .frame(width: 18)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(OmegaTheme.font(.caption, .medium))
                     .foregroundColor(theme.titleTextColor)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.system(size: 10))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
             }
@@ -746,11 +746,11 @@ private struct SettingsValueRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(title)
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
             Spacer(minLength: 12)
             Text(value)
-                .font(.system(size: 11, design: .rounded))
+                .font(OmegaTheme.font(.meta, design: .rounded))
                 .foregroundColor(theme.bodyTextColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -788,9 +788,9 @@ private struct SettingsPillButton: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .lineLimit(1)
                     .fixedSize()
             }
@@ -850,14 +850,14 @@ private struct GoalTargetField: View {
         HStack(spacing: 5) {
             TextField("", text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(OmegaTheme.font(.caption, .semibold, design: .rounded))
                 .foregroundColor(theme.titleTextColor)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 48)
                 .focused($isFocused)
                 .onSubmit(commit)
             Text(unit)
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
         }
         .padding(.horizontal, 9)
@@ -914,11 +914,11 @@ private struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: section.icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(isSelected ? theme.accentColor : theme.secondaryTextColor)
                     .frame(width: 18)
                 Text(section.rawValue)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .font(OmegaTheme.font(.meta, isSelected ? .semibold : .regular))
                     .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
                     .lineLimit(1)
                 Spacer(minLength: 0)

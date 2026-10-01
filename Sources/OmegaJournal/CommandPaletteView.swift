@@ -157,17 +157,17 @@ struct CommandPaletteView: View {
                 // Search field
                 HStack(spacing: 9) {
                     Image(systemName: "command")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(OmegaTheme.font(.body, .medium))
                         .foregroundColor(theme.accentColor)
                     TextField("Type a command or search entries…", text: $query)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 15))
+                        .font(OmegaTheme.font(.bodyLarge))
                         .foregroundColor(theme.titleTextColor)
                         .focused($focused)
                         .onSubmit { runHighlighted() }
                         .onChange(of: query) { _, _ in highlighted = 0 }
                     Text("esc")
-                        .font(.system(size: 11, design: .rounded))
+                        .font(OmegaTheme.font(.meta, design: .rounded))
                         .foregroundColor(theme.secondaryTextColor)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -188,7 +188,7 @@ struct CommandPaletteView: View {
                             }
                             if results.isEmpty {
                                 Text("No matching commands")
-                                    .font(.system(size: 12))
+                                    .font(OmegaTheme.font(.caption))
                                     .foregroundColor(theme.secondaryTextColor)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 24)
@@ -210,7 +210,7 @@ struct CommandPaletteView: View {
                     hint("esc", "close")
                     Spacer()
                     Text("\(results.count) results")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 .padding(.horizontal, 14)
@@ -250,22 +250,22 @@ struct CommandPaletteView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: cmd.icon)
-                    .font(.system(size: 12))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(isOn ? theme.accentColor : theme.secondaryTextColor)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cmd.title)
-                        .font(.system(size: 12.5, weight: isOn ? .semibold : .regular))
+                        .font(OmegaTheme.font(.caption, isOn ? .semibold : .regular))
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
                     Text(cmd.subtitle)
-                        .font(.system(size: 10))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(1)
                 }
                 Spacer()
                 Text(cmd.group)
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.7))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1.5)
@@ -285,13 +285,13 @@ struct CommandPaletteView: View {
     private func hint(_ key: String, _ label: String) -> some View {
         HStack(spacing: 3) {
             Text(key)
-                .font(.system(size: 11, design: .rounded))
+                .font(OmegaTheme.font(.meta, design: .rounded))
                 .foregroundColor(theme.bodyTextColor)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(RoundedRectangle(cornerRadius: 3).fill(theme.secondaryTextColor.opacity(0.15)))
             Text(label)
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
         }
     }

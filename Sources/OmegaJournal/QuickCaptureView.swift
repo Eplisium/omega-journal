@@ -27,9 +27,9 @@ struct QuickCaptureView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Quick capture")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OmegaTheme.font(.caption, .semibold))
             TextEditor(text: $text)
-                .font(.system(size: 13))
+                .font(OmegaTheme.font(.body))
                 .frame(width: 280, height: 110)
                 .focused($focused)
                 .accessibilityLabel("Quick capture text")

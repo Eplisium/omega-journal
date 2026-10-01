@@ -43,12 +43,12 @@ struct EntryDrillThroughSheet: View {
     private var sheetHeader: some View {
         HStack(spacing: 8) {
             Label(contextTitle, systemImage: "book.closed")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OmegaTheme.font(.caption, .semibold))
                 .foregroundColor(theme.titleTextColor)
             Spacer()
             Button(action: { dismiss() }) {
                 Label("Close", systemImage: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .foregroundColor(theme.accentColor)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 5)
@@ -75,13 +75,13 @@ struct EntryDrillThroughSheet: View {
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 26, weight: .light))
+                    .font(OmegaTheme.font(.title, .light))
                     .foregroundColor(theme.accentColor)
                 Text("Entry unavailable")
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
+                    .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text("This entry is no longer available in the current scope.")
-                    .font(.system(size: 12))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.secondaryTextColor)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 310)

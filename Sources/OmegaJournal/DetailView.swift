@@ -63,18 +63,18 @@ struct DetailView: View {
                             )
                             .frame(width: 74, height: 74)
                         Text("Ω")
-                            .font(.system(size: 14, weight: .light, design: .serif))
+                            .font(OmegaTheme.font(.bodyLarge, .light, design: .serif))
                             .foregroundColor(theme.accentColor)
                     }
 
                     Text(greeting)
-                        .font(.system(size: 12, weight: .semibold, design: .serif))
+                        .font(OmegaTheme.font(.caption, .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
 
                     Text(vm.entries.isEmpty
                          ? "Your journal is empty. Let's change that."
                          : "\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words · \(StreakCopy.streakLine(vm.streakSummary))")
-                        .font(.system(size: 12))
+                        .font(OmegaTheme.font(.caption))
                         .foregroundColor(theme.secondaryTextColor)
                 }
 
@@ -82,21 +82,21 @@ struct DetailView: View {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack(spacing: 5) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 10))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.accentColor)
                         Text("TODAY'S PROMPT")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(OmegaTheme.font(.meta, .semibold))
                             .tracking(0.7)
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     Text(PromptGenerator.today())
-                        .font(.system(size: 15, weight: .medium, design: .serif))
+                        .font(OmegaTheme.font(.bodyLarge, .medium, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Button { vm.createEntryFromPrompt() } label: {
                             Text("Write about this")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(OmegaTheme.font(.meta, .medium))
                                 .foregroundColor(theme.onAccentColor)
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 5)
@@ -127,29 +127,29 @@ struct DetailView: View {
                     VStack(alignment: .leading, spacing: 9) {
                         HStack(spacing: 5) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 10))
+                                .font(OmegaTheme.font(.meta))
                                 .foregroundColor(theme.accentColor)
                             Text("ON THIS DAY")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(OmegaTheme.font(.meta, .semibold))
                                 .tracking(0.7)
                                 .foregroundColor(theme.secondaryTextColor)
                         }
                         ForEach(vm.reflectiveOnThisDay.prefix(3)) { entry in
                             Button { vm.select(entry) } label: {
                                 HStack(spacing: 8) {
-                                    Text(entry.mood.emoji).font(.system(size: 13))
+                                    Text(entry.mood.emoji).font(OmegaTheme.font(.body))
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(entry.displayTitle)
-                                            .font(.system(size: 12, weight: .medium))
+                                            .font(OmegaTheme.font(.caption, .medium))
                                             .foregroundColor(theme.titleTextColor)
                                             .lineLimit(1)
                                         Text(entry.createdAt.formatted(.dateTime.year()))
-                                            .font(.system(size: 10))
+                                            .font(OmegaTheme.font(.meta))
                                             .foregroundColor(theme.secondaryTextColor)
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 10))
+                                        .font(OmegaTheme.font(.meta))
                                         .foregroundColor(theme.secondaryTextColor)
                                 }
                                 .padding(.horizontal, 10)
@@ -190,13 +190,13 @@ struct DetailView: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .light))
+                    .font(OmegaTheme.font(.bodyLarge, .light))
                     .foregroundColor(theme.accentColor)
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.bodyTextColor)
                 Text(shortcut)
-                    .font(.system(size: 11, design: .rounded))
+                    .font(OmegaTheme.font(.meta, design: .rounded))
                     .foregroundColor(theme.secondaryTextColor)
             }
             .frame(width: 84, height: 68)
@@ -220,15 +220,15 @@ private struct ToastView: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                .font(.system(size: 12))
+                .font(OmegaTheme.font(.caption))
                 .foregroundColor(toast.isError ? .orange : .green)
             Text(toast.message)
-                .font(.system(size: 12, weight: .medium))
+                .font(OmegaTheme.font(.caption, .medium))
                 .foregroundColor(theme.titleTextColor)
             if let label = toast.actionLabel {
                 Button(label, action: onAction)
                     .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .foregroundColor(theme.accentColor)
             }
         }

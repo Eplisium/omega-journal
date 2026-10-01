@@ -27,7 +27,7 @@ struct ReadView: View {
                         hiddenContentOverlay
                     } else if entry.body.isEmpty {
                         Text("This entry has no content yet.")
-                            .font(.system(size: 13))
+                            .font(OmegaTheme.font(.body))
                             .foregroundColor(theme.secondaryTextColor)
                             .italic()
                     } else {
@@ -101,7 +101,7 @@ struct ReadView: View {
                     vm.restoreFromTrash(entry)
                 } label: {
                     Label("Restore", systemImage: "arrow.uturn.backward")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.accentColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -112,7 +112,7 @@ struct ReadView: View {
                 Spacer()
 
                 Text("\(max(0, DatabaseManager.trashRetentionDays - entry.daysInTrash)) days until permanent deletion")
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
 
                 ActionButton(icon: "trash.slash", color: .red, active: true, tooltip: "Delete Forever", isDestructive: true) {
@@ -153,8 +153,8 @@ struct ReadView: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(entry.mood.emoji).font(.system(size: 13))
-                        Text(entry.mood.label).font(.system(size: 11))
+                        Text(entry.mood.emoji).font(OmegaTheme.font(.body))
+                        Text(entry.mood.label).font(OmegaTheme.font(.meta))
                     }
                     .foregroundColor(theme.bodyTextColor)
                 }
@@ -198,7 +198,7 @@ struct ReadView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(entry.displayTitle)
-                .font(.system(size: 27, weight: .bold, design: .serif))
+                .font(OmegaTheme.font(.title, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -213,7 +213,7 @@ struct ReadView: View {
                 FlowLayout(spacing: 5) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Text("#\(tag)")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(OmegaTheme.font(.meta, .medium))
                             .foregroundColor(theme.accentColor)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2.5)
@@ -225,7 +225,7 @@ struct ReadView: View {
 
             if entry.updatedAt.timeIntervalSince(entry.createdAt) > 60 {
                 Text("Edited \(entry.updatedAt.formatted(.relative(presentation: .named)))")
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.8))
             }
 
@@ -249,17 +249,17 @@ struct ReadView: View {
                     )
                     .frame(width: 64, height: 64)
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 24, weight: .light))
+                    .font(OmegaTheme.font(.title, .light))
                     .foregroundColor(theme.accentColor)
             }
 
             VStack(spacing: 5) {
                 Text("Content Hidden")
-                    .font(.system(size: 15, weight: .semibold, design: .serif))
+                    .font(OmegaTheme.font(.bodyLarge, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
 
                 Text("Authenticate with \(biometricAuth.biometricType) to view this entry.")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -268,9 +268,9 @@ struct ReadView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: biometricAuth.biometricType == "Touch ID" ? "touchid" : "lock.open.fill")
-                        .font(.system(size: 12))
+                        .font(OmegaTheme.font(.caption))
                     Text("Unlock")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(OmegaTheme.font(.caption, .semibold))
                 }
                 .foregroundColor(onAccentColor)
                 .padding(.horizontal, 20)
@@ -286,7 +286,7 @@ struct ReadView: View {
 
     private func metaChip(_ text: String, color: Color? = nil) -> some View {
         Text(text)
-            .font(.system(size: 10))
+            .font(OmegaTheme.font(.meta))
             .foregroundColor(color ?? theme.secondaryTextColor)
             .padding(.horizontal, 7)
             .padding(.vertical, 2.5)
@@ -311,7 +311,7 @@ struct ReadView: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider().opacity(0.2)
             Text("ATTACHMENTS (\(entry.attachments.count))")
-                .font(.system(size: 10, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .tracking(0.7)
                 .foregroundColor(theme.secondaryTextColor)
 
@@ -325,18 +325,18 @@ struct ReadView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     } else {
                         Image(systemName: "doc.fill")
-                            .font(.system(size: 16))
+                            .font(OmegaTheme.font(.heading))
                             .foregroundColor(theme.accentColor)
                             .frame(width: 44, height: 44)
                             .background(RoundedRectangle(cornerRadius: 6).fill(theme.cardColor.opacity(0.6)))
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachment.filename)
-                            .font(.system(size: 11.5, weight: .medium))
+                            .font(OmegaTheme.font(.caption, .medium))
                             .foregroundColor(theme.titleTextColor)
                             .lineLimit(1)
                         Text(attachment.mimeType)
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     Spacer()
@@ -351,7 +351,7 @@ struct ReadView: View {
                         }
                     } label: {
                         Image(systemName: "arrow.up.forward.square")
-                            .font(.system(size: 12))
+                            .font(OmegaTheme.font(.caption))
                             .foregroundColor(theme.accentColor)
                     }
                     .buttonStyle(.plain)
@@ -362,7 +362,7 @@ struct ReadView: View {
                         vm.deleteAttachment(attachment)
                     } label: {
                         Image(systemName: "xmark.circle")
-                            .font(.system(size: 12))
+                            .font(OmegaTheme.font(.caption))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)

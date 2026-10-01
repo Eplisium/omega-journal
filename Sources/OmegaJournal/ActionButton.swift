@@ -39,7 +39,7 @@ struct ActionButton: View {
         TooltipContainer(tooltip: tooltip, color: isDestructive ? .red : color) {
             Button(action: action) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(OmegaTheme.font(.bodyLarge, .medium))
                     .foregroundColor(iconColor)
                     .frame(width: 36, height: 36)
                     .background(

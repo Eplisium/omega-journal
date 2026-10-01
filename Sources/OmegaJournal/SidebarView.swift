@@ -108,15 +108,15 @@ struct SidebarView: View {
                     )
                     .frame(width: 26, height: 26)
                 Text("Ω")
-                    .font(.system(size: 15, weight: .bold, design: .serif))
+                    .font(OmegaTheme.font(.bodyLarge, .bold, design: .serif))
                     .foregroundColor(theme.onAccentColor)
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text("Omega Journal")
-                    .font(.system(size: 13.5, weight: .semibold, design: .serif))
+                    .font(OmegaTheme.font(.body, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text("\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words")
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()
@@ -132,24 +132,24 @@ struct SidebarView: View {
             VStack(spacing: 1) {
                 HStack(spacing: 3) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(vm.writingStreak > 0 ? .orange : theme.secondaryTextColor.opacity(0.5))
                     Text("\(vm.writingStreak)")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(OmegaTheme.font(.heading, .bold, design: .rounded))
                         .foregroundColor(theme.titleTextColor)
                 }
                 Text(vm.writingStreak == 0 ? "fresh start" : "\(vm.streakUnit)\(vm.writingStreak == 1 ? "" : "s") showing up")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
             Divider().frame(height: 26).opacity(0.25)
             VStack(spacing: 1) {
                 Text("\(vm.entriesThisMonth)")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(OmegaTheme.font(.heading, .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                 Text("this month")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()
@@ -169,7 +169,7 @@ struct SidebarView: View {
     private var goalsCard: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text("TODAY'S GOALS")
-                .font(.system(size: 11, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .foregroundColor(theme.secondaryTextColor)
                 .tracking(0.7)
                 .padding(.horizontal, 4)
@@ -178,14 +178,14 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Image(systemName: goal.isComplete ? "checkmark.circle.fill" : goal.type.icon)
-                            .font(.system(size: 10))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(goal.isComplete ? .green : theme.accentColor)
                         Text(goal.type.rawValue)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(OmegaTheme.font(.meta, .medium))
                             .foregroundColor(theme.bodyTextColor)
                         Spacer()
                         Text(goal.displayProgress)
-                            .font(.system(size: 11, design: .rounded))
+                            .font(OmegaTheme.font(.meta, design: .rounded))
                             .foregroundColor(theme.secondaryTextColor)
                     }
                     GeometryReader { geo in
@@ -214,8 +214,8 @@ struct SidebarView: View {
                 vm.createEntry()
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "square.and.pencil").font(.system(size: 11, weight: .semibold))
-                    Text("New Entry").font(.system(size: 11, weight: .medium))
+                    Image(systemName: "square.and.pencil").font(OmegaTheme.font(.meta, .semibold))
+                    Text("New Entry").font(OmegaTheme.font(.meta, .medium))
                 }
                 .foregroundColor(theme.onAccentColor)
                 .frame(maxWidth: .infinity)
@@ -230,7 +230,7 @@ struct SidebarView: View {
 
             Button { settingsSection = .appearance; showSettings = true } label: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 12))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.secondaryTextColor)
                     .frame(width: 28, height: 28)
                     .background(
@@ -252,7 +252,7 @@ struct SidebarView: View {
     private func section<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .foregroundColor(theme.secondaryTextColor)
                 .tracking(0.7)
                 .padding(.horizontal, 8)
@@ -270,11 +270,11 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.secondaryTextColor)
                         .tracking(0.7)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(OmegaTheme.font(.meta, .bold))
                         .foregroundColor(theme.secondaryTextColor)
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                     Spacer()
@@ -301,11 +301,11 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
                     .frame(width: 15)
                 Text(search.name)
-                    .font(.system(size: 12))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.bodyTextColor)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -356,17 +356,17 @@ private struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: item.icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
                     .frame(width: 15)
                 Text(item.title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(OmegaTheme.font(.caption, isSelected ? .semibold : .regular))
                     .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let badge, badge > 0 {
                     Text("\(badge)")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(OmegaTheme.font(.meta, .medium, design: .rounded))
                         .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)

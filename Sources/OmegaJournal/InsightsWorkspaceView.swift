@@ -132,10 +132,10 @@ struct InsightsWorkspaceView: View {
     private var headerCopy: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Insights")
-                .font(.system(size: 18, weight: .bold, design: .serif))
+                .font(OmegaTheme.font(.heading, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text("A quieter way to notice your writing rhythm.")
-                .font(.system(size: 13))
+                .font(OmegaTheme.font(.body))
                 .foregroundColor(theme.secondaryTextColor)
         }
     }
@@ -157,17 +157,17 @@ struct InsightsWorkspaceView: View {
     private var scopeCard: some View {
         HStack(spacing: 12) {
             Image(systemName: biometricAuth.isAuthenticated ? "eye" : "lock.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(OmegaTheme.font(.body, .semibold))
                 .foregroundColor(theme.accentColor)
                 .frame(width: 30, height: 30)
                 .background(Circle().fill(theme.accentColor.opacity(0.14)))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Reflective scope")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OmegaTheme.font(.caption, .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text(vm.analyticsVisibilityLabel)
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -176,13 +176,13 @@ struct InsightsWorkspaceView: View {
             if biometricAuth.isAuthenticated {
                 Toggle("Include private", isOn: privateInclusionBinding)
                     .toggleStyle(.switch)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.bodyTextColor)
                     .accessibilityLabel("Include private entries in Insights")
             } else {
                 Button(action: requestPrivateInclusion) {
                     Label("Unlock to include", systemImage: "lock.open")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.accentColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -212,10 +212,10 @@ struct InsightsWorkspaceView: View {
     private var reflectionSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(summaryTitle)
-                .font(.system(size: 11, weight: .medium, design: .serif))
+                .font(OmegaTheme.font(.meta, .medium, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text(summaryBody)
-                .font(.system(size: 13))
+                .font(OmegaTheme.font(.body))
                 .foregroundColor(theme.bodyTextColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -384,20 +384,20 @@ extension InsightsWorkspaceView {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "book.closed")
-                .font(.system(size: 32, weight: .light))
+                .font(OmegaTheme.font(.display, .light))
                 .foregroundColor(theme.accentColor.opacity(0.7))
             Text("No writing in this period")
-                .font(.system(size: 16, weight: .semibold, design: .serif))
+                .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text("Try a longer period, or begin a new entry when the moment feels right.")
-                .font(.system(size: 12))
+                .font(OmegaTheme.font(.caption))
                 .foregroundColor(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
             Button {
                 NotificationCenter.default.post(name: .newEntry, object: nil)
             } label: {
                 Label("Write an entry", systemImage: "square.and.pencil")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OmegaTheme.font(.caption, .semibold))
                     .foregroundColor(theme.onAccentColor)
                     .padding(.horizontal, 13)
                     .padding(.vertical, 7)
@@ -529,10 +529,10 @@ private struct InsightSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
+                    .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text(subtitle)
-                    .font(.system(size: 11.5))
+                    .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.secondaryTextColor)
             }
             content
@@ -558,20 +558,20 @@ private struct ReflectionMetric: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(OmegaTheme.font(.heading, .medium))
                 .foregroundColor(tint)
                 .frame(width: 33, height: 33)
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tint.opacity(0.14)))
             VStack(alignment: .leading, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(OmegaTheme.font(.heading, .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                     .lineLimit(1)
                 Text(label)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .foregroundColor(theme.bodyTextColor)
                 Text(detail)
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 0)
@@ -597,16 +597,16 @@ private struct PatternRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(OmegaTheme.font(.caption, .semibold))
                 .foregroundColor(tint)
                 .frame(width: 27, height: 27)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.13)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 10.5))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                 Text(value)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OmegaTheme.font(.caption, .semibold))
                     .foregroundColor(theme.bodyTextColor)
                     .lineLimit(1)
             }
@@ -662,7 +662,7 @@ private struct MoodCheckInChart: View {
                 AxisGridLine().foregroundStyle(theme.secondaryTextColor.opacity(0.10))
                 AxisValueLabel {
                     let label = [1: "😞", 2: "😕", 3: "😐", 4: "🙂", 5: "😄"][value.as(Int.self) ?? 3] ?? ""
-                    Text(label).font(.system(size: 10))
+                    Text(label).font(OmegaTheme.font(.meta))
                 }
             }
         }
@@ -670,7 +670,7 @@ private struct MoodCheckInChart: View {
             AxisMarks(values: .automatic(desiredCount: 5)) { _ in
                 AxisGridLine().foregroundStyle(.clear)
                 AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
             }
         }
         .chartOverlay { proxy in
@@ -714,18 +714,18 @@ private struct MoodCheckInChart: View {
             OmegaHoverCard(accent: mood.color) {
                 HStack(alignment: .top, spacing: 10) {
                     Text(mood.emoji)
-                        .font(.system(size: 15))
+                        .font(OmegaTheme.font(.bodyLarge))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(point.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .font(OmegaTheme.font(.caption, .semibold, design: .rounded))
                             .foregroundColor(.white)
                         Text(hoverTitleProvider(point))
-                            .font(.system(size: 11))
+                            .font(OmegaTheme.font(.meta))
                             .foregroundColor(.white.opacity(0.78))
                             .lineLimit(2)
                         if onOpenDay != nil {
                             Text("Click to open this day")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(OmegaTheme.font(.meta, .medium))
                                 .foregroundColor(.white.opacity(0.5))
                         }
                     }
@@ -738,10 +738,10 @@ private struct MoodCheckInChart: View {
         } else {
             HStack(spacing: 8) {
                 Image(systemName: "hand.point.up.left.fill")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.6))
                 Text("Hover a point to see that day's entries")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.75))
                 Spacer(minLength: 0)
             }
@@ -782,16 +782,16 @@ private struct MoodDistributionRow: View {
             ForEach(data) { item in
                 HStack(spacing: 10) {
                     Text(item.mood.emoji)
-                        .font(.system(size: 14))
+                        .font(OmegaTheme.font(.bodyLarge))
                         .frame(width: 22)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(item.mood.label)
-                                .font(.system(size: 10.5, weight: .medium))
+                                .font(OmegaTheme.font(.meta, .medium))
                                 .foregroundColor(theme.secondaryTextColor)
                             Spacer()
                             Text("\(item.count)")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .font(OmegaTheme.font(.meta, .bold, design: .rounded))
                                 .foregroundColor(theme.titleTextColor)
                                 .monospacedDigit()
                         }
@@ -815,7 +815,7 @@ private struct MoodDistributionRow: View {
                     Spacer()
                     Label("Average \(average.emoji) \(average.label)",
                           systemImage: "line.diagonal")
-                        .font(.system(size: 10.5, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.accentColor)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
@@ -854,7 +854,7 @@ private struct WeekdayRhythmChart: View {
                 AxisValueLabel {
                     let weekday = value.as(Int.self) ?? 1
                     Text(Calendar.current.veryShortWeekdaySymbols[weekday - 1])
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                 }
             }
         }
@@ -862,7 +862,7 @@ private struct WeekdayRhythmChart: View {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
                 AxisGridLine().foregroundStyle(theme.secondaryTextColor.opacity(0.08))
                 AxisValueLabel()
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
             }
         }
         .frame(height: 150)
@@ -881,24 +881,24 @@ private struct InsightsEntryRow: View {
         Button(action: onOpen) {
             HStack(spacing: 10) {
                 Text(entry.mood.emoji)
-                    .font(.system(size: 15))
+                    .font(OmegaTheme.font(.bodyLarge))
                     .frame(width: 22)
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         if entry.isHidden {
                             Image(systemName: "lock.open")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(OmegaTheme.font(.meta, .semibold))
                                 .foregroundColor(theme.accentColor)
                                 .accessibilityHidden(true)
                         }
                         Text(entry.displayTitle)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(OmegaTheme.font(.caption, .semibold))
                             .foregroundColor(theme.titleTextColor)
                             .lineLimit(1)
                     }
                     Text("\(entry.createdAt.formatted(.dateTime.month(.abbreviated).day())) · \(entry.wordCount) words")
-                        .font(.system(size: 10.5))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                         .lineLimit(1)
                 }
@@ -906,7 +906,7 @@ private struct InsightsEntryRow: View {
                 Spacer(minLength: 8)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(OmegaTheme.font(.meta, .semibold))
                     .foregroundColor(theme.secondaryTextColor.opacity(isHovered ? 0.9 : 0.45))
                     .accessibilityHidden(true)
             }
@@ -953,16 +953,16 @@ private struct DayEntriesSheet: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(Self.dayFormatter.string(from: day))
-                        .font(.system(size: 14, weight: .semibold, design: .serif))
+                        .font(OmegaTheme.font(.bodyLarge, .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                     Text("\(entries.count) \(entries.count == 1 ? "entry" : "entries") written this day")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Button(action: { dismiss() }) {
                     Label("Close", systemImage: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.accentColor)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
@@ -1012,7 +1012,7 @@ private struct WritingVolumeChart: View {
                 AxisMarks(values: .automatic(desiredCount: 5)) { _ in
                     AxisGridLine().foregroundStyle(.clear)
                     AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                 }
             }
             .frame(height: 190)
@@ -1026,10 +1026,10 @@ private func chartEmptyState(_ message: String, icon: String) -> some View {
         Spacer()
         VStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 24, weight: .light))
+                .font(OmegaTheme.font(.title, .light))
                 .foregroundColor(.secondary.opacity(0.55))
             Text(message)
-                .font(.system(size: 12))
+                .font(OmegaTheme.font(.caption))
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 32)

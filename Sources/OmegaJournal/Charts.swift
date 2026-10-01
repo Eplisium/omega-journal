@@ -25,7 +25,7 @@ struct MoodTrendChartView: View {
                     AxisGridLine().foregroundStyle(Color.secondary.opacity(0.1))
                     AxisValueLabel {
                         let label = [1: "😞", 2: "😕", 3: "😐", 4: "🙂", 5: "😄"][v.as(Int.self) ?? 3] ?? ""
-                        Text(label).font(.system(size: 10))
+                        Text(label).font(OmegaTheme.font(.meta))
                     }
                 }
             }
@@ -50,7 +50,7 @@ struct MoodDistributionView: View {
                     RuleMark(y: .value("Count", item.count))
                         .foregroundStyle(.clear)
                         .annotation(position: .top) {
-                            Text("\(item.count)").font(.system(size: 10, weight: .medium)).foregroundColor(.secondary)
+                            Text("\(item.count)").font(OmegaTheme.font(.meta, .medium)).foregroundColor(.secondary)
                         }
                 }
             }
@@ -66,8 +66,8 @@ func emptyChart(_ message: String) -> some View {
     HStack {
         Spacer()
         VStack(spacing: 8) {
-            Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 28)).foregroundColor(.secondary.opacity(0.5))
-            Text(message).font(.system(size: 13)).foregroundColor(.secondary)
+            Image(systemName: "chart.line.uptrend.xyaxis").font(OmegaTheme.font(.title)).foregroundColor(.secondary.opacity(0.5))
+            Text(message).font(OmegaTheme.font(.body)).foregroundColor(.secondary)
         }
         .padding(.vertical, 30)
         Spacer()

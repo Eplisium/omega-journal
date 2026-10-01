@@ -19,16 +19,16 @@ struct TemplatePickerView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start from a Template")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(OmegaTheme.font(.bodyLarge, .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Reusable structures for recurring entries")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 15))
+                        .font(OmegaTheme.font(.bodyLarge))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
@@ -61,15 +61,15 @@ struct TemplatePickerView: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack {
                     Image(systemName: template.icon)
-                        .font(.system(size: 15))
+                        .font(OmegaTheme.font(.bodyLarge))
                         .foregroundColor(theme.accentColor)
                     Spacer()
                 }
                 Text(template.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OmegaTheme.font(.body, .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text(template.body.isEmpty ? "Empty page" : template.body)
-                    .font(.system(size: 10))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .lineLimit(4)
                     .multilineTextAlignment(.leading)
@@ -77,7 +77,7 @@ struct TemplatePickerView: View {
                     HStack(spacing: 3) {
                         ForEach(template.tags.prefix(3), id: \.self) { tag in
                             Text("#\(tag)")
-                                .font(.system(size: 10))
+                                .font(OmegaTheme.font(.meta))
                                 .foregroundColor(theme.accentColor)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -116,10 +116,10 @@ struct TemplatePickerView: View {
         } label: {
             VStack(spacing: 7) {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 20, weight: .light))
+                    .font(OmegaTheme.font(.title, .light))
                     .foregroundColor(theme.secondaryTextColor)
                 Text("New Template")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
             .frame(maxWidth: .infinity)
@@ -137,7 +137,7 @@ struct TemplatePickerView: View {
     private var templateEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("New Template")
-                .font(.system(size: 14, weight: .semibold))
+                .font(OmegaTheme.font(.bodyLarge, .semibold))
                 .foregroundColor(theme.titleTextColor)
 
             TextField("Name", text: $draftName)
@@ -147,10 +147,10 @@ struct TemplatePickerView: View {
                 .textFieldStyle(.roundedBorder)
 
             Text("Body")
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
             TextEditor(text: $draftBody)
-                .font(.system(size: 12, design: .monospaced))
+                .font(OmegaTheme.font(.caption, design: .monospaced))
                 .frame(height: 180)
                 .scrollContentBackground(.hidden)
                 .padding(6)

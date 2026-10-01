@@ -171,10 +171,10 @@ struct CalendarView: View {
     private var workspaceTitle: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("Calendar")
-                .font(.system(size: 15, weight: .bold, design: .serif))
+                .font(OmegaTheme.font(.bodyLarge, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text("Reflect on your writing rhythm without leaving the workspace.")
-                .font(.system(size: 12))
+                .font(OmegaTheme.font(.caption))
                 .foregroundColor(theme.secondaryTextColor)
         }
     }
@@ -224,7 +224,7 @@ struct CalendarView: View {
             }
 
             Text(anchorMonth.formatted(.dateTime.month(.wide).year()))
-                .font(.system(size: 13, weight: .semibold))
+                .font(OmegaTheme.font(.body, .semibold))
                 .foregroundColor(theme.titleTextColor)
                 .lineLimit(1)
                 .fixedSize()
@@ -248,17 +248,17 @@ struct CalendarView: View {
     private var reflectiveScopeControl: some View {
         HStack(spacing: 12) {
             Image(systemName: biometricAuth.isAuthenticated ? "eye" : "lock.fill")
-                .font(.system(size: 14, weight: .semibold))
+                .font(OmegaTheme.font(.bodyLarge, .semibold))
                 .foregroundColor(theme.accentColor)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(theme.accentColor.opacity(0.14)))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Reflective scope")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OmegaTheme.font(.caption, .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text(vm.analyticsVisibilityLabel)
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -267,13 +267,13 @@ struct CalendarView: View {
             if biometricAuth.isAuthenticated {
                 Toggle("Include private", isOn: privacyInclusionBinding)
                     .toggleStyle(.switch)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.bodyTextColor)
                     .accessibilityLabel("Include private entries in Calendar")
             } else {
                 Button(action: requestPrivateInclusion) {
                     Label("Unlock to include", systemImage: "lock.open")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.accentColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -321,18 +321,18 @@ struct CalendarView: View {
     private func summaryMetric(value: String, label: String, icon: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
+                .font(OmegaTheme.font(.bodyLarge, .medium))
                 .foregroundColor(theme.accentColor)
                 .frame(width: 24, height: 24)
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(theme.accentColor.opacity(0.12)))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(OmegaTheme.font(.bodyLarge, .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                     .lineLimit(1)
                 Text(label)
-                    .font(.system(size: 10.5))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 0)
@@ -364,15 +364,15 @@ struct CalendarView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Month at a glance")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(OmegaTheme.font(.bodyLarge, .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Select any day to inspect its writing.")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Text("\(monthEntries.count) \(entryWord(for: monthEntries.count))")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -380,7 +380,7 @@ struct CalendarView: View {
                 HStack(spacing: 8) {
                     ForEach(orderedWeekdaySymbols, id: \.self) { symbol in
                         Text(symbol.uppercased())
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(OmegaTheme.font(.meta, .semibold))
                             .foregroundColor(theme.secondaryTextColor)
                             .frame(maxWidth: .infinity)
                             .accessibilityHidden(true)
@@ -434,15 +434,15 @@ struct CalendarView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Agenda")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(OmegaTheme.font(.bodyLarge, .semibold))
                         .foregroundColor(theme.titleTextColor)
                     Text("Writing days in \(anchorMonth.formatted(.dateTime.month(.wide).year())).")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
                 Text("\(agendaDays.count) \(agendaDays.count == 1 ? "day" : "days")")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
@@ -464,13 +464,13 @@ struct CalendarView: View {
     private var agendaEmptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "calendar.badge.exclamationmark")
-                .font(.system(size: 22, weight: .light))
+                .font(OmegaTheme.font(.title, .light))
                 .foregroundColor(theme.secondaryTextColor)
             Text("No entries in this month’s reflective scope.")
-                .font(.system(size: 12, weight: .medium))
+                .font(OmegaTheme.font(.caption, .medium))
                 .foregroundColor(theme.titleTextColor)
             Text("Choose a date in the inspector to begin writing.")
-                .font(.system(size: 11))
+                .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
         }
         .frame(maxWidth: .infinity)
@@ -486,18 +486,18 @@ struct CalendarView: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(day.formatted(.dateTime.weekday(.wide)))
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(OmegaTheme.font(.meta, .semibold))
                             .foregroundColor(theme.secondaryTextColor)
                         Text(day.formatted(.dateTime.month(.abbreviated).day().year()))
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(OmegaTheme.font(.bodyLarge, .semibold))
                             .foregroundColor(theme.titleTextColor)
                     }
                     Spacer()
                     Text("\(entries.count) \(entryWord(for: entries.count))")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(isSelected ? theme.accentColor : theme.secondaryTextColor)
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(isSelected ? theme.accentColor : theme.secondaryTextColor)
                 }
                 .padding(.horizontal, 12)
@@ -514,7 +514,7 @@ struct CalendarView: View {
 
             if entries.isEmpty {
                 Text("No entries on this selected date.")
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .padding(.leading, 12)
             } else {
@@ -537,14 +537,14 @@ struct CalendarView: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("DAY INSPECTOR")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .tracking(0.8)
                         .foregroundColor(theme.secondaryTextColor)
                     Text(selectedDay.formatted(date: .complete, time: .omitted))
-                        .font(.system(size: 16, weight: .bold, design: .serif))
+                        .font(OmegaTheme.font(.heading, .bold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
                     Text("\(entries.count) \(entryWord(for: entries.count)) in this reflective scope")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
 
@@ -552,7 +552,7 @@ struct CalendarView: View {
 
                 Button(action: createEntryForSelectedDay) {
                     Label("New Entry", systemImage: "square.and.pencil")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.onAccentColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -578,12 +578,12 @@ struct CalendarView: View {
 
             HStack {
                 Text("Entries")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OmegaTheme.font(.caption, .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Spacer()
                 if !entries.isEmpty {
                     Text("Open to read or edit")
-                        .font(.system(size: 10))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
             }
@@ -591,10 +591,10 @@ struct CalendarView: View {
             if entries.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Nothing written on this day yet.")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(OmegaTheme.font(.caption, .medium))
                         .foregroundColor(theme.titleTextColor)
                     Text("Start a dated entry without leaving Calendar.")
-                        .font(.system(size: 11))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 .padding(.vertical, 4)
@@ -616,17 +616,17 @@ struct CalendarView: View {
     private func dayTotal(value: String, label: String, icon: String) -> some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(OmegaTheme.font(.meta, .medium))
                 .foregroundColor(theme.accentColor)
                 .frame(width: 22, height: 22)
                 .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(theme.accentColor.opacity(0.12)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(value)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(OmegaTheme.font(.caption, .bold, design: .rounded))
                     .foregroundColor(theme.titleTextColor)
                     .lineLimit(1)
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer(minLength: 0)
@@ -756,7 +756,7 @@ private struct MonthChevronButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(OmegaTheme.font(.caption, .semibold))
                 .foregroundColor(theme.accentColor)
                 .frame(width: 40, height: 40)
                 .background(
@@ -788,7 +788,7 @@ private struct PillActionButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(OmegaTheme.font(.caption, .semibold))
                 .foregroundColor(theme.accentColor)
                 .lineLimit(1)
                 .fixedSize()
@@ -848,12 +848,12 @@ private struct CalendarDayCell: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(calendar.component(.day, from: day))")
-                        .font(.system(size: 14, weight: isToday ? .bold : .semibold, design: .rounded))
+                        .font(OmegaTheme.font(.bodyLarge, isToday ? .bold : .semibold, design: .rounded))
                         .foregroundColor(isFuture ? theme.secondaryTextColor.opacity(0.55) : theme.titleTextColor)
                     Spacer(minLength: 4)
                     if !safeEntries.isEmpty {
                         Text("\(safeEntries.count)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .font(OmegaTheme.font(.meta, .bold, design: .rounded))
                             .foregroundColor(theme.accentColor)
                     }
                 }
@@ -862,7 +862,7 @@ private struct CalendarDayCell: View {
 
                 if safeEntries.isEmpty {
                     Text(isFuture ? "Future" : "No entry")
-                        .font(.system(size: 10))
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor.opacity(isFuture ? 0.5 : 0.82))
                 } else {
                     HStack(spacing: 5) {
@@ -872,7 +872,7 @@ private struct CalendarDayCell: View {
                                 .frame(width: 7, height: 7)
                         }
                         Text(entryLabel)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(OmegaTheme.font(.meta, .medium))
                             .foregroundColor(theme.secondaryTextColor)
                             .lineLimit(1)
                     }
@@ -947,24 +947,24 @@ struct CalendarEntryRow: View {
     private var entryContent: some View {
         HStack(spacing: 10) {
             Text(entry.mood.emoji)
-                .font(.system(size: 17))
+                .font(OmegaTheme.font(.heading))
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     if entry.isHidden {
                         Image(systemName: "lock.open")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(OmegaTheme.font(.meta, .semibold))
                             .foregroundColor(theme.accentColor)
                             .accessibilityHidden(true)
                     }
                     Text(entry.displayTitle)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(OmegaTheme.font(.caption, .semibold))
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
                 }
                 Text("\(entry.createdAt.formatted(date: .omitted, time: .shortened)) · \(entry.wordCount) words")
-                    .font(.system(size: 10.5))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .lineLimit(1)
             }
@@ -972,7 +972,7 @@ struct CalendarEntryRow: View {
             Spacer(minLength: 8)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .foregroundColor(theme.secondaryTextColor)
                 .accessibilityHidden(true)
         }
@@ -981,20 +981,20 @@ struct CalendarEntryRow: View {
     private var lockedContent: some View {
         HStack(spacing: 10) {
             Image(systemName: "lock.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(OmegaTheme.font(.body, .semibold))
                 .foregroundColor(theme.accentColor)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Private entry")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OmegaTheme.font(.caption, .semibold))
                     .foregroundColor(theme.titleTextColor)
                 Text("Unlock to view")
-                    .font(.system(size: 10.5))
+                    .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
             }
             Spacer()
             Image(systemName: "lock.open")
-                .font(.system(size: 10, weight: .semibold))
+                .font(OmegaTheme.font(.meta, .semibold))
                 .foregroundColor(theme.accentColor)
                 .accessibilityHidden(true)
         }
