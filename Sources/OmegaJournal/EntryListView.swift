@@ -13,12 +13,19 @@ struct EntryListView: View {
     @FocusState var listFocused: Bool
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State var showFilters = false
+    @AppStorage(ListDensity.storageKey) var densityRaw = ListDensity.comfortable.rawValue
     @State var showSaveSearch = false
     @State var savedSearchName = ""
     @State var bulkTagText = ""
     @State var showBulkTagField = false
     @State var showBulkPermanentDeleteConfirmation = false
     @State var showEmptyTrashConfirmation = false
+
+    var collectionTitle: String {
+        if case .smartFolder(let id) = selection { return vm.smartFolder(id: id)?.name ?? "Smart Folder" }
+        if let j = vm.activeJournal, selection == .all || selection == nil { return j.name }
+        return selection?.title ?? "All Entries"
+    }
 
     var isHiddenSection: Bool { selection == .hidden }
 
@@ -32,6 +39,8 @@ struct EntryListView: View {
             base = vm.libraryEntries.filter { $0.createdAt >= cutoff }
         case .mood(let m): base = vm.libraryEntries.filter { $0.mood == m }
         case .tag(let t): base = vm.libraryEntries.filter { $0.tags.contains(t) }
+        case .smartFolder(let id):
+            base = vm.smartFolder(id: id).map { vm.smartFolderEntries($0, from: vm.libraryEntries) } ?? []
         case .onThisDay: base = vm.onThisDay
         case .archive: base = vm.entriesMatchingCurrentSearch(in: vm.archivedEntries)
         case .hidden: base = vm.entriesMatchingCurrentSearch(in: vm.hiddenEntries)
@@ -70,7 +79,7 @@ struct EntryListView: View {
             let rest = displayed.filter { !$0.isPinned }
             var result: [JournalViewModel.EntrySection] = []
             if !pinned.isEmpty { result.append(.init(title: "Pinned", entries: pinned)) }
-            if !rest.isEmpty { result.append(.init(title: selection?.title ?? "Entries", entries: rest)) }
+            if !rest.isEmpty { result.append(.init(title: collectionTitle, entries: rest)) }
             return displayed.isEmpty ? [] : result
         }
         let ids = Set(displayed.map(\.id))
@@ -86,6 +95,7 @@ struct EntryListView: View {
                 hiddenBanner
             }
             searchBar
+            SearchOperatorBar(vm: vm)
             if showFilters { FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity)) }
             if vm.isBulkSelecting { bulkActionBar.transition(.move(edge: .top).combined(with: .opacity)) }
             if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
@@ -95,7 +105,11 @@ struct EntryListView: View {
         .background(theme.backgroundColor)
         .alert("Save Search", isPresented: $showSaveSearch) {
             TextField("Name", text: $savedSearchName)
-            Button("Save") { vm.saveCurrentSearch(name: savedSearchName) }
+            Button("Save") {
+                vm.saveCurrentSearch(name: savedSearchName)
+                vm.loadOrganizationState()
+                vm.refreshOrganization()
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Saves the current search text and first tag or mood filter to the sidebar.")
@@ -148,7 +162,7 @@ struct EntryListView: View {
     var collectionHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(selection?.title ?? "All Entries")
+                Text(collectionTitle)
                     .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                 Text(isSearchingCurrentCollection

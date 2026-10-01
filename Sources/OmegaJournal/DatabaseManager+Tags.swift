@@ -138,13 +138,13 @@ extension DatabaseManager {
         return map
     }
 
-    func tagsWithCounts(includeHidden: Bool = true) -> [(tag: String, count: Int)] {
+    func tagsWithCounts(includeHidden: Bool = true, journalId: String? = nil) -> [(tag: String, count: Int)] {
         // Count only active (non-trashed, non-archived) entries so the sidebar
         // tag list matches what the entry list actually shows. Archived entries
         // are excluded because they don't appear in `vm.entries` (scope .active).
         // Hidden entries are excluded while the biometric session is locked —
         // the sidebar shouldn't advertise the tags used on private entries.
-        let hiddenClause = includeHidden ? "" : " AND e.is_hidden = 0"
+        let hiddenClause = (includeHidden ? "" : " AND e.is_hidden = 0") + journalClause(journalId)
         let sql = """
             SELECT t.name, COUNT(et.entry_id) as cnt
             FROM tags t

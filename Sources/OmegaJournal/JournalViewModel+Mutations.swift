@@ -54,7 +54,7 @@ extension JournalViewModel {
         hiddenEntries.removeAll { $0.id == entry.id }
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
-        trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed)
+        trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed, journalId: activeJournalId)
         pushUndo(.restoreTrashed(ids: [entry.id]))
         refreshTagCounts()
         showToast("Moved to Trash", actionLabel: "Undo")

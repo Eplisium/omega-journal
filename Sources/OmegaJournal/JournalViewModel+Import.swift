@@ -50,7 +50,7 @@ extension JournalViewModel {
             let committed = db.inTransaction {
               for je in export.entries {
                 guard knownIDs.insert(je.id).inserted else { skipped += 1; continue }
-                let entry = JournalEntry(
+                var entry = JournalEntry(
                     id: je.id, title: je.title, body: je.body,
                     mood: Mood(rawValue: je.mood) ?? .neutral,
                     tags: OmegaCore.normalizeTags(je.tags),
@@ -61,10 +61,14 @@ extension JournalViewModel {
                     isHidden: je.isHidden ?? false,
                     attachments: []
                 )
+                entry.journalId = db.ensureJournal(id: je.journalId, name: je.journalName)
                 db.saveEntry(entry)
                 added += 1
                 let atts = ExportManager.decodeAttachments(je)
                 if !atts.isEmpty { pendingAttachments.append((je.id, atts)) }
+                for r in je.revisions ?? [] {
+                    db.importRevision(entryId: je.id, title: r.title, body: r.body, createdAt: r.createdAt, isAuto: r.isAuto ?? true)
+                }
               }
             }
             guard committed else {

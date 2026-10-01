@@ -24,9 +24,9 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 24) {
                 welcomeHeader
                 heroCard
-                statRow
-                writingPrompt
-                progressAndShortcuts
+                statLine
+                if hasDailyGoals { progressCard }
+                if vm.entries.count < 5 { writingPrompt }
 
                 if !recentEntries.isEmpty {
                     recentWriting
@@ -166,6 +166,35 @@ struct TodayView: View {
             statCard(value: vm.totalWordCount.formatted(), label: "Words written", detail: "\(vm.entries.count) entries total")
             statCard(value: "\(vm.entriesThisMonth)", label: "This month", detail: "Every entry counts")
         }
+    }
+
+    /// One quiet line instead of three cards: the numbers stay, the visual weight goes.
+    private var statLine: some View {
+        Text("\(vm.entriesThisWeek) this week  ·  \(vm.entriesThisMonth) this month  ·  \(vm.totalWordCount.formatted()) words  ·  \(StreakCopy.streakLine(vm.streakSummary))")
+            .font(OmegaTheme.font(.caption))
+            .foregroundColor(theme.secondaryTextColor)
+            .accessibilityElement(children: .combine)
+    }
+
+    private var hasDailyGoals: Bool {
+        goals.goals.contains { $0.type == .dailyWords || $0.type == .dailyEntries }
+    }
+
+    /// Daily goals only; the old "Return to" shortcuts duplicated the sidebar and were removed.
+    private var progressCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("TODAY'S PROGRESS")
+                .font(OmegaTheme.font(.meta, .semibold))
+                .tracking(0.8)
+                .foregroundColor(theme.secondaryTextColor)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(goals.goals.filter { $0.type == .dailyWords || $0.type == .dailyEntries }) { goal in
+                TodayGoalRow(goal: goal)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.42)))
     }
 
     private func statCard(value: String, label: String, detail: String) -> some View {

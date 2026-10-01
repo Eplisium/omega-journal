@@ -147,6 +147,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        GlobalHotkey.shared.syncRegistration()
+    }
+
+    /// Dock right-click menu.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "New Entry", action: #selector(dockNewEntry), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func dockNewEntry() {
+        NSApp.activate(ignoringOtherApps: true)
+        NotificationCenter.default.post(name: .newEntry, object: nil)
     }
 
     func applicationDidResignActive(_ notification: Notification) {

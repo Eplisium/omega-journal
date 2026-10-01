@@ -46,7 +46,8 @@ extension DatabaseManager {
             bindText(stmt, index: 1, value: template.id)
             bindText(stmt, index: 2, value: template.name)
             bindText(stmt, index: 3, value: template.body)
-            bindText(stmt, index: 4, value: template.tags.joined(separator: ","))
+            // Commas are the storage separator, so tags are normalised (no commas/#, no dupes) on the way in.
+            bindText(stmt, index: 4, value: TemplateExpander.parseTagField(template.tags.joined(separator: ",")).joined(separator: ","))
             bindText(stmt, index: 5, value: template.icon)
             sqlite3_bind_int(stmt, 6, Int32(template.sortOrder))
         }
@@ -77,6 +78,21 @@ extension DatabaseManager {
                     context: "Saving setting '\(key)' failed") { stmt in
             bindText(stmt, index: 1, value: key)
             bindText(stmt, index: 2, value: value)
+        }
+    }
+}
+
+extension DatabaseManager {
+    /// Rewrites `sort_order` to match the given id order (one transaction).
+    @discardableResult
+    func reorderTemplates(ids: [String]) -> Bool {
+        inTransaction {
+            for (i, id) in ids.enumerated() {
+                execChecked("UPDATE templates SET sort_order = ? WHERE id = ?;", context: "Reordering templates failed") { stmt in
+                    sqlite3_bind_int(stmt, 1, Int32(i))
+                    bindText(stmt, index: 2, value: id)
+                }
+            }
         }
     }
 }

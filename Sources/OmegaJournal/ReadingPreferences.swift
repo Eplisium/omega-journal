@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import AppKit
+import OmegaJournalCore
 
 /// Shared AppStorage keys for reading-view preferences (Settings writes, reader reads).
 enum ReadingPreferences {
@@ -26,6 +28,31 @@ enum ReadingPreferences {
         case "rounded": .rounded
         case "monospaced": .monospaced
         default: .default
+        }
+    }
+
+    // MARK: Editor (focus / typewriter) preferences — persisted via @AppStorage (UserDefaults)
+
+    static let editorFontKey = "editorFontChoice"
+    static let editorLineHeightKey = "editorLineHeight"
+    static let editorColumnWidthKey = "editorColumnWidth"
+    static let editorTypewriterKey = "editorTypewriter"
+    static let editorDimParagraphsKey = "editorDimParagraphs"
+    static let editorDailyGoalRingKey = "editorShowGoalRing"
+
+    /// NSFont for the editor body at `size` for a stored font choice.
+    static func editorFont(_ choice: EditorFontChoice, size: CGFloat) -> NSFont {
+        switch choice {
+        case .system:
+            return .systemFont(ofSize: size)
+        case .serif:
+            let base = NSFont.systemFont(ofSize: size)
+            if let d = base.fontDescriptor.withDesign(.serif), let f = NSFont(descriptor: d, size: size) { return f }
+            return NSFont(name: "Georgia", size: size) ?? base
+        case .sans:
+            return NSFont(name: "Helvetica Neue", size: size) ?? .systemFont(ofSize: size)
+        case .mono:
+            return .monospacedSystemFont(ofSize: size, weight: .regular)
         }
     }
 }

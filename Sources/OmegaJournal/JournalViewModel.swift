@@ -34,6 +34,15 @@ final class JournalViewModel: ObservableObject {
     @Published var filter: EntryFilter = .empty
     /// Named search + tag/mood filter combinations (stored as JSON in settings).
     @Published var savedSearches: [SavedSearch] = []
+    /// Notebooks. `activeJournalId == nil` means "All journals".
+    @Published var journals: [Journal] = []
+    @Published var activeJournalId: String?
+    @Published var tagColors: [String: String] = [:]
+    @Published var smartFolders: [SmartFolder] = []
+    @Published var smartFolderCounts: [String: Int] = [:]
+    @Published var recentSearches: [String] = []
+    @Published var journalCounts: [String: Int] = [:]
+    @Published var tagTree: [TagNode] = []
 
     // Reflection scope
     @Published var analyticsPeriod: AnalyticsPeriod = .thirtyDays
@@ -98,6 +107,7 @@ final class JournalViewModel: ObservableObject {
             self?.showToast(message, isError: true)
         }
         loadPersistedViewState()
+        loadOrganizationState()
         reload()
         loadTemplates()
         $sortOrder
@@ -127,7 +137,7 @@ final class JournalViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.allTags = self.db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
+                self.refreshTagCounts()
             }
             .store(in: &cancellables)
     }
@@ -159,14 +169,15 @@ final class JournalViewModel: ObservableObject {
             (.trashed, .dateDesc),
             (.archived, sortOrder),
             (.hidden, .dateDesc),
-        ])
+        ], journalId: activeJournalId)
         entries = scopes[.active] ?? []
         trashedEntries = scopes[.trashed] ?? []
         archivedEntries = scopes[.archived] ?? []
         hiddenEntries = scopes[.hidden] ?? []
         // While the biometric session is locked, hidden entries must not
         // advertise their tags in the sidebar/filter chips.
-        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
+        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
+        refreshOrganization()
         GoalManager.shared.loadGoals()
         refreshQuery()
     }
@@ -179,7 +190,8 @@ final class JournalViewModel: ObservableObject {
     /// session is locked. Every mutation path refreshes counts through this so
     /// the privacy rule holds regardless of where the refresh happens.
     func refreshTagCounts() {
-        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated)
+        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
+        refreshOrganization()
     }
 
     /// Re-runs whichever query matches the current search box contents.
@@ -195,7 +207,13 @@ final class JournalViewModel: ObservableObject {
             return
         }
         let unlocked = BiometricAuth.shared.isAuthenticated
-        let fts = db.fullTextSearch(q, scope: .active).filter { entry in
+        let parsed = SearchQuery.parse(q)
+        if parsed.hasOperators {
+            // Operator queries (tag:/mood:/before:/after:/has:) run over the decrypted in-memory set.
+            searchResults = operatorMatches(parsed, in: entries)
+            return
+        }
+        let fts = db.fullTextSearch(q, scope: .active, journalId: activeJournalId).filter { entry in
             unlocked || !entry.isHidden || Self.matchesVisibleFields(entry, query: q)
         }
         var seen = Set(fts.map(\.id))
@@ -226,6 +244,8 @@ final class JournalViewModel: ObservableObject {
     func entriesMatchingCurrentSearch(in source: [JournalEntry]) -> [JournalEntry] {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return source }
+        let parsed = SearchQuery.parse(query)
+        if parsed.hasOperators { return operatorMatches(parsed, in: source) }
         return source.filter { entry in
             if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
                 return Self.matchesVisibleFields(entry, query: query)
@@ -246,7 +266,7 @@ final class JournalViewModel: ObservableObject {
         searchDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
-            await MainActor.run { self?.refreshQuery() }
+            await MainActor.run { self?.refreshQuery(); if let q = self?.searchText, q.count >= 3 { self?.recordRecentSearch(q) } }
         }
     }
 
@@ -403,6 +423,7 @@ final class JournalViewModel: ObservableObject {
     @discardableResult
     func createEntry(title: String = "", body: String = "", tags: [String] = []) -> JournalEntry {
         var entry = JournalEntry.new()
+        entry.journalId = newEntryJournalId
         entry.title = title
         entry.body = body
         entry.tags = OmegaCore.normalizeTags(tags)
@@ -423,13 +444,17 @@ final class JournalViewModel: ObservableObject {
     }
 
     func createEntry(from template: EntryTemplate) {
-        createEntry(title: template.name == "Blank" ? "" : template.name, body: template.body, tags: template.tags)
+        let filled = TemplateExpander.instantiate(
+            name: template.name, body: template.body, tags: template.tags,
+            context: TemplateContext(date: Date(), prompt: PromptGenerator.today(), moodLabel: Mood.neutral.label))
+        createEntry(title: filled.title, body: filled.body, tags: filled.tags)
         showToast("Started “\(template.name)”")
     }
 
     /// Creates an entry back-dated to a specific day — used by the calendar view.
     func createEntry(on date: Date) {
         var entry = JournalEntry.new()
+        entry.journalId = newEntryJournalId
         // Keep the current time-of-day but move to the requested calendar day.
         let cal = Calendar.current
         let time = cal.dateComponents([.hour, .minute, .second], from: Date())

@@ -8,6 +8,7 @@ struct ContentView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @State private var sidebarSelection: SidebarItem? = .today
     @State private var showTemplatePicker = false
+    @StateObject private var onboarding = OnboardingState()
     @SceneStorage("shell.sidebarSelection") private var storedSelection = SidebarItem.today.storageKey
     @State private var didRestoreSelection = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -37,6 +38,16 @@ struct ContentView: View {
         .sheet(isPresented: $showTemplatePicker) {
             TemplatePickerView(vm: vm)
         }
+        .sheet(isPresented: $onboarding.isPresentingTour) {
+            OnboardingTourView(onboarding: onboarding) {
+                sidebarSelection = .all
+                vm.createEntry()
+            }
+        }
+        .sheet(isPresented: $onboarding.isPresentingWhatsNew) {
+            WhatsNewView(onboarding: onboarding)
+        }
+        .onAppear { onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty) }
         .modifier(ShellEntryCommands(vm: vm, selection: $sidebarSelection))
         .modifier(ShellLifecycle(vm: vm, selection: $sidebarSelection, showTemplatePicker: $showTemplatePicker,
                                  storedSelection: $storedSelection, didRestore: $didRestoreSelection))
@@ -90,6 +101,7 @@ enum SidebarItem: Hashable {
     case hidden
     case trash
     case tag(String)
+    case smartFolder(String)
 
     var title: String {
         switch self {
@@ -105,6 +117,7 @@ enum SidebarItem: Hashable {
         case .hidden: "Hidden"
         case .trash: "Trash"
         case .tag(let t): "#\(t)"
+        case .smartFolder: "Smart Folder"
         }
     }
 
@@ -122,6 +135,7 @@ enum SidebarItem: Hashable {
         case .hidden: "lock.fill"
         case .trash: "trash"
         case .tag: "number"
+        case .smartFolder: "folder.badge.gearshape"
         }
     }
 
@@ -140,6 +154,7 @@ enum SidebarItem: Hashable {
         case .hidden: "hidden"
         case .trash: "trash"
         case .tag(let t): "tag:\(t)"
+        case .smartFolder(let id): "smart:\(id)"
         }
     }
 
@@ -162,6 +177,8 @@ enum SidebarItem: Hashable {
                 self = .mood(m)
             } else if storageKey.hasPrefix("tag:"), storageKey.count > 4 {
                 self = .tag(String(storageKey.dropFirst(4)))
+            } else if storageKey.hasPrefix("smart:"), storageKey.count > 6 {
+                self = .smartFolder(String(storageKey.dropFirst(6)))
             } else {
                 return nil
             }
@@ -176,7 +193,7 @@ enum SidebarItem: Hashable {
         case .calendar: .calendar
         case .insights: .insights
         case .onThisDay: .onThisDay
-        case .all, .favorites, .thisWeek, .mood, .archive, .hidden, .trash, .tag: .journal
+        case .all, .favorites, .thisWeek, .mood, .archive, .hidden, .trash, .tag, .smartFolder: .journal
         }
     }
 }

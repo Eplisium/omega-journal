@@ -34,7 +34,8 @@ enum ImportExportPanels {
                 return
             }
             save(vm: vm, suggested: "OmegaJournal-\(stamp()).json", type: .json, omittedHidden: omitted) { url in
-                try ExportManager.exportJSON(entries, to: url, attachmentData: { vm.db.readAttachmentData($0) })
+                try ExportManager.exportJSON(entries, to: url, attachmentData: { vm.db.readAttachmentData($0) },
+                                             revisionData: { vm.db.exportRevisions(for: $0) })
             }
         }
     }
@@ -66,6 +67,103 @@ enum ImportExportPanels {
             return (visible, all.count - visible.count)
         }
         return (all, 0)
+    }
+
+    // MARK: Phase 5 exports
+
+    /// Passphrase-protected full export (.ojenc).
+    static func exportEncrypted(vm: JournalViewModel, passphrase: String) {
+        Task {
+            let (entries, omitted) = await entriesForExport(vm: vm)
+            guard !entries.isEmpty else { vm.showToast("Nothing to export — the journal is empty", isError: true); return }
+            let panel = NSSavePanel()
+            panel.title = "Encrypted Export"
+            panel.nameFieldStringValue = "OmegaJournal-\(stamp()).\(ExportManager.encryptedExtension)"
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            do {
+                try ExportManager.exportEncrypted(entries, to: url, passphrase: passphrase, attachmentData: { vm.db.readAttachmentData($0) })
+                vm.showToast("Encrypted export saved" + (omitted > 0 ? " — \(omitted) hidden not included" : ""), isError: omitted > 0)
+            } catch { vm.showToast("Export failed: \(error.localizedDescription)", isError: true) }
+        }
+    }
+
+    private static func chooseFolder(_ message: String, prompt: String) -> URL? {
+        let panel = NSOpenPanel()
+        panel.message = message
+        panel.prompt = prompt
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    static func exportMarkdownFolder(vm: JournalViewModel) {
+        Task {
+            let (entries, omitted) = await entriesForExport(vm: vm)
+            let live = entries.filter { !$0.isTrashed }
+            guard !live.isEmpty else { vm.showToast("Nothing to export", isError: true); return }
+            guard let parent = chooseFolder("Choose where to create the “Omega Journal Markdown” folder.", prompt: "Export Here") else { return }
+            let dir = parent.appendingPathComponent("Omega Journal Markdown \(stamp())", isDirectory: true)
+            do {
+                let n = try ExportManager.exportMarkdownFolder(live, to: dir, attachmentData: { vm.db.readAttachmentData($0) })
+                vm.showToast("Exported \(n) markdown files" + (omitted > 0 ? " — \(omitted) hidden not included" : ""), isError: omitted > 0)
+                NSWorkspace.shared.activateFileViewerSelecting([dir])
+            } catch { vm.showToast("Export failed: \(error.localizedDescription)", isError: true) }
+        }
+    }
+
+    static func exportHTMLSite(vm: JournalViewModel) {
+        Task {
+            let (entries, omitted) = await entriesForExport(vm: vm)
+            let live = entries.filter { !$0.isTrashed }
+            guard !live.isEmpty else { vm.showToast("Nothing to export", isError: true); return }
+            guard let parent = chooseFolder("Choose where to create the website folder.", prompt: "Export Here") else { return }
+            let dir = parent.appendingPathComponent("Omega Journal Site \(stamp())", isDirectory: true)
+            do {
+                let n = try ExportManager.exportHTMLSite(live, to: dir, attachmentData: { vm.db.readAttachmentData($0) })
+                vm.showToast("Exported \(n) pages — open index.html" + (omitted > 0 ? " (\(omitted) hidden not included)" : ""), isError: omitted > 0)
+                NSWorkspace.shared.activateFileViewerSelecting([dir.appendingPathComponent("index.html")])
+            } catch { vm.showToast("Export failed: \(error.localizedDescription)", isError: true) }
+        }
+    }
+
+    /// Themed PDF of the selected entry (asks for authentication first when hidden).
+    @MainActor
+    static func exportEntryPDF(vm: JournalViewModel) {
+        guard let entry = vm.selectedEntry else { vm.showToast("No entry selected", isError: true); return }
+        Task {
+            if entry.isHidden, !(await BiometricAuth.shared.authenticate()) { return }
+            let safeName = entry.displayTitle.replacingOccurrences(of: "/", with: "-").prefix(60)
+            save(vm: vm, suggested: "\(safeName).pdf", type: .pdf) { url in
+                try ExportManager.exportEntryPDF(entry, to: url, accent: NSColor(ThemeManager.shared.accentColor))
+            }
+        }
+    }
+
+    // MARK: Phase 5 imports
+
+    static func importDayOne(vm: JournalViewModel) {
+        let panel = NSOpenPanel()
+        panel.message = "Choose a Day One JSON export (the .json file or its unzipped folder)."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowedContentTypes = [.json, .folder]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        vm.importDayOneJSON(from: url)
+    }
+
+    static func importNotesFolder(vm: JournalViewModel) {
+        guard let url = chooseFolder("Choose an Obsidian vault or a folder of .md / .txt notes.", prompt: "Import") else { return }
+        vm.importNotesFolder(from: url)
+    }
+
+    static func importEncrypted(vm: JournalViewModel, passphrase: String) {
+        let panel = NSOpenPanel()
+        panel.message = "Choose an encrypted Omega Journal export (.ojenc)."
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        vm.importEncryptedExport(from: url, passphrase: passphrase)
     }
 
     /// Exports only the currently selected entry.

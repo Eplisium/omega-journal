@@ -50,6 +50,8 @@ struct SettingsView: View {
     @State private var customCard = ThemeManager.shared.cardColor
     @State private var showEmptyTrashConfirmation = false
     @AppStorage(ShellPrefs.lockOnResignKey) private var lockOnResign = true
+    @AppStorage(SpotlightIndexer.enabledKey) private var spotlightTitles = false
+    @AppStorage(GlobalHotkey.enabledKey) private var globalHotkeyEnabled = true
     @AppStorage(ReadingPreferences.maxWidthKey) private var readingMaxWidth = ReadingPreferences.defaultMaxWidth
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
     @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
@@ -148,6 +150,7 @@ struct SettingsView: View {
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(theme.secondaryTextColor.opacity(0.12)))
                 }
+                .accessibilityLabel("Close")
                 .buttonStyle(.plain)
                 .help("Close settings")
             }
@@ -160,8 +163,10 @@ struct SettingsView: View {
                 Group {
                     switch section {
                     case .appearance: appearancePane
-                    case .goals: goalsPane
-                    case .data: dataPane
+                    case .goals:
+                        VStack(alignment: .leading, spacing: 18) { goalsPane; ReflectionSettingsPanels(vm: vm) }
+                    case .data:
+                        VStack(alignment: .leading, spacing: 18) { dataPane; DataSafetyPanels(vm: vm) }
                     case .about: aboutPane
                     }
                 }
@@ -469,6 +474,28 @@ struct SettingsView: View {
                     Toggle("Lock hidden entries when I switch apps", isOn: $lockOnResign)
                         .labelsHidden()
                         .toggleStyle(.switch)
+                }
+                SettingsRowDivider()
+                SettingsRow(
+                    title: "Show entry titles in Spotlight",
+                    subtitle: "Off by default. Only titles of non-hidden entries are indexed — never bodies or tags."
+                ) {
+                    Toggle("Show entry titles in Spotlight", isOn: $spotlightTitles)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: spotlightTitles) { _, on in
+                            if on { SpotlightIndexer.shared.scheduleReindex(db: vm.db) } else { SpotlightIndexer.shared.removeAll() }
+                        }
+                }
+                SettingsRowDivider()
+                SettingsRow(
+                    title: "Global new-entry hotkey (⌥⌘J)",
+                    subtitle: "Opens Omega Journal with a fresh entry from any app."
+                ) {
+                    Toggle("Global new-entry hotkey", isOn: $globalHotkeyEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: globalHotkeyEnabled) { _, _ in GlobalHotkey.shared.syncRegistration() }
                 }
             }
 

@@ -47,6 +47,18 @@ extension EntryListView {
 
                 Spacer()
 
+                Menu {
+                    Picker("Density", selection: $densityRaw) {
+                        ForEach(ListDensity.allCases) { d in Label(d.label, systemImage: d.icon).tag(d.rawValue) }
+                    }
+                } label: {
+                    Image(systemName: (ListDensity(rawValue: densityRaw) ?? .comfortable).icon)
+                        .font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor)
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .accessibilityLabel("List density")
+                .omegaTooltip("List density")
+
                 Button {
                     withAnimation(reduceMotion ? nil : .default) { showFilters.toggle() }
                 } label: {
@@ -68,6 +80,7 @@ extension EntryListView {
                     Button {
                         savedSearchName = vm.searchText.trimmingCharacters(in: .whitespaces)
                         showSaveSearch = true
+                        vm.recordRecentSearch(vm.searchText)
                     } label: {
                         Image(systemName: "bookmark")
                             .font(OmegaTheme.font(.meta))
@@ -105,6 +118,7 @@ extension EntryListView {
                     }
                     .buttonStyle(.plain)
                     .omegaTooltip("Lock hidden entries (⌘L)")
+                    .accessibilityLabel("Lock hidden entries")
                 }
             }
         }
@@ -163,6 +177,20 @@ extension EntryListView {
                     .buttonStyle(.plain)
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
+                    .keyboardShortcut(.escape, modifiers: [])
+
+                if bulkStorage == .library && vm.journals.count > 1 {
+                    Menu {
+                        ForEach(vm.journals) { j in
+                            Button(j.name) { vm.moveSelectedToJournal(j.id) }
+                        }
+                    } label: {
+                        Label("Move", systemImage: "book.closed").font(OmegaTheme.font(.meta))
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .disabled(vm.bulkSelection.isEmpty)
+                    .accessibilityLabel("Move selected entries to a notebook")
+                }
 
                 Spacer()
 
@@ -234,6 +262,7 @@ extension EntryListView {
         .disabled(vm.bulkSelection.isEmpty)
         .opacity(vm.bulkSelection.isEmpty ? 0.4 : 1)
         .omegaTooltip(help, accent: destructive ? .red : nil)
+        .accessibilityLabel(help)
     }
 
     var trashBanner: some View {

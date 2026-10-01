@@ -69,7 +69,7 @@ final class DatabaseManager {
     var attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    static let currentSchemaVersion = 9
+    static let currentSchemaVersion = 12
 
     /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
     static let trashRetentionDays = 30

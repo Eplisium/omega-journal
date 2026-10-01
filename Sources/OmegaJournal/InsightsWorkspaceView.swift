@@ -20,6 +20,14 @@ struct InsightsWorkspaceView: View {
     @State private var workspaceSize: CGSize = .zero
 
     private var entries: [JournalEntry] { vm.scopedAnalyticsEntries }
+    /// Habit completion share per day (dot overlay on the heatmap).
+    private var habitCompletionByDate: [Date: Double] {
+        var out: [Date: Double] = [:]
+        for (key, v) in CheckinStore.shared.dailyHabitCompletion {
+            if let d = DayKey.date(from: key) { out[Calendar.current.startOfDay(for: d)] = v }
+        }
+        return out
+    }
     private var writingPoints: [WordPoint] { vm.wordsPerDay(for: entries, period: vm.analyticsPeriod) }
     private var moodPoints: [MoodPoint] { vm.moodTrend(for: entries) }
     private var distribution: [MoodCount] { vm.moodDistribution(for: entries) }
@@ -52,6 +60,7 @@ struct InsightsWorkspaceView: View {
                     activitySection
                     distributionSection
                     rhythmSection
+                    SmartInsightsSections(vm: vm, entries: entries)
                     recentWritingSection
                 }
             }
@@ -348,7 +357,7 @@ extension InsightsWorkspaceView {
 
     private var activitySection: some View {
         InsightSection(title: "Writing activity", subtitle: "Hover for a day's story · click to open its entries") {
-            HeatmapView(info: activity, onOpenDate: openDay)
+            HeatmapView(info: activity, habitCompletion: habitCompletionByDate, onOpenDate: openDay)
         }
     }
 
@@ -1021,7 +1030,7 @@ private struct WritingVolumeChart: View {
     }
 }
 
-private func chartEmptyState(_ message: String, icon: String) -> some View {
+func chartEmptyState(_ message: String, icon: String) -> some View {
     HStack {
         Spacer()
         VStack(spacing: 8) {

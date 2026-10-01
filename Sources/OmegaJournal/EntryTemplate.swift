@@ -25,6 +25,8 @@ struct EntryTemplate: Identifiable, Hashable {
         EntryTemplate(
             name: "Daily Reflection",
             body: """
+            # {{weekday}}, {{date}}
+
             ## Highlights
             -
 
@@ -43,7 +45,7 @@ struct EntryTemplate: Identifiable, Hashable {
         EntryTemplate(
             name: "Gratitude",
             body: """
-            Three things I'm grateful for today:
+            {{date}} — three things I'm grateful for today:
 
             1.
             2.

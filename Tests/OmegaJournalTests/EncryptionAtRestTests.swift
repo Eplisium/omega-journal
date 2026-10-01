@@ -10,6 +10,7 @@ import SQLite3
 /// 4. Auto-backups are sealed but recoverable via the documented decrypt path.
 /// 5. The legacy plaintext upgrade path re-encrypts on next write.
 @Suite("Encryption at rest", .serialized)
+@MainActor
 struct EncryptionAtRestTests {
     // DatabaseManager.shared is process-wide: the env-var override only takes
     // effect at first construction, so this suite uses ONE root for all tests

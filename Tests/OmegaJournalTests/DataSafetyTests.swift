@@ -185,7 +185,7 @@ struct DataSafetyTests {
         Self.run(path, "DROP TABLE entries_fts_map; UPDATE schema_version SET version = 8;")
         for _ in 0..<2 { // re-open twice: V9 must be re-runnable
             let db = DatabaseManager(databasePath: path, attachmentsPath: root.appendingPathComponent("att").path)
-            #expect(db.schemaVersion == 9)
+            #expect(db.schemaVersion == DatabaseManager.currentSchemaVersion)
             #expect(db.scalarIntForTesting("SELECT COUNT(*) FROM entries_fts_map") == 2)
             #expect(db.scalarIntForTesting("SELECT COUNT(*) FROM entries_fts") == 2)
             #expect(db.fetchAllEntries(search: "Beta").map(\.id) == ["b2"])

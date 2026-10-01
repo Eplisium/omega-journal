@@ -4,6 +4,7 @@ import Testing
 @testable import OmegaJournal
 
 @Suite("Archive and trash lifecycle", .serialized)
+@MainActor
 struct ArchiveTrashLifecycleTests {
     /// Points the process-global env vars at a unique temp database. The
     /// DatabaseManager singleton binds to whichever path is set the first time

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
+import OmegaJournalCore
 
 // MARK: - Export Manager
 
@@ -46,6 +47,11 @@ enum ExportManager {
         let isHidden: Bool?
         // Added in v5: attachment payloads (base64). Absent in older files.
         var attachments: [JSONAttachment]? = nil
+        // Added in v6: optional version history (see `JSONRevision`). Absent in older files / when not requested.
+        var revisions: [JSONRevision]? = nil
+        // Added with notebooks: optional so older files import into the default journal.
+        var journalId: String? = nil
+        var journalName: String? = nil
     }
 
     struct JSONAttachment: Codable {
@@ -73,7 +79,7 @@ enum ExportManager {
 
     /// Bump when the JSON layout changes. v3 = adds isHidden; v4 = adds formatVersion;
     /// v5 = optional per-entry attachments (older files stay importable).
-    static let formatVersion = 5
+    static let formatVersion = 6
 
     /// Real app version from the bundle (falls back for `swift run`/tests).
     static var appVersion: String {
@@ -100,7 +106,14 @@ enum ExportManager {
     /// `attachmentData` supplies the decrypted bytes of an attachment; when nil,
     /// attachments are not embedded.
     static func exportJSON(_ entries: [JournalEntry], to url: URL,
-                           attachmentData: ((Attachment) -> Data?)? = nil) throws {
+                           attachmentData: ((Attachment) -> Data?)? = nil,
+                           revisionData: ((JournalEntry) -> [JSONRevision])? = nil) throws {
+        try jsonData(entries, attachmentData: attachmentData, revisionData: revisionData).write(to: url, options: .atomic)
+    }
+
+    static func jsonData(_ entries: [JournalEntry], attachmentData: ((Attachment) -> Data?)? = nil,
+                         revisionData: ((JournalEntry) -> [JSONRevision])? = nil) throws -> Data {
+        let journalNames = Dictionary(DatabaseManager.shared.fetchJournals().map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         let jsonEntries = entries.map { e in
             JSONEntry(
                 id: e.id, title: e.title, body: e.body,
@@ -116,7 +129,13 @@ enum ExportManager {
                         read(a).map { JSONAttachment(filename: a.filename, mimeType: a.mimeType, dataBase64: $0.base64EncodedString()) }
                     }
                     return list.isEmpty ? nil : list
-                }
+                },
+                revisions: revisionData.flatMap { read in
+                    let list = read(e)
+                    return list.isEmpty ? nil : list
+                },
+                journalId: e.journalId,
+                journalName: journalNames[e.journalId]
             )
         }
         let export = JSONExport(
@@ -129,8 +148,84 @@ enum ExportManager {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(export)
-        try data.write(to: url, options: .atomic)
+        return try encoder.encode(export)
+    }
+
+    // MARK: Passphrase-encrypted export (CryptoKit)
+
+    static let encryptedExtension = "ojenc"
+
+    /// Full JSON export (attachments included) sealed with a passphrase — readable on any Mac.
+    static func exportEncrypted(_ entries: [JournalEntry], to url: URL, passphrase: String,
+                                attachmentData: ((Attachment) -> Data?)? = nil,
+                                iterations: UInt32 = PassphraseVault.defaultIterations) throws {
+        let plain = try jsonData(entries, attachmentData: attachmentData)
+        try PassphraseVault.seal(plain, passphrase: passphrase, iterations: iterations).write(to: url, options: .atomic)
+    }
+
+    // MARK: Entry model bridge
+
+    static func exportable(_ e: JournalEntry, attachmentFiles: [String] = []) -> ExportableEntry {
+        ExportableEntry(id: e.id, title: e.title, body: e.body, mood: e.mood.rawValue, moodLabel: e.mood.label,
+                        tags: e.tags, createdAt: e.createdAt, updatedAt: e.updatedAt,
+                        isFavorite: e.isFavorite, attachmentFiles: attachmentFiles)
+    }
+
+    /// Writes `<dir>/<date title>.md` per entry with YAML front matter, plus `<dir>/attachments/`.
+    /// Returns the number of entry files written.
+    @discardableResult
+    static func exportMarkdownFolder(_ entries: [JournalEntry], to dir: URL,
+                                     attachmentData: ((Attachment) -> Data?)? = nil) throws -> Int {
+        let fm = FileManager.default
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stems = ExportFormats.uniqueNames(entries.map { ExportFormats.fileStem(exportable($0)) })
+        for (e, stem) in zip(entries, stems) {
+            let files = try writeAttachments(for: e, into: dir.appendingPathComponent("attachments", isDirectory: true),
+                                             attachmentData: attachmentData)
+            let md = ExportFormats.markdownWithFrontMatter(exportable(e, attachmentFiles: files))
+            try md.write(to: dir.appendingPathComponent("\(stem).md"), atomically: true, encoding: .utf8)
+        }
+        return entries.count
+    }
+
+    /// Writes an entry's attachments with collision-free names; returns the file names written.
+    private static func writeAttachments(for e: JournalEntry, into dir: URL,
+                                         attachmentData: ((Attachment) -> Data?)?) throws -> [String] {
+        guard let read = attachmentData, !e.attachments.isEmpty else { return [] }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var names: [String] = []
+        for a in e.attachments {
+            guard let data = read(a) else { continue }
+            let safe = a.filename.components(separatedBy: CharacterSet(charactersIn: "/\\:")).joined(separator: "-")
+            let name = "\(e.id.prefix(8))-\(safe)"
+            try data.write(to: dir.appendingPathComponent(name), options: .atomic)
+            names.append(name)
+        }
+        return names
+    }
+
+    /// Static website: `index.html`, `entries/<n>.html`, `attachments/…`. Self-contained, no scripts, no network.
+    @discardableResult
+    static func exportHTMLSite(_ entries: [JournalEntry], to dir: URL, title: String = "Omega Journal",
+                               theme: ExportFormats.HTMLTheme = .init(),
+                               attachmentData: ((Attachment) -> Data?)? = nil) throws -> Int {
+        let fm = FileManager.default
+        let entriesDir = dir.appendingPathComponent("entries", isDirectory: true)
+        try fm.createDirectory(at: entriesDir, withIntermediateDirectories: true)
+        let stems = ExportFormats.uniqueNames(entries.map { ExportFormats.fileStem(exportable($0)) })
+        var index: [(ExportableEntry, String)] = []
+        for (e, stem) in zip(entries, stems) {
+            let files = try writeAttachments(for: e, into: dir.appendingPathComponent("attachments", isDirectory: true),
+                                             attachmentData: attachmentData)
+            let ex = exportable(e, attachmentFiles: files)
+            let fileName = "\(stem).html"
+            let page = ExportFormats.entryPage(ex, theme: theme, indexHref: "../index.html", attachmentsHref: "../attachments")
+            try page.write(to: entriesDir.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
+            index.append((ex, "entries/" + ExportFormats.percentEncode(fileName)))
+        }
+        try ExportFormats.indexPage(title: title, entries: index, theme: theme)
+            .write(to: dir.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        return entries.count
     }
 
     // MARK: PDF Export
@@ -151,6 +246,35 @@ enum ExportManager {
 
         let pdfData = textView.dataWithPDF(inside: fullRect)
         try pdfData.write(to: url, options: .atomic)
+    }
+
+    /// Themed single-entry PDF (accent-coloured heading, serif body). Hidden entries must be
+    /// unlocked by the caller before exporting.
+    @MainActor
+    static func exportEntryPDF(_ entry: JournalEntry, to url: URL, accent: NSColor = NSColor(red: 0.49, green: 0.30, blue: 0.93, alpha: 1)) throws {
+        let pageWidth: CGFloat = 612, pageHeight: CGFloat = 792, margin: CGFloat = 54
+        let text = NSMutableAttributedString()
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = 4
+        let ink = NSColor(red: 0.13, green: 0.10, blue: 0.22, alpha: 1)
+        let soft = NSColor(red: 0.42, green: 0.38, blue: 0.52, alpha: 1)
+        text.append(NSAttributedString(string: entry.displayTitle + "\n", attributes: [
+            .font: NSFont.systemFont(ofSize: 26, weight: .bold), .foregroundColor: accent]))
+        var meta = "\(entry.createdAt.formatted(date: .long, time: .shortened)) · \(entry.mood.emoji) \(entry.mood.label) · \(entry.wordCount) words"
+        if !entry.tags.isEmpty { meta += "\n" + entry.tags.map { "#\($0)" }.joined(separator: "  ") }
+        text.append(NSAttributedString(string: meta + "\n\n", attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: soft]))
+        text.append(NSAttributedString(string: entry.body.isEmpty ? "No content" : entry.body, attributes: [
+            .font: NSFont(name: "Georgia", size: 13) ?? NSFont.systemFont(ofSize: 13), .foregroundColor: ink, .paragraphStyle: para]))
+        let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: pageWidth - margin * 2, height: pageHeight))
+        tv.textStorage?.setAttributedString(text)
+        tv.drawsBackground = false
+        tv.isVerticallyResizable = true
+        tv.sizeToFit()
+        let height = max(tv.bounds.height + margin * 2, pageHeight)
+        let canvas = NSView(frame: NSRect(x: 0, y: 0, width: pageWidth, height: height))
+        tv.frame.origin = NSPoint(x: margin, y: height - margin - tv.bounds.height)
+        canvas.addSubview(tv)
+        try canvas.dataWithPDF(inside: canvas.bounds).write(to: url, options: .atomic)
     }
 
     private static func buildPDFContent(_ entries: [JournalEntry]) -> NSAttributedString {

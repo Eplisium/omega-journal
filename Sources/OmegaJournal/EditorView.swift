@@ -18,7 +18,11 @@ struct EditorView: View {
     @State private var tags: [String]
     @State private var tagInput = ""
     @State private var showTagField = false
-    @State private var isTypewriter = false
+    @AppStorage(ReadingPreferences.editorTypewriterKey) private var isTypewriter = false
+    @AppStorage(ReadingPreferences.editorDimParagraphsKey) private var dimOthers = false
+    @AppStorage(ReadingPreferences.editorFontKey) private var fontChoiceRaw = EditorFontChoice.system.rawValue
+    @AppStorage(ReadingPreferences.editorLineHeightKey) private var lineHeight = WritingFocusLogic.defaultLineHeight
+    @AppStorage(ReadingPreferences.editorColumnWidthKey) private var columnWidth = WritingFocusLogic.defaultColumnWidth
     @State private var fontSize: Double
     @FocusState private var titleFocused: Bool
     @FocusState private var tagFieldFocused: Bool
@@ -31,18 +35,42 @@ struct EditorView: View {
     /// Debounced copy of the body for the preview pane.
     @State private var previewText: String
 
+    // Writing session (footer): timer, sprint, goal ring.
+    @State private var sessionStart = Date()
+    @State private var sessionStartWords: Int
+    @State private var otherWordsToday = 0
+    @State private var sprint: WritingSprint?
+    @State private var sprintNotified = false
+
+    // Optional place/weather stamp (stored as a trailing comment line in the body).
+    @State private var stamp: EntryStamp
+    @State private var showStampPopover = false
+    @State private var showFocusPopover = false
+    @State private var showRecorder = false
+    @State private var showHistory = false
+
+    // Slash / [[ popover.
+    @State private var suggestion: EditorSuggestion?
+    @State private var suggestionIndex = 0
+
     init(vm: JournalViewModel, entry: JournalEntry) {
         self.vm = vm
         self.entry = entry
+        let parts = EntryStampCodec.split(entry.body)
         _title = State(initialValue: entry.title)
-        _body_ = State(initialValue: entry.body)
+        _body_ = State(initialValue: parts.rest)
+        _stamp = State(initialValue: parts.stamp ?? EntryStamp())
         _mood = State(initialValue: entry.mood)
         _tags = State(initialValue: entry.tags)
         _fontSize = State(initialValue: Double(DatabaseManager.shared.getSetting("editorFontSize", defaultValue: "15")) ?? 15)
-        _wordCount = State(initialValue: MarkdownLogic.wordCount(entry.body))
-        _charCount = State(initialValue: entry.body.utf16.count)
-        _previewText = State(initialValue: entry.body)
+        _wordCount = State(initialValue: MarkdownLogic.wordCount(parts.rest))
+        _sessionStartWords = State(initialValue: MarkdownLogic.wordCount(parts.rest))
+        _charCount = State(initialValue: parts.rest.utf16.count)
+        _previewText = State(initialValue: parts.rest)
     }
+
+    private var fontChoice: EditorFontChoice { EditorFontChoice.from(raw: fontChoiceRaw) }
+    private var editorNSFont: NSFont { ReadingPreferences.editorFont(fontChoice, size: fontSize) }
 
     private static let fontSizes: [Double] = [13, 15, 17, 19, 22]
 
@@ -113,16 +141,49 @@ struct EditorView: View {
         .onChange(of: title) { _, _ in persist() }
         .onChange(of: mood) { _, _ in persist() }
         .onChange(of: tags) { _, _ in persist() }
+        .onChange(of: stamp) { _, _ in persist() }
         .onChange(of: fontSize) { _, new in
             DatabaseManager.shared.setSetting("editorFontSize", value: "\(Int(new))")
         }
-        .onDisappear { vm.flushPendingSave() }
+        .onDisappear {
+            vm.flushPendingSave()
+            // Edit session over: take a (throttled) version-history snapshot of the in-memory entry,
+            // which `autoSave` keeps current. Hidden entries' revisions are sealed like their bodies.
+            if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
+        }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { now in
+            if let sprint, !sprintNotified, sprint.isFinished(at: now) {
+                sprintNotified = true
+                vm.showToast("Sprint complete — +\(sprint.wordsWritten(currentWords: wordCount)) words")
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .formatCommand)) { note in
             if let cmd = note.object as? MarkdownCommand { controller.apply(cmd) }
         }
         .onAppear {
             if title.isEmpty { titleFocused = true }
+            loadGoalBaseline()
+            // Entries from before version history existed get a kept baseline so the first edit is undoable.
+            if vm.db.revisionCount(entryId: entry.id) == 0 {
+                vm.db.snapshotRevision(of: entry, isAuto: false)
+            }
         }
+    }
+
+    // MARK: Goal ring
+
+    private var entryCountsTowardToday: Bool { entry.createdAt >= Calendar.current.startOfDay(for: Date()) }
+
+    /// Words written today in OTHER entries (the goal counts entries created today, like the Today view).
+    private func loadGoalBaseline() {
+        let total = vm.db.wordCountSum(since: Calendar.current.startOfDay(for: Date()))
+        otherWordsToday = max(0, total - (entryCountsTowardToday ? entry.wordCount : 0))
+    }
+
+    private var goalRing: GoalRingState {
+        let target = GoalManager.shared.goals.first { $0.type == .dailyWords }?.target ?? 0
+        return WritingSessionMath.goalRing(otherWordsToday: otherWordsToday,
+                                           liveEntryWords: entryCountsTowardToday ? wordCount : 0, target: target)
     }
 
     // MARK: Top bar
@@ -195,8 +256,6 @@ struct EditorView: View {
                 Divider()
                 Button("Larger") { stepFontSize(1) }
                 Button("Smaller") { stepFontSize(-1) }
-                Divider()
-                Toggle("Typewriter Scrolling", isOn: $isTypewriter)
             } label: {
                 Image(systemName: "textformat.size")
                     .font(OmegaTheme.font(.bodyLarge, .medium))
@@ -207,8 +266,41 @@ struct EditorView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Text size & typewriter scrolling")
+            .help("Text size")
             .accessibilityLabel("Text size")
+
+            ActionButton(icon: "text.alignleft", color: theme.accentColor, active: isTypewriter || dimOthers || columnWidth > 0, tooltip: "Focus & typography") {
+                showFocusPopover.toggle()
+            }
+            .accessibilityLabel("Focus and typography")
+            .popover(isPresented: $showFocusPopover, arrowEdge: .bottom) { WritingFocusSettingsView() }
+
+            ActionButton(icon: "mappin.and.ellipse", color: theme.accentColor, active: !stamp.isEmpty, tooltip: "Place & weather") {
+                showStampPopover.toggle()
+            }
+            .accessibilityLabel("Place and weather")
+            .popover(isPresented: $showStampPopover, arrowEdge: .bottom) { EntryStampEditor(stamp: $stamp) }
+
+            ActionButton(icon: "mic", color: theme.accentColor, active: entry.attachments.contains { $0.isAudio }, tooltip: "Record voice memo") {
+                showRecorder.toggle()
+            }
+            .accessibilityLabel("Record voice memo")
+            .popover(isPresented: $showRecorder, arrowEdge: .bottom) { AudioRecorderPopover(vm: vm, entry: entry) }
+
+            ActionButton(icon: "clock.arrow.circlepath", color: theme.accentColor, active: false, tooltip: "Version history") {
+                vm.flushPendingSave()
+                if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
+                showHistory = true
+            }
+            .accessibilityLabel("Version history")
+            .sheet(isPresented: $showHistory) {
+                RevisionHistoryView(vm: vm, entry: vm.entry(id: entry.id) ?? entry) { newTitle, newBody in
+                    title = newTitle
+                    let parts = EntryStampCodec.split(newBody)
+                    body_ = parts.rest
+                    stamp = parts.stamp ?? EntryStamp()
+                }
+            }
 
             ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
                 attachFile()
@@ -298,7 +390,7 @@ struct EditorView: View {
     }
 
     private var tagSuggestions: [String] {
-        MarkdownLogic.tagSuggestions(prefix: tagInput, from: vm.allTags.map(\.tag), excluding: tags)
+        TagPath.suggestions(prefix: tagInput, from: vm.allTags.map(\.tag), excluding: tags, limit: 5)
     }
 
     /// Hidden buttons that carry editor-local shortcuts (font size, task toggle).
@@ -372,7 +464,7 @@ struct EditorView: View {
 
             TextField("Title", text: $title)
                 .textFieldStyle(.plain)
-                .font(.system(size: vm.isZenMode ? 28 : 22, weight: .bold, design: .serif))
+                .font(OmegaTheme.font(.title, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .focused($titleFocused)
                 .accessibilityLabel("Entry title")
@@ -382,9 +474,16 @@ struct EditorView: View {
 
             MarkdownTextEditor(
                 text: $body_,
-                font: .systemFont(ofSize: fontSize),
-                lineSpacing: 7,
+                font: editorNSFont,
+                lineSpacing: CGFloat(WritingFocusLogic.lineSpacing(fontSize: fontSize, lineHeight: lineHeight)),
                 isTypewriterMode: isTypewriter,
+                isFocusMode: dimOthers,
+                columnWidth: columnWidth,
+                onSuggestion: { newValue in
+                    if newValue != suggestion { suggestionIndex = 0 }
+                    suggestion = newValue
+                },
+                onSuggestionKey: { handleSuggestionKey($0) },
                 controller: controller,
                 palette: palette,
                 onCommandReturn: { vm.stopEditing() },
@@ -393,9 +492,12 @@ struct EditorView: View {
                 onPasteImage: { data, ext in pasteImage(data, ext: ext) }
             )
             .overlay(alignment: .topLeading) {
+                if let popover = suggestionPopover { popover }
+            }
+            .overlay(alignment: .topLeading) {
                 if body_.isEmpty {
                     Text("Write something…")
-                        .font(.system(size: fontSize))
+                        .font(Font(editorNSFont))
                         .foregroundColor(theme.secondaryTextColor.opacity(0.6))
                         .padding(.horizontal, 13)
                         .padding(.top, 12)
@@ -442,7 +544,11 @@ struct EditorView: View {
                         .font(OmegaTheme.font(.body))
                         .foregroundColor(theme.secondaryTextColor)
                 } else {
-                    MarkdownBodyView(markdown: previewText, style: renderStyle, textColor: theme.bodyTextColor)
+                    MarkdownBodyView(markdown: previewText, style: renderStyle, textColor: theme.bodyTextColor,
+                                     attachments: entry.attachments, db: vm.db,
+                                     onResizeImage: { line, width in
+                                         if let updated = ImageRefs.resizing(body: body_, lineIndex: line, width: width) { body_ = updated }
+                                     })
                 }
             }
             .padding(.horizontal, 22)
@@ -456,34 +562,91 @@ struct EditorView: View {
     // MARK: Status bar
 
     private var statusBar: some View {
-        HStack(spacing: 12) {
-            Label("\(wordCount) words", systemImage: "text.word.spacing")
-            if selectionWords > 0 {
-                Text("(\(selectionWords) selected)")
+        WritingFooterView(
+            wordCount: wordCount, charCount: charCount, selectionWords: selectionWords,
+            readingTime: readingTime, attachmentCount: entry.attachments.count,
+            sessionStart: sessionStart, sessionStartWords: sessionStartWords,
+            ring: goalRing, sprint: sprint, sprintFinished: sprint?.isFinished(at: Date()) ?? false,
+            isZen: vm.isZenMode, saveState: vm.saveState,
+            onStartSprint: { minutes in
+                sprint = WritingSprint(minutes: minutes, startedAt: Date(), startWords: wordCount)
+                sprintNotified = false
+            },
+            onStopSprint: { sprint = nil })
+    }
+
+    // MARK: Slash / wiki suggestions
+
+    private var suggestionItems: [SuggestionItem] {
+        guard let suggestion else { return [] }
+        switch suggestion {
+        case .slash(let ctx, _):
+            var items = SlashCommands.filter(ctx.query)
+                .filter { $0.kind != .template }
+                .map { SuggestionItem(id: $0.id, icon: $0.icon, title: $0.title, subtitle: $0.subtitle, action: .command($0.kind)) }
+            let q = ctx.query.trimmingCharacters(in: .whitespaces)
+            let templates = vm.templates.filter { !$0.body.isEmpty && (q.isEmpty || OmegaCore.fuzzyScore(q, $0.name) != nil) }
+            items += templates.prefix(q.isEmpty ? 3 : 6).map {
+                SuggestionItem(id: "tpl-" + $0.id, icon: $0.icon, title: $0.name, subtitle: "Insert template", action: .template($0.id))
             }
-            Text("·")
-            Text("\(charCount) chars")
-            Text("·")
-            Text(readingTime)
-            if !entry.attachments.isEmpty {
-                Text("·")
-                Label("\(entry.attachments.count)", systemImage: "paperclip")
-            }
-            Spacer()
-            if vm.isZenMode {
-                Text("⎋ exit zen").foregroundColor(theme.secondaryTextColor.opacity(0.7))
-            } else {
-                Text(vm.saveState == .pending ? "Saving…" : "Saved")
-                    .foregroundColor(theme.secondaryTextColor.opacity(0.7))
-                    .accessibilityLabel(vm.saveState == .pending ? "Saving" : "All changes saved")
-            }
+            return items
+        case .wiki(let ctx, _):
+            let titles = vm.linkCandidateTitles(excluding: entry.id)
+            return MarkdownLogic.wikiTitleSuggestions(query: ctx.query, from: titles, limit: 8)
+                .map { SuggestionItem(id: "wiki-" + $0, icon: "link", title: $0, subtitle: "Link to entry", action: .wiki($0)) }
         }
-        .font(OmegaTheme.font(.meta))
-        .foregroundColor(theme.secondaryTextColor)
-        .labelStyle(.titleAndIcon)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(theme.cardColor.opacity(0.3))
+    }
+
+    private var suggestionPopover: AnyView? {
+        guard let suggestion else { return nil }
+        let items = suggestionItems
+        guard !items.isEmpty else { return nil }
+        let rect = suggestion.caretRect
+        return AnyView(
+            SuggestionPopoverView(items: items, selected: min(suggestionIndex, items.count - 1)) { pick($0) }
+                .offset(x: max(8, rect.minX), y: rect.maxY + 6)
+        )
+    }
+
+    private func handleSuggestionKey(_ key: SuggestionKey) -> Bool {
+        let items = suggestionItems
+        guard !items.isEmpty else { return false }
+        switch key {
+        case .up: suggestionIndex = (suggestionIndex - 1 + items.count) % items.count; return true
+        case .down: suggestionIndex = (suggestionIndex + 1) % items.count; return true
+        case .accept: pick(items[min(suggestionIndex, items.count - 1)]); return true
+        case .dismiss: return false
+        }
+    }
+
+    private func pick(_ item: SuggestionItem) {
+        guard let current = suggestion else { return }
+        suggestion = nil
+        let text = controller.text
+        switch (current, item.action) {
+        case (.slash(let ctx, _), .command(let kind)):
+            let lineStart = (text as NSString).lineRange(for: NSRange(location: ctx.range.location, length: 0)).location
+            let before = (text as NSString).substring(with: NSRange(location: lineStart, length: ctx.range.location - lineStart))
+            let atStart = before.trimmingCharacters(in: .whitespaces).isEmpty
+            let tctx = TemplateContext(date: Date(), prompt: "", moodLabel: mood.label)
+            guard let exp = SlashCommands.expansion(
+                for: kind,
+                dateText: TemplateExpander.value(for: "date", context: tctx) ?? "",
+                timeText: TemplateExpander.value(for: "time", context: tctx) ?? "",
+                moodText: "\(mood.emoji) \(mood.label)", atLineStart: atStart) else { return }
+            let edit = MarkdownLogic.slashEdit(context: ctx, expansion: exp)
+            controller.apply(edit, selecting: exp.selectionLength, at: edit.range.location + exp.caretOffset)
+        case (.slash(let ctx, _), .template(let id)):
+            guard let template = vm.templates.first(where: { $0.id == id }) else { return }
+            let expanded = TemplateExpander.expand(template.body, context: TemplateContext(
+                date: Date(), prompt: PromptGenerator.today(), moodLabel: mood.label))
+            let exp = SlashExpansion(text: expanded, caretOffset: (expanded as NSString).length, selectionLength: 0)
+            controller.apply(MarkdownLogic.slashEdit(context: ctx, expansion: exp))
+            for tag in template.tags where !tags.contains(tag) { tags.append(tag) }
+        case (.wiki(let ctx, _), .wiki(let title)):
+            controller.apply(MarkdownLogic.wikiCompletionEdit(in: text, context: ctx, title: title))
+        default: break
+        }
     }
 
     // MARK: Actions
@@ -491,9 +654,7 @@ struct EditorView: View {
     private func commitTag() {
         // Commas are the text-column separator; a comma inside a tag name would
         // be misparsed as two tags on the next reconcile. Strip them at input.
-        let t = tagInput.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "#", with: "")
-            .replacingOccurrences(of: ",", with: "")
+        let t = TagPath.normalize(tagInput) ?? ""
         if !t.isEmpty && !tags.contains(t) { tags.append(t) }
         tagInput = ""
     }
@@ -501,7 +662,7 @@ struct EditorView: View {
     private func persist() {
         var updated = entry
         updated.title = title
-        updated.body = body_
+        updated.body = EntryStampCodec.join(stamp: stamp, rest: body_)
         updated.mood = mood
         updated.tags = tags
         vm.autoSave(updated)
@@ -515,8 +676,19 @@ struct EditorView: View {
         }
         let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "-")
         let mime = ext == "png" ? "image/png" : "image/tiff"
-        vm.addAttachment(to: entry, data: data, filename: "Pasted image \(stamp).\(ext)", mimeType: mime)
+        let name = "Pasted image \(stamp).\(ext)"
+        vm.addAttachment(to: entry, data: data, filename: name, mimeType: mime)
+        insertImageReference(filename: name)
         return true
+    }
+
+    /// Drops a `![](omega-attachment://name)` line at the caret so the image renders inline in the
+    /// preview and reader (the attachment itself stays encrypted on disk).
+    private func insertImageReference(filename: String) {
+        let text = controller.text
+        let loc = controller.caretLocation ?? (text as NSString).length
+        let atLineStart = loc == 0 || (text as NSString).character(at: min(loc, (text as NSString).length) - 1) == 10
+        controller.insert((atLineStart ? "" : "\n") + ImageRefs.markdown(alt: "", filename: filename) + "\n")
     }
 
     /// Largest single attachment accepted (files are encrypted and stored in-app).
@@ -548,6 +720,7 @@ struct EditorView: View {
                 case .success(let data):
                     let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
                     vm.addAttachment(to: target, data: data, filename: url.lastPathComponent, mimeType: type)
+                    if type.hasPrefix("image/") { insertImageReference(filename: url.lastPathComponent) }
                 case .failure(.tooLarge(let name)):
                     vm.showToast("\(name) is too large to attach (limit \(limit / 1_048_576) MB)", isError: true)
                 case .failure(.unreadable(let name)):

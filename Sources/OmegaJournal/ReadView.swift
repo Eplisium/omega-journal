@@ -12,6 +12,10 @@ struct ReadView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
     @State private var showPermanentDeleteConfirmation = false
+    @State private var showHistory = false
+    @State private var showGraph = false
+    @State private var showOutline = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
 
     var body: some View {
@@ -19,9 +23,11 @@ struct ReadView: View {
             toolbar
             Divider().opacity(0.25)
 
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    if showOutline, !isContentLocked { outlineList(proxy) }
 
                     if entry.isHidden && !biometricAuth.isAuthenticated {
                         hiddenContentOverlay
@@ -31,7 +37,10 @@ struct ReadView: View {
                             .foregroundColor(theme.secondaryTextColor)
                             .italic()
                     } else {
-                        MarkdownBodyView(markdown: entry.body, style: renderStyle, textColor: theme.bodyTextColor)
+                        MarkdownBodyView(markdown: bodyParts.rest, style: renderStyle, textColor: theme.bodyTextColor, lineSpacing: 6,
+                                         attachments: entry.attachments, db: vm.db,
+                                         onResizeImage: isTrash ? nil : { line, width in resizeImage(atLine: line, width: width) })
+                            .id("reader-body")
                             .environment(\.openURL, OpenURLAction { url in
                                 if let title = MarkdownLogic.wikiLinkTitle(from: url) {
                                     vm.openLinkedEntry(titled: title)
@@ -46,15 +55,27 @@ struct ReadView: View {
                     if !entry.attachments.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
                         attachmentsSection
                     }
+
+                    if !isTrash && !isContentLocked {
+                        BacklinksPanel(vm: vm, entry: entry) { showGraph = true }
+                    }
                 }
                 .padding(.horizontal, 30)
                 .padding(.vertical, 26)
-                .frame(maxWidth: 760, alignment: .leading)
+                // Readable measure: ~70 characters per line at the reading size.
+                .frame(maxWidth: 720, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .scrollContentBackground(.hidden)
+            }
+        }
+        .sheet(isPresented: $showGraph) {
+            GraphView(vm: vm) { vm.select($0) }
         }
         .background(theme.backgroundColor)
+        .sheet(isPresented: $showHistory) {
+            RevisionHistoryView(vm: vm, entry: entry)
+        }
         .confirmationDialog(
             "Delete this entry forever?",
             isPresented: $showPermanentDeleteConfirmation,
@@ -69,7 +90,54 @@ struct ReadView: View {
         }
     }
 
+    // MARK: Outline (table of contents)
+
+    private var isContentLocked: Bool { entry.isHidden && !biometricAuth.isAuthenticated }
+
+    private var outline: [OutlineHeading] { MarkdownOutline.headings(in: entry.body) }
+
+    private var showsOutlineToggle: Bool {
+        !isContentLocked && MarkdownOutline.shouldShow(headings: outline, wordCount: entry.wordCount)
+    }
+
+    /// Jumps proportionally to where the heading sits in the text. The renderer emits one text run per
+    /// block, so an exact per-heading anchor isn't available; this lands within a screen of the heading.
+    private func outlineList(_ proxy: ScrollViewProxy) -> some View {
+        let lines = max(1, entry.body.split(separator: "\n", omittingEmptySubsequences: false).count)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("CONTENTS").font(OmegaTheme.font(.meta, .semibold)).tracking(0.7).foregroundColor(theme.secondaryTextColor)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(outline) { h in
+                Button {
+                    let ratio = min(1, max(0, Double(h.line) / Double(lines)))
+                    withAnimation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion)) {
+                        proxy.scrollTo("reader-body", anchor: UnitPoint(x: 0, y: ratio))
+                    }
+                } label: {
+                    Text(h.title)
+                        .font(OmegaTheme.font(.caption, h.level == 1 ? .semibold : .regular))
+                        .foregroundColor(theme.accentColor)
+                        .padding(.leading, CGFloat(max(0, h.level - 1)) * 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Jump to \(h.title)")
+            }
+        }
+        .padding(OmegaTheme.Spacing.m)
+        .background(RoundedRectangle(cornerRadius: OmegaTheme.Radius.control, style: .continuous).fill(theme.cardColor.opacity(0.4)))
+    }
+
     // MARK: Body rendering & tasks
+
+    /// Body without the optional trailing place/weather stamp comment.
+    private var bodyParts: (stamp: EntryStamp?, rest: String) { EntryStampCodec.split(entry.body) }
+
+    private func resizeImage(atLine line: Int, width: Int?) {
+        guard !isTrash, let newBody = ImageRefs.resizing(body: bodyParts.rest, lineIndex: line, width: width) else { return }
+        vm.updateBody(EntryStampCodec.join(stamp: bodyParts.stamp, rest: newBody), for: entry)
+    }
 
     private var renderStyle: MarkdownRenderStyle {
         MarkdownRenderStyle(
@@ -81,8 +149,8 @@ struct ReadView: View {
 
     /// Toggles a task checkbox via the VM's immediate-mutation path (flushes pending autosave first).
     private func toggleTask(atLine line: Int) {
-        guard !isTrash, let newBody = MarkdownLogic.togglingTask(inBody: entry.body, lineIndex: line) else { return }
-        vm.updateBody(newBody, for: entry)
+        guard !isTrash, let newBody = MarkdownLogic.togglingTask(inBody: bodyParts.rest, lineIndex: line) else { return }
+        vm.updateBody(EntryStampCodec.join(stamp: bodyParts.stamp, rest: newBody), for: entry)
     }
 
     /// Black or white, whichever contrasts better with the accent color.
@@ -132,6 +200,13 @@ struct ReadView: View {
                     vm.toggleFavorite(entry)
                 }
                     .accessibilityLabel(entry.isFavorite ? "Unfavorite" : "Favorite")
+                ActionButton(icon: "clock.arrow.circlepath", color: theme.accentColor, active: false, tooltip: "Version history") {
+                    Task {
+                        guard await vm.revealIfNeeded(entry) else { return }
+                        showHistory = true
+                    }
+                }
+                    .accessibilityLabel("Version history")
                 ActionButton(icon: "doc.on.doc", color: theme.accentColor, active: false, tooltip: "Duplicate") {
                     vm.duplicate(entry)
                 }
@@ -162,6 +237,12 @@ struct ReadView: View {
                 .fixedSize()
                 .accessibilityLabel("Mood: \(entry.mood.label). Change mood")
 
+                if showsOutlineToggle {
+                    ActionButton(icon: "list.bullet.indent", color: theme.accentColor, active: showOutline, tooltip: "Table of contents") {
+                        showOutline.toggle()
+                    }
+                    .accessibilityLabel("Table of contents")
+                }
                 ActionButton(icon: "square.and.arrow.up", color: theme.accentColor, active: false, tooltip: "Export this entry") {
                     Task {
                         guard await vm.revealIfNeeded(entry) else { return }
@@ -207,6 +288,9 @@ struct ReadView: View {
                 metaChip(entry.createdAt.formatted(date: .long, time: .shortened))
                 metaChip("\(entry.wordCount) words")
                 metaChip(entry.readingTime)
+                if let stamp = bodyParts.stamp, !stamp.isEmpty, !(entry.isHidden && !biometricAuth.isAuthenticated) {
+                    metaChip("📍 " + stamp.summary)
+                }
             }
 
             if !entry.tags.isEmpty && !(entry.isHidden && !biometricAuth.isAuthenticated) {
@@ -316,6 +400,21 @@ struct ReadView: View {
                 .foregroundColor(theme.secondaryTextColor)
 
             ForEach(entry.attachments) { attachment in
+                if attachment.isAudio {
+                    HStack(spacing: 9) {
+                        AudioMemoRow(attachment: attachment, db: vm.db)
+                        Button { vm.deleteAttachment(attachment) } label: {
+                            Image(systemName: "xmark.circle")
+                                .font(OmegaTheme.font(.caption))
+                                .foregroundColor(theme.secondaryTextColor)
+                        }
+                        .buttonStyle(.plain)
+                        .omegaTooltip("Remove")
+                        .accessibilityLabel("Remove attachment \(attachment.filename)")
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor.opacity(0.4)))
+                } else {
                 HStack(spacing: 9) {
                     if attachment.isImage, let image = attachmentThumbnail(attachment) {
                         Image(nsImage: image)
@@ -371,6 +470,7 @@ struct ReadView: View {
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor.opacity(0.4)))
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UserNotifications
+import OmegaJournalCore
 
 // MARK: - Foreground presentation
 
@@ -13,6 +14,27 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     ) {
         completionHandler([.banner, .sound])
     }
+
+    /// Tapping a review reminder asks the UI to open the review (see `.reviewRequested`).
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let id = response.notification.request.identifier
+        if id.hasPrefix(NotificationManager.reviewWeeklyPrefix) || id.hasPrefix(NotificationManager.reviewMonthlyPrefix) {
+            let period: ReviewPeriod = id.hasPrefix(NotificationManager.reviewWeeklyPrefix) ? .week : .month
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .reviewRequested, object: nil, userInfo: ["period": period.rawValue])
+            }
+        }
+        completionHandler()
+    }
+}
+
+extension Notification.Name {
+    /// Posted when a weekly/monthly review reminder is tapped. `userInfo["period"]` is a `ReviewPeriod.rawValue`.
+    static let reviewRequested = Notification.Name("OmegaJournal.reviewRequested")
 }
 
 // MARK: - Notification Manager
@@ -42,6 +64,7 @@ final class NotificationManager: ObservableObject {
         reminderEnabled = db.getSetting("reminderEnabled", defaultValue: "false") == "true"
         reminderHour = Int(db.getSetting("reminderHour", defaultValue: "20")) ?? 20
         reminderMinute = Int(db.getSetting("reminderMinute", defaultValue: "0")) ?? 0
+        loadReviewSchedule()
         guard Self.centerAvailable else { return }
         UNUserNotificationCenter.current().delegate = presenter
         checkAuthorization()
@@ -93,6 +116,7 @@ final class NotificationManager: ObservableObject {
     /// Re-tops-up the rolling window (the one-shot requests expire day by day).
     func refreshScheduleIfNeeded() {
         if reminderEnabled && isAuthorized { scheduleReminder() }
+        if isAuthorized && (reviewSchedule.weeklyEnabled || reviewSchedule.monthlyEnabled) { scheduleReviews() }
     }
 
     /// Pure: the next `count` occurrences of hour:minute strictly after `now`,
@@ -152,6 +176,73 @@ final class NotificationManager: ObservableObject {
         guard Self.centerAvailable else { return }
         let ids = [Self.legacyIdentifier]
             + (0..<Self.upcomingReminderCount).map { "\(Self.requestIdentifierPrefix)\($0)" }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
+    // MARK: - Weekly / monthly review reminders
+
+    nonisolated static let reviewWeeklyPrefix = "reviewWeekly-"
+    nonisolated static let reviewMonthlyPrefix = "reviewMonthly-"
+    nonisolated static let upcomingReviewCount = 6
+
+    @Published var reviewSchedule = ReviewSchedule()
+
+    func loadReviewSchedule() {
+        reviewSchedule = ReviewSchedule(
+            weeklyEnabled: db.getSetting("reviewWeeklyEnabled", defaultValue: "false") == "true",
+            weeklyWeekday: Int(db.getSetting("reviewWeeklyWeekday", defaultValue: "1")) ?? 1,
+            monthlyEnabled: db.getSetting("reviewMonthlyEnabled", defaultValue: "false") == "true",
+            monthlyDay: Int(db.getSetting("reviewMonthlyDay", defaultValue: "1")) ?? 1,
+            hour: Int(db.getSetting("reviewHour", defaultValue: "18")) ?? 18,
+            minute: Int(db.getSetting("reviewMinute", defaultValue: "0")) ?? 0)
+    }
+
+    func setReviewSchedule(_ schedule: ReviewSchedule) {
+        reviewSchedule = schedule
+        db.setSetting("reviewWeeklyEnabled", value: schedule.weeklyEnabled ? "true" : "false")
+        db.setSetting("reviewWeeklyWeekday", value: "\(schedule.weeklyWeekday)")
+        db.setSetting("reviewMonthlyEnabled", value: schedule.monthlyEnabled ? "true" : "false")
+        db.setSetting("reviewMonthlyDay", value: "\(schedule.monthlyDay)")
+        db.setSetting("reviewHour", value: "\(schedule.hour)")
+        db.setSetting("reviewMinute", value: "\(schedule.minute)")
+        scheduleReviews()
+    }
+
+    /// Pure: one-shot requests for the upcoming reviews. Content is generic — never entry text.
+    nonisolated static func buildReviewRequests(schedule: ReviewSchedule, after now: Date,
+                                                calendar: Calendar = .current) -> [UNNotificationRequest] {
+        var out: [UNNotificationRequest] = []
+        for period in ReviewPeriod.allCases {
+            let prefix = period == .week ? reviewWeeklyPrefix : reviewMonthlyPrefix
+            let dates = schedule.upcoming(period, after: now, count: upcomingReviewCount, calendar: calendar)
+            for (i, date) in dates.enumerated() {
+                let content = UNMutableNotificationContent()
+                content.title = period == .week ? "Your weekly review is ready" : "Your monthly review is ready"
+                content.body = "Take a few minutes to look back. One click saves it as an entry."
+                content.sound = .default
+                let comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                out.append(UNNotificationRequest(identifier: "\(prefix)\(i)", content: content,
+                                                 trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)))
+            }
+        }
+        return out
+    }
+
+    func scheduleReviews() {
+        guard Self.centerAvailable else { return }
+        cancelReviews()
+        guard isAuthorized else { return }
+        let center = UNUserNotificationCenter.current()
+        for request in Self.buildReviewRequests(schedule: reviewSchedule, after: Date()) {
+            center.add(request) { error in
+                if let error = error { print("Failed to schedule review: \(error)") }
+            }
+        }
+    }
+
+    func cancelReviews() {
+        guard Self.centerAvailable else { return }
+        let ids = (0..<Self.upcomingReviewCount).flatMap { ["\(Self.reviewWeeklyPrefix)\($0)", "\(Self.reviewMonthlyPrefix)\($0)"] }
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
     }
 

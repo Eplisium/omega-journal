@@ -129,7 +129,46 @@ final class MarkdownEditorController: ObservableObject {
         guard let tv = textView else { return "" }
         return (tv.string as NSString).substring(with: tv.selectedRange())
     }
+
+    /// Applies a pure completion edit (slash command / wiki link) through the undo-aware path.
+    func apply(_ edit: CompletionEdit) {
+        guard let tv = textView else { return }
+        let len = (tv.string as NSString).length
+        guard edit.range.location >= 0, NSMaxRange(edit.range) <= len else { return }
+        if tv.shouldChangeText(in: edit.range, replacementString: edit.replacement) {
+            tv.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+            tv.setSelectedRange(NSRange(location: min(edit.caret, (tv.string as NSString).length), length: 0))
+            tv.didChangeText()
+        }
+        tv.window?.makeFirstResponder(tv)
+    }
+
+    /// Replaces the selection range with `edit` and selects `selectionLength` characters
+    /// starting `caretOffset` into the inserted text (used by table placeholders).
+    func apply(_ edit: CompletionEdit, selecting length: Int, at location: Int) {
+        apply(edit)
+        guard let tv = textView, length > 0 else { return }
+        tv.setSelectedRange(NSRange(location: location, length: length))
+    }
+
+    /// Current caret (UTF-16) or nil without a text view.
+    var caretLocation: Int? { textView?.selectedRange().location }
+    /// True when the caret's line is empty before the slash (used to decide on a leading newline).
+    var text: String { textView?.string ?? "" }
 }
+
+/// Inline suggestion popover state computed by the editor (positions are in the editor view's
+/// top-left-origin coordinate space).
+enum EditorSuggestion: Equatable {
+    case slash(SlashContext, CGRect)
+    case wiki(MarkdownWikiCompletion, CGRect)
+
+    var caretRect: CGRect {
+        switch self { case .slash(_, let r), .wiki(_, let r): r }
+    }
+}
+
+enum SuggestionKey { case up, down, accept, dismiss }
 
 /// Theme-driven colors for source highlighting.
 struct MarkdownEditorPalette: Hashable {
@@ -150,7 +189,14 @@ struct MarkdownTextEditor: NSViewRepresentable {
     var font: NSFont
     var lineSpacing: CGFloat = 6
     var isTypewriterMode: Bool = false
+    /// Dims every paragraph except the one holding the caret.
     var isFocusMode: Bool = false
+    /// Max text column width in points (0 = fill the pane); the column is centred.
+    var columnWidth: Double = 0
+    /// Slash / `[[` popover state changes (nil = hide).
+    var onSuggestion: ((EditorSuggestion?) -> Void)?
+    /// Navigation keys while a popover is showing. Return true when consumed.
+    var onSuggestionKey: ((SuggestionKey) -> Bool)?
     var controller: MarkdownEditorController
     var palette: MarkdownEditorPalette = .system
     var onCommandReturn: (() -> Void)?
@@ -191,6 +237,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isIncrementalSearchingEnabled = true
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 8, height: 12)
+        textView.columnWidth = columnWidth
+        textView.padsForTypewriter = isTypewriterMode
         textView.string = text
 
         scrollView.drawsBackground = false
@@ -227,6 +275,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
         if context.coordinator.styleSignature != context.coordinator.signature(for: self) { needsFull = true }
         context.coordinator.applyHighlighting(to: textView, full: needsFull)
 
+        if let omega = textView as? OmegaTextView {
+            omega.columnWidth = columnWidth
+            omega.padsForTypewriter = isTypewriterMode
+        }
+        context.coordinator.applyFocusDimming(to: textView)
         if isTypewriterMode {
             context.coordinator.centerCaret(in: textView, scrollView: scrollView)
         }
@@ -322,16 +375,115 @@ struct MarkdownTextEditor: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             if !suppressChangeCallback, parent.text != tv.string { parent.text = tv.string }
             applyHighlighting(to: tv)
+            applyFocusDimming(to: tv)
+            updateSuggestion(in: tv, fromTyping: true)
+            if parent.isTypewriterMode, let sv = tv.enclosingScrollView { centerCaret(in: tv, scrollView: sv) }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView, let cb = parent.onSelectionWords else { return }
+            guard let tv = notification.object as? NSTextView else { return }
+            applyFocusDimming(to: tv)
+            updateSuggestion(in: tv, fromTyping: false)
+            if parent.isTypewriterMode, let sv = tv.enclosingScrollView { centerCaret(in: tv, scrollView: sv) }
+            guard let cb = parent.onSelectionWords else { return }
             let r = tv.selectedRange()
             let words = r.length == 0 ? 0 : MarkdownLogic.wordCount((tv.string as NSString).substring(with: r))
             DispatchQueue.main.async { cb(words) }
         }
 
+        // MARK: Suggestions (slash commands, [[ wiki links)
+
+        private var suggestionActive = false
+        private var lastSuggestion: EditorSuggestion?
+        /// Start offset of a token the user dismissed with Esc, so it doesn't pop straight back up.
+        private var dismissedStart: Int?
+
+        private func publish(_ s: EditorSuggestion?) {
+            guard s != lastSuggestion else { return }
+            lastSuggestion = s
+            suggestionActive = s != nil
+            let cb = parent.onSuggestion
+            DispatchQueue.main.async { cb?(s) }
+        }
+
+        /// Typing may open a popover; mere caret movement may only update/close one.
+        func updateSuggestion(in tv: NSTextView, fromTyping: Bool) {
+            guard parent.onSuggestion != nil else { return }
+            let sel = tv.selectedRange()
+            guard !tv.hasMarkedText(), sel.length == 0 else { publish(nil); return }
+            if !fromTyping && !suggestionActive { return }
+            let text = tv.string
+            let caret = sel.location
+            let ctxStart: Int
+            var found: EditorSuggestion?
+            if let wiki = MarkdownLogic.wikiCompletionContext(in: text, caret: caret) {
+                ctxStart = wiki.range.location
+                found = .wiki(wiki, caretRect(in: tv, at: caret))
+            } else if let slash = SlashCommands.context(in: text, caret: caret) {
+                ctxStart = slash.range.location
+                found = .slash(slash, caretRect(in: tv, at: caret))
+            } else { dismissedStart = nil; publish(nil); return }
+            if dismissedStart == ctxStart { publish(nil); return }
+            dismissedStart = nil
+            publish(found)
+        }
+
+        /// Caret rectangle in the scroll view's top-left-origin space.
+        private func caretRect(in tv: NSTextView, at caret: Int) -> CGRect {
+            guard let lm = tv.layoutManager, let tc = tv.textContainer, let sv = tv.enclosingScrollView else { return .zero }
+            let length = (tv.string as NSString).length
+            let ch = min(max(caret - 1, 0), max(length - 1, 0))
+            var rect = CGRect.zero
+            if length > 0 {
+                let glyphs = lm.glyphRange(forCharacterRange: NSRange(location: ch, length: 1), actualCharacterRange: nil)
+                rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
+                rect.origin.x = caret == 0 ? rect.minX : rect.maxX
+            }
+            rect.origin.x += tv.textContainerOrigin.x
+            rect.origin.y += tv.textContainerOrigin.y
+            var inSV = tv.convert(rect, to: sv)
+            if !sv.isFlipped { inSV.origin.y = sv.bounds.height - inSV.maxY }
+            return inSV
+        }
+
+        func dismissCurrentSuggestion() {
+            if let s = lastSuggestion {
+                switch s { case .slash(let c, _): dismissedStart = c.range.location
+                           case .wiki(let c, _): dismissedStart = c.range.location }
+            }
+            publish(nil)
+        }
+
+        // MARK: Focus dimming (non-destructive: temporary attributes only)
+
+        func applyFocusDimming(to tv: NSTextView) {
+            guard let lm = tv.layoutManager else { return }
+            let ns = tv.string as NSString
+            let full = NSRange(location: 0, length: ns.length)
+            lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
+            guard parent.isFocusMode, ns.length > 0 else { return }
+            let active = WritingFocusLogic.paragraphRange(in: tv.string, caret: tv.selectedRange().location)
+            let dim = parent.palette.text.withAlphaComponent(0.3)
+            for r in WritingFocusLogic.dimRanges(textLength: ns.length, active: active) where r.length > 0 {
+                lm.addTemporaryAttribute(.foregroundColor, value: dim, forCharacterRange: r)
+            }
+        }
+
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            if suggestionActive, let handler = parent.onSuggestionKey, !NSEvent.modifierFlags.contains(.command) {
+                let key: SuggestionKey?
+                switch selector {
+                case #selector(NSResponder.moveUp(_:)): key = .up
+                case #selector(NSResponder.moveDown(_:)): key = .down
+                case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)): key = .accept
+                case #selector(NSResponder.cancelOperation(_:)): key = .dismiss
+                default: key = nil
+                }
+                if let key {
+                    if key == .dismiss { dismissCurrentSuggestion(); return true }
+                    if handler(key) { return true }
+                }
+            }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 if NSEvent.modifierFlags.contains(.command) {
@@ -430,9 +582,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
             let caret = textView.selectedRange()
             let glyphRange = layoutManager.glyphRange(forCharacterRange: caret, actualCharacterRange: nil)
             let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: container)
-            let target = rect.midY - scrollView.contentView.bounds.height / 2
-            let clamped = max(0, min(target, max(0, textView.bounds.height - scrollView.contentView.bounds.height)))
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: clamped))
+            let clamped = WritingFocusLogic.typewriterOffset(
+                caretMidY: Double(rect.midY + textView.textContainerOrigin.y),
+                viewportHeight: Double(scrollView.contentView.bounds.height),
+                documentHeight: Double(textView.bounds.height))
+            guard abs(scrollView.contentView.bounds.origin.y - CGFloat(clamped)) > 0.5 else { return }
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: CGFloat(clamped)))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
@@ -655,6 +810,26 @@ extension NSTextView {
 /// NSTextView that hands pasted images to the host (as attachments) instead of dropping them.
 final class OmegaTextView: NSTextView {
     var onPasteImage: ((Data, String) -> Bool)?
+
+    /// Centred column width (0 = fill). The inset grows with the view so the text column stays centred.
+    var columnWidth: Double = 0 { didSet { if oldValue != columnWidth { refreshInsets() } } }
+    /// Typewriter mode pads the document so the first/last lines can reach the vertical centre.
+    var padsForTypewriter = false { didSet { if oldValue != padsForTypewriter { refreshInsets() } } }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        refreshInsets()
+    }
+
+    private func refreshInsets() {
+        let col = WritingFocusLogic.clampedColumnWidth(columnWidth)
+        let width: CGFloat = col > 0 ? max(8, (bounds.width - CGFloat(col)) / 2) : 8
+        let viewport = enclosingScrollView?.contentView.bounds.height ?? 0
+        let height: CGFloat = padsForTypewriter && viewport > 0 ? max(12, viewport / 2) : 12
+        if abs(textContainerInset.width - width) > 0.5 || abs(textContainerInset.height - height) > 0.5 {
+            textContainerInset = NSSize(width: width, height: height)
+        }
+    }
 
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general

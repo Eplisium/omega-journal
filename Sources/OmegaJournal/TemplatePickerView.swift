@@ -1,16 +1,16 @@
 import SwiftUI
+import OmegaJournalCore
 
-// MARK: - Template Picker
+// MARK: - Template library (pick, create, edit, delete, reorder)
 
 struct TemplatePickerView: View {
     @ObservedObject var vm: JournalViewModel
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var theme = ThemeManager.shared
 
-    @State private var showingEditor = false
-    @State private var draftName = ""
-    @State private var draftBody = ""
-    @State private var draftTags = ""
+    @State private var editing: EntryTemplate?
+    @State private var isNew = false
+    @State private var pendingDelete: EntryTemplate?
 
     private let columns = [GridItem(.adaptive(minimum: 170), spacing: 12)]
 
@@ -21,7 +21,7 @@ struct TemplatePickerView: View {
                     Text("Start from a Template")
                         .font(OmegaTheme.font(.bodyLarge, .semibold))
                         .foregroundColor(theme.titleTextColor)
-                    Text("Reusable structures for recurring entries")
+                    Text("Variables like {{date}} and {{prompt}} fill in when you start an entry")
                         .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
@@ -32,6 +32,7 @@ struct TemplatePickerView: View {
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Close")
             }
             .padding(16)
 
@@ -48,9 +49,32 @@ struct TemplatePickerView: View {
             }
             .scrollContentBackground(.hidden)
         }
-        .frame(width: 620, height: 460)
+        .frame(width: 640, height: 480)
         .background(theme.backgroundColor)
-        .sheet(isPresented: $showingEditor) { templateEditor }
+        .sheet(item: $editing) { template in
+            TemplateEditorView(template: template, isNew: isNew, sortOrder: vm.templates.count) { saved in
+                vm.db.saveTemplate(saved)
+                vm.loadTemplates()
+            }
+        }
+        .confirmationDialog("Delete this template?", isPresented: Binding(
+            get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
+            Button("Delete “\(pendingDelete?.name ?? "")”", role: .destructive) {
+                if let t = pendingDelete { vm.db.deleteTemplate(id: t.id); vm.loadTemplates() }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("Entries already created from it are not affected.")
+        }
+    }
+
+    private func move(_ template: EntryTemplate, by delta: Int) {
+        var ids = vm.templates.map(\.id)
+        guard let i = ids.firstIndex(of: template.id), ids.indices.contains(i + delta) else { return }
+        ids.swapAt(i, i + delta)
+        vm.db.reorderTemplates(ids: ids)
+        vm.loadTemplates()
     }
 
     private func templateCard(_ template: EntryTemplate) -> some View {
@@ -101,18 +125,27 @@ struct TemplatePickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Template \(template.name)")
         .contextMenu {
-            Button(role: .destructive) {
-                vm.db.deleteTemplate(id: template.id)
-                vm.loadTemplates()
-            } label: { Label("Delete Template", systemImage: "trash") }
+            Button { isNew = false; editing = template } label: { Label("Edit Template…", systemImage: "pencil") }
+            Button {
+                var copy = template
+                copy = EntryTemplate(name: template.name + " copy", body: template.body, tags: template.tags,
+                                     icon: template.icon, sortOrder: vm.templates.count)
+                vm.db.saveTemplate(copy); vm.loadTemplates()
+            } label: { Label("Duplicate", systemImage: "doc.on.doc") }
+            Divider()
+            Button { move(template, by: -1) } label: { Label("Move Earlier", systemImage: "arrow.left") }
+            Button { move(template, by: 1) } label: { Label("Move Later", systemImage: "arrow.right") }
+            Divider()
+            Button(role: .destructive) { pendingDelete = template } label: { Label("Delete Template", systemImage: "trash") }
         }
     }
 
     private var newTemplateCard: some View {
         Button {
-            draftName = ""; draftBody = ""; draftTags = ""
-            showingEditor = true
+            isNew = true
+            editing = EntryTemplate(name: "", body: "", tags: [], icon: "doc.text", sortOrder: vm.templates.count)
         } label: {
             VStack(spacing: 7) {
                 Image(systemName: "plus.circle")
@@ -132,53 +165,112 @@ struct TemplatePickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("New template")
+    }
+}
+
+// MARK: - Editor sheet
+
+struct TemplateEditorView: View {
+    let template: EntryTemplate
+    let isNew: Bool
+    let sortOrder: Int
+    var onSave: (EntryTemplate) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var theme = ThemeManager.shared
+    @State private var name: String
+    @State private var bodyText: String
+    @State private var tagsText: String
+    @State private var icon: String
+
+    private static let icons = ["doc.text", "sun.max", "heart", "calendar.badge.clock", "moon.stars",
+                                "arrow.triangle.branch", "star", "book", "lightbulb", "checklist",
+                                "figure.walk", "fork.knife", "airplane", "briefcase", "leaf"]
+
+    init(template: EntryTemplate, isNew: Bool, sortOrder: Int, onSave: @escaping (EntryTemplate) -> Void) {
+        self.template = template; self.isNew = isNew; self.sortOrder = sortOrder; self.onSave = onSave
+        _name = State(initialValue: template.name)
+        _bodyText = State(initialValue: template.body)
+        _tagsText = State(initialValue: template.tags.joined(separator: ", "))
+        _icon = State(initialValue: template.icon)
     }
 
-    private var templateEditor: some View {
+    private var tags: [String] { TemplateExpander.parseTagField(tagsText) }
+
+    private var preview: String {
+        TemplateExpander.expand(bodyText, context: TemplateContext(date: Date(), prompt: PromptGenerator.today(), moodLabel: Mood.neutral.label))
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New Template")
+            Text(isNew ? "New Template" : "Edit Template")
                 .font(OmegaTheme.font(.bodyLarge, .semibold))
                 .foregroundColor(theme.titleTextColor)
 
-            TextField("Name", text: $draftName)
-                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Name (also the entry title — variables allowed)", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Template name")
+                Menu {
+                    ForEach(Self.icons, id: \.self) { i in Button { icon = i } label: { Label(i, systemImage: i) } }
+                } label: { Image(systemName: icon) }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .accessibilityLabel("Template icon")
+            }
 
-            TextField("Tags (comma separated)", text: $draftTags)
+            TextField("Default tags (comma separated)", text: $tagsText)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Default tags")
 
-            Text("Body")
-                .font(OmegaTheme.font(.meta))
-                .foregroundColor(theme.secondaryTextColor)
-            TextEditor(text: $draftBody)
+            HStack {
+                Text("Body")
+                    .font(OmegaTheme.font(.meta))
+                    .foregroundColor(theme.secondaryTextColor)
+                Spacer()
+                ForEach(TemplateExpander.variableNames, id: \.self) { v in
+                    Button("{{\(v)}}") { bodyText += (bodyText.isEmpty || bodyText.hasSuffix("\n") || bodyText.hasSuffix(" ") ? "" : " ") + "{{\(v)}}" }
+                        .buttonStyle(.plain)
+                        .font(OmegaTheme.font(.meta, design: .monospaced))
+                        .foregroundColor(theme.accentColor)
+                        .accessibilityLabel("Insert \(v) variable")
+                }
+            }
+            TextEditor(text: $bodyText)
                 .font(OmegaTheme.font(.caption, design: .monospaced))
-                .frame(height: 180)
+                .frame(height: 150)
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .background(RoundedRectangle(cornerRadius: 6).fill(theme.cardColor.opacity(0.5)))
+                .accessibilityLabel("Template body")
+
+            if !TemplateExpander.variables(in: bodyText + name).isEmpty {
+                Text("Preview today")
+                    .font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor)
+                ScrollView {
+                    Text(preview).font(OmegaTheme.font(.meta)).foregroundColor(theme.bodyTextColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 60)
+                .padding(6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(theme.cardColor.opacity(0.3)))
+            }
 
             HStack {
                 Spacer()
-                Button("Cancel") { showingEditor = false }
+                Button("Cancel") { dismiss() }
                 Button("Save") {
-                    let tags = draftTags.split(separator: ",")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                        .filter { !$0.isEmpty }
-                    let t = EntryTemplate(
-                        name: draftName.isEmpty ? "Untitled Template" : draftName,
-                        body: draftBody,
-                        tags: tags,
-                        sortOrder: vm.templates.count
-                    )
-                    vm.db.saveTemplate(t)
-                    vm.loadTemplates()
-                    showingEditor = false
+                    onSave(EntryTemplate(id: template.id, name: name.trimmingCharacters(in: .whitespaces),
+                                         body: bodyText, tags: tags, icon: icon, sortOrder: template.sortOrder))
+                    dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .tint(theme.accentColor)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .padding(18)
-        .frame(width: 460)
+        .frame(width: 500)
         .background(theme.backgroundColor)
     }
 }

@@ -81,6 +81,7 @@ extension DatabaseManager {
             return nil
         }
         cleanupOldBackups(in: backupDir, prefix: Self.dailyBackupPrefix, keep: Self.dailyBackupsToKeep)
+        mirrorBackupToChosenFolder(backupURL)
         return backupURL
     }
 

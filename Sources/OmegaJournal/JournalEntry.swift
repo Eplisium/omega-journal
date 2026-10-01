@@ -43,6 +43,8 @@ struct JournalEntry: Identifiable, Hashable {
     /// Whether the entry is hidden (requires biometric/password to view).
     var isHidden: Bool
     var attachments: [Attachment]
+    /// Notebook the entry belongs to (V11). Defaults to the migrated default journal.
+    var journalId: String = JournalDefaults.defaultJournalId
 
     static func new() -> JournalEntry {
         JournalEntry(id: UUID().uuidString, title: "", body: "", mood: .neutral,
@@ -66,7 +68,7 @@ struct JournalEntry: Identifiable, Hashable {
     var displayTitle: String { title.isEmpty ? "Untitled" : title }
 
     var preview: String {
-        let stripped = body
+        let stripped = EntryStampCodec.split(body).rest
             .replacingOccurrences(of: "```", with: "")
             .replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)

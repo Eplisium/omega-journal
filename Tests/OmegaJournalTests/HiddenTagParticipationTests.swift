@@ -5,6 +5,7 @@ import Testing
 /// Verifies how hidden entries participate in the sidebar tag counts — in
 /// particular that unhiding an entry restores its tags to the totals.
 @Suite("Hidden entry tag participation", .serialized)
+@MainActor
 struct HiddenTagParticipationTests {
     private static func makeIsolatedDatabase() throws {
         let root = FileManager.default.temporaryDirectory

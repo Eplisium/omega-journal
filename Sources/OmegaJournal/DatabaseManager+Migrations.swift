@@ -48,7 +48,9 @@ extension DatabaseManager {
         let migrations: [(version: Int, run: () -> Bool)] = [
             (1, migrateToV1), (2, migrateToV2), (3, migrateToV3), (4, migrateToV4),
             (5, migrateToV5), (6, migrateToV6), (7, migrateToV7), (8, migrateToV8),
-            (9, migrateToV9),
+            (9, migrateToV9), (10, migrateToV10),
+            (11, migrateToV11),
+            (12, migrateToV12),
         ]
 
         // Snapshot existing user data before any change. A brand-new database

@@ -137,14 +137,26 @@ struct CommandPaletteView: View {
         guard !q.isEmpty else {
             return Array(commands.filter { $0.group != "Entries" }.prefix(24))
         }
-        return commands
+        let fuzzy = commands
             .compactMap { cmd -> (Command, Int)? in
                 guard let s = fuzzyScore(q, cmd.title) ?? fuzzyScore(q, cmd.subtitle).map({ $0 / 2 }) else { return nil }
                 return (cmd, s)
             }
             .sorted { $0.1 > $1.1 }
-            .prefix(30)
+            .prefix(24)
             .map(\.0)
+        // Content matches (body/tags/operators). Masked while locked: hidden entries match title only
+        // and never contribute a body snippet.
+        let shown = Set(fuzzy.filter { $0.group == "Entries" }.map(\.title))
+        let content = vm.contentSearchHits(q, limit: 8).filter { !shown.contains($0.entry.displayTitle) }.map { hit in
+            Command(title: hit.entry.displayTitle,
+                    subtitle: hit.snippet?.text ?? "\(hit.entry.mood.emoji) \(hit.entry.createdAt.formatted(date: .abbreviated, time: .omitted))",
+                    icon: "text.magnifyingglass", group: "In entries") {
+                selection = .all
+                vm.select(hit.entry)
+            }
+        }
+        return fuzzy + content
     }
 
     var body: some View {

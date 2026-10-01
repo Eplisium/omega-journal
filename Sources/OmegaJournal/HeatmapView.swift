@@ -5,6 +5,8 @@ import SwiftUI
 struct HeatmapView: View {
     let info: [Date: JournalViewModel.DayInfo]
     let onOpenDate: ((Date) -> Void)?
+    /// Share (0…1) of tracked habits completed per start-of-day; drawn as a dot on the cell.
+    var habitCompletion: [Date: Double] = [:]
 
     @ObservedObject private var theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -13,9 +15,11 @@ struct HeatmapView: View {
 
     init(
         info: [Date: JournalViewModel.DayInfo],
+        habitCompletion: [Date: Double] = [:],
         onOpenDate: ((Date) -> Void)? = nil
     ) {
         self.info = info
+        self.habitCompletion = habitCompletion
         self.onOpenDate = onOpenDate
     }
 
@@ -418,6 +422,16 @@ struct HeatmapView: View {
                     .strokeBorder(border(for: count, isToday: isToday, hovered: hovered || selected),
                                   lineWidth: isToday || hovered || selected ? 1.6 : 1)
             )
+            .overlay(alignment: .bottomTrailing) {
+                if let h = habitCompletion[date], h > 0 {
+                    Circle()
+                        .fill(Color.white.opacity(0.35 + 0.65 * h))
+                        .frame(width: 4, height: 4)
+                        .overlay(Circle().strokeBorder(accent.opacity(0.9), lineWidth: 0.5))
+                        .padding(1.5)
+                        .accessibilityHidden(true)
+                }
+            }
             .shadow(color: ((hovered || selected) && count > 0) ? accent.opacity(0.35) : .clear, radius: 4, y: 1)
             .scaleEffect(reduceMotion ? 1.0 : (hovered ? 1.35 : (selected ? 1.15 : 1.0)))
             .zIndex(hovered || selected ? 20 : 0)
@@ -445,8 +459,9 @@ struct HeatmapView: View {
 
     private func accessibilityLabel(date: Date, count: Int) -> String {
         let d = Self.fullDateFormatter.string(from: date)
-        if count == 0 { return "\(d), no entries" }
-        return "\(d), \(count) \(count == 1 ? "entry" : "entries")"
+        let habit = (habitCompletion[date] ?? 0) > 0 ? ", \(Int(((habitCompletion[date] ?? 0) * 100).rounded())) percent of habits done" : ""
+        if count == 0 { return "\(d), no entries\(habit)" }
+        return "\(d), \(count) \(count == 1 ? "entry" : "entries")\(habit)"
     }
 
     // MARK: Legend

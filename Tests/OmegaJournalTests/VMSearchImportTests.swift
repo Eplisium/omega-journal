@@ -4,6 +4,7 @@ import Testing
 @testable import OmegaJournal
 
 @Suite("VM search, import, undo", .serialized)
+@MainActor
 struct VMSearchImportTests {
     private static func isolate() throws {
         let root = FileManager.default.temporaryDirectory

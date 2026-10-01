@@ -9,12 +9,30 @@ struct SidebarView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var goals = GoalManager.shared
 
+    // Collapsed/expanded state of every section persists across launches.
+    @AppStorage("shell.sidebar.libraryExpanded") private var libraryExpanded = true
+    @AppStorage("shell.sidebar.reflectExpanded") private var reflectExpanded = true
+    @AppStorage("shell.sidebar.notebooksExpanded") private var notebooksExpanded = true
+    @AppStorage("shell.sidebar.smartExpanded") private var smartExpanded = true
     @AppStorage("shell.sidebar.tagsExpanded") private var tagsExpanded = true
     @AppStorage("shell.sidebar.moodsExpanded") private var moodsExpanded = false
-    @AppStorage("shell.sidebar.savedExpanded") private var savedExpanded = true
+    @AppStorage("shell.sidebar.storageExpanded") private var storageExpanded = true
+    /// Newline-separated tag paths whose children are folded away.
+    @AppStorage("shell.sidebar.collapsedTags") private var collapsedTagsRaw = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var settingsSection: SettingsSection = .appearance
+    @State private var smartFolderDraft: SmartFolder?
+    @State private var showTagManager = false
+    @State private var journalDraft: JournalDraft?
+    @State private var dropTarget: String?
+    @FocusState private var sidebarFocused: Bool
+
+    struct JournalDraft: Identifiable { let id = UUID(); var journal: Journal? }
+
+    private var collapsedTags: Set<String> {
+        Set(collapsedTagsRaw.split(separator: "\n").map(String.init))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,17 +47,21 @@ struct SidebarView: View {
                         row(.today)
                     }
 
-                    section("LIBRARY") {
+                    disclosureSection("LIBRARY", isExpanded: $libraryExpanded) {
                         row(.all, badge: vm.entries.count)
                         row(.favorites, badge: vm.favoriteCount)
                         row(.thisWeek, badge: vm.entriesThisWeek)
                     }
 
-                    section("REFLECT") {
+                    disclosureSection("REFLECT", isExpanded: $reflectExpanded) {
                         row(.calendar)
                         row(.insights)
                         row(.onThisDay, badge: vm.reflectiveOnThisDay.count)
                     }
+
+                    notebooksSection
+
+                    smartFoldersSection
 
                     disclosureSection("MOODS", isExpanded: $moodsExpanded) {
                         ForEach(Mood.allCases) { mood in
@@ -48,24 +70,14 @@ struct SidebarView: View {
                         }
                     }
 
-                    if !vm.savedSearches.isEmpty {
-                        disclosureSection("SAVED SEARCHES", isExpanded: $savedExpanded) {
-                            ForEach(vm.savedSearches) { search in
-                                savedSearchRow(search)
-                            }
-                        }
+                    if !vm.tagTree.isEmpty {
+                        tagsSection
                     }
 
-                    if !vm.allTags.isEmpty {
-                        disclosureSection("TAGS", isExpanded: $tagsExpanded) {
-                            ForEach(vm.allTags.prefix(24), id: \.tag) { item in
-                                row(.tag(item.tag), badge: item.count)
-                            }
+                    disclosureSection("STORAGE", isExpanded: $storageExpanded) {
+                        row(.archive, badge: vm.archivedEntries.count, dropTargetId: "archive") { ids in
+                            vm.dropEntriesOnArchive(ids: ids)
                         }
-                    }
-
-                    section("STORAGE") {
-                        row(.archive, badge: vm.archivedEntries.count)
                         row(.hidden, badge: vm.hiddenCount)
                         row(.trash, badge: vm.trashedEntries.count)
                     }
@@ -76,6 +88,10 @@ struct SidebarView: View {
                 .padding(.vertical, 10)
             }
             .scrollContentBackground(.hidden)
+            .focusable()
+            .focused($sidebarFocused)
+            .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
+            .onKeyPress(.downArrow) { moveSelection(1); return .handled }
 
             Divider().opacity(0.25)
             footer
@@ -83,6 +99,17 @@ struct SidebarView: View {
         .background(theme.sidebarColor)
         .sheet(isPresented: $showSettings) {
             SettingsView(vm: vm, initialSection: settingsSection)
+        }
+        .sheet(item: $smartFolderDraft) { draft in
+            SmartFolderEditor(vm: vm, folder: draft) { saved in
+                if let saved { selection = .smartFolder(saved.id) }
+            }
+        }
+        .sheet(isPresented: $showTagManager) {
+            TagManagerView(vm: vm)
+        }
+        .sheet(item: $journalDraft) { draft in
+            NotebookEditor(vm: vm, journal: draft.journal)
         }
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
             settingsSection = .appearance
@@ -92,6 +119,140 @@ struct SidebarView: View {
             settingsSection = .about
             showSettings = true
         }
+    }
+
+    /// Keyboard navigation through the primary destinations.
+    private var keyboardOrder: [SidebarItem] {
+        var items: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .insights, .onThisDay]
+        items += vm.smartFolders.map { .smartFolder($0.id) }
+        items += TagTree.flatten(vm.tagTree, collapsed: collapsedTags).map { .tag($0.path) }
+        items += [.archive, .hidden, .trash]
+        return items
+    }
+
+    private func moveSelection(_ delta: Int) {
+        let order = keyboardOrder
+        guard let current = selection, let idx = order.firstIndex(of: current) else {
+            selection = order.first; return
+        }
+        selection = order[min(max(idx + delta, 0), order.count - 1)]
+        vm.selectedEntryId = nil
+    }
+
+    // MARK: Notebooks
+
+    private var notebooksSection: some View {
+        disclosureSection("NOTEBOOKS", isExpanded: $notebooksExpanded, trailing: {
+            sectionAddButton("New notebook") { journalDraft = JournalDraft(journal: nil) }
+        }) {
+            notebookRow(nil)
+            ForEach(vm.journals) { j in notebookRow(j) }
+        }
+    }
+
+    private func notebookRow(_ journal: Journal?) -> some View {
+        let isActive = vm.activeJournalId == journal?.id
+        let count = journal.map { vm.journalCounts[$0.id] ?? 0 } ?? vm.journalCounts.values.reduce(0, +)
+        let color = journal.flatMap { TagColors.rgb(hex: $0.colorHex) }.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? theme.secondaryTextColor
+        let name = journal?.name ?? "All notebooks"
+        return SidebarRowButton(
+            title: name, icon: nil, dot: color, badge: count, indent: 0,
+            isSelected: isActive, tint: color, theme: theme, isDropTarget: dropTarget == "nb:\(journal?.id ?? "")"
+        ) {
+            vm.setActiveJournal(journal?.id)
+        }
+        .contextMenu {
+            if let journal {
+                Button("Edit Notebook…") { journalDraft = JournalDraft(journal: journal) }
+                if !journal.isDefault {
+                    Divider()
+                    Button("Delete Notebook", role: .destructive) { vm.deleteJournal(journal) }
+                }
+            }
+        }
+        .dropDestination(for: String.self, action: { items, _ in
+            guard let journal else { return false }
+            let ids = items.flatMap(EntryDragPayload.decode)
+            guard !ids.isEmpty else { return false }
+            vm.moveToJournal(ids: ids, journalId: journal.id)
+            return true
+        }, isTargeted: { dropTarget = $0 ? "nb:\(journal?.id ?? "")" : (dropTarget == "nb:\(journal?.id ?? "")" ? nil : dropTarget) })
+        .accessibilityLabel(isActive ? "\(name), current notebook" : "Switch to \(name)")
+    }
+
+    // MARK: Smart folders
+
+    private var smartFoldersSection: some View {
+        disclosureSection("SMART FOLDERS", isExpanded: $smartExpanded, trailing: {
+            sectionAddButton("New smart folder") { smartFolderDraft = SmartFolder(name: "") }
+        }) {
+            if vm.smartFolders.isEmpty {
+                Text("Save a search or build a folder from tags, moods, dates and more.")
+                    .font(OmegaTheme.font(.meta))
+                    .foregroundColor(theme.secondaryTextColor)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+            }
+            ForEach(vm.smartFolders) { folder in
+                row(.smartFolder(folder.id), badge: vm.smartFolderCounts[folder.id] ?? 0)
+                    .contextMenu {
+                        Button("Edit Smart Folder…") { smartFolderDraft = folder }
+                        Divider()
+                        Button("Delete Smart Folder", role: .destructive) {
+                            if selection == .smartFolder(folder.id) { selection = .all }
+                            vm.deleteSmartFolder(folder)
+                        }
+                    }
+            }
+        }
+    }
+
+    // MARK: Tags (nested, colored, drop targets)
+
+    private var tagsSection: some View {
+        disclosureSection("TAGS", isExpanded: $tagsExpanded, trailing: {
+            sectionAddButton("Manage tags", icon: "slider.horizontal.3") { showTagManager = true }
+        }) {
+            let nodes = TagTree.flatten(vm.tagTree, collapsed: collapsedTags)
+            ForEach(nodes.prefix(60)) { node in
+                tagRow(node)
+            }
+        }
+    }
+
+    private func tagRow(_ node: TagNode) -> some View {
+        let item = SidebarItem.tag(node.path)
+        let color = vm.color(forTag: node.path) ?? theme.accentColor
+        let hasChildren = !node.children.isEmpty
+        let folded = collapsedTags.contains(node.path)
+        return HStack(spacing: 0) {
+            SidebarRowButton(
+                title: node.name, icon: nil, dot: color, badge: node.totalCount, indent: node.depth,
+                isSelected: selection == item, tint: color, theme: theme, isDropTarget: dropTarget == "tag:\(node.path)",
+                disclosure: hasChildren ? (folded ? .collapsed : .expanded) : nil,
+                onDisclosure: { toggleTagFold(node.path) }
+            ) {
+                selection = item
+                vm.selectedEntryId = nil
+            }
+        }
+        .contextMenu {
+            Button("Manage Tags…") { showTagManager = true }
+            if hasChildren { Button(folded ? "Expand" : "Collapse") { toggleTagFold(node.path) } }
+        }
+        .dropDestination(for: String.self, action: { items, _ in
+            let ids = items.flatMap(EntryDragPayload.decode)
+            guard !ids.isEmpty else { return false }
+            vm.dropEntries(ids: ids, onTag: node.path)
+            return true
+        }, isTargeted: { dropTarget = $0 ? "tag:\(node.path)" : (dropTarget == "tag:\(node.path)" ? nil : dropTarget) })
+        .accessibilityLabel("Tag \(node.path)")
+        .accessibilityValue("\(node.totalCount) \(node.totalCount == 1 ? "entry" : "entries")")
+    }
+
+    private func toggleTagFold(_ path: String) {
+        var set = collapsedTags
+        if set.contains(path) { set.remove(path) } else { set.insert(path) }
+        collapsedTagsRaw = set.sorted().joined(separator: "\n")
     }
 
     // MARK: Header
@@ -258,146 +419,184 @@ struct SidebarView: View {
                 .padding(.horizontal, 8)
                 .padding(.top, 10)
                 .padding(.bottom, 3)
+                .accessibilityAddTraits(.isHeader)
             content()
         }
     }
 
     @ViewBuilder
-    private func disclosureSection<C: View>(_ title: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> C) -> some View {
+    private func disclosureSection<C: View>(_ title: String, isExpanded: Binding<Bool>,
+                                            @ViewBuilder trailing: () -> some View = { EmptyView() },
+                                            @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Button {
-                if reduceMotion { isExpanded.wrappedValue.toggle() } else { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.wrappedValue.toggle() } }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(title)
-                        .font(OmegaTheme.font(.meta, .semibold))
-                        .foregroundColor(theme.secondaryTextColor)
-                        .tracking(0.7)
-                    Image(systemName: "chevron.right")
-                        .font(OmegaTheme.font(.meta, .bold))
-                        .foregroundColor(theme.secondaryTextColor)
-                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                    Spacer()
+            HStack(spacing: 4) {
+                Button {
+                    withAnimation(OmegaTheme.Motion.quick.animation(reduceMotion: reduceMotion)) { isExpanded.wrappedValue.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(title)
+                            .font(OmegaTheme.font(.meta, .semibold))
+                            .foregroundColor(theme.secondaryTextColor)
+                            .tracking(0.7)
+                        Image(systemName: "chevron.right")
+                            .font(OmegaTheme.font(.meta, .bold))
+                            .foregroundColor(theme.secondaryTextColor)
+                            .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-                .padding(.horizontal, 8)
-                .padding(.top, 10)
-                .padding(.bottom, 3)
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(title.capitalized) section")
+                .accessibilityValue(isExpanded.wrappedValue ? "expanded" : "collapsed")
+                .accessibilityHint("Double tap to \(isExpanded.wrappedValue ? "collapse" : "expand")")
+                if isExpanded.wrappedValue { trailing() }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(title.capitalized) section")
-            .accessibilityValue(isExpanded.wrappedValue ? "expanded" : "collapsed")
-            .accessibilityHint("Double tap to \(isExpanded.wrappedValue ? "collapse" : "expand")")
+            .padding(.horizontal, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 3)
 
             if isExpanded.wrappedValue { content() }
         }
     }
 
-    private func savedSearchRow(_ search: SavedSearch) -> some View {
-        Button {
-            selection = .all
-            vm.selectedEntryId = nil
-            vm.applySavedSearch(search)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(OmegaTheme.font(.meta, .medium))
-                    .foregroundColor(theme.secondaryTextColor)
-                    .frame(width: 15)
-                Text(search.name)
-                    .font(OmegaTheme.font(.caption))
-                    .foregroundColor(theme.bodyTextColor)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+    private func sectionAddButton(_ label: String, icon: String = "plus", action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(OmegaTheme.font(.meta, .semibold))
+                .foregroundColor(theme.secondaryTextColor)
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Saved search: \(search.name)")
-        .contextMenu {
-            Button("Delete Saved Search", role: .destructive) { vm.deleteSavedSearch(search) }
-        }
+        .accessibilityLabel(label)
+        .omegaTooltip(label)
     }
 
-    private func row(_ item: SidebarItem, badge: Int? = nil) -> some View {
-        SidebarRow(
-            item: item,
-            badge: badge,
-            isSelected: selection == item,
-            theme: theme
+    private func row(_ item: SidebarItem, badge: Int? = nil, dropTargetId: String? = nil,
+                     onDrop: (([String]) -> Void)? = nil) -> some View {
+        let title: String = {
+            if case .smartFolder(let id) = item { return vm.smartFolder(id: id)?.name ?? "Smart Folder" }
+            return item.title
+        }()
+        let base = SidebarRowButton(
+            title: title, icon: item.icon, dot: nil, badge: badge, indent: 0,
+            isSelected: selection == item, tint: tint(for: item), theme: theme,
+            isDropTarget: dropTargetId != nil && dropTarget == dropTargetId
         ) {
             selection = item
             vm.selectedEntryId = nil
         }
+        return Group {
+            if let onDrop {
+                base.dropDestination(for: String.self, action: { items, _ in
+                    let ids = items.flatMap(EntryDragPayload.decode)
+                    guard !ids.isEmpty else { return false }
+                    onDrop(ids)
+                    return true
+                }, isTargeted: { on in dropTarget = on ? dropTargetId : (dropTarget == dropTargetId ? nil : dropTarget) })
+            } else {
+                base
+            }
+        }
+    }
+
+    private func tint(for item: SidebarItem) -> Color {
+        if case .mood(let m) = item { return m.color }
+        if case .trash = item { return .red }
+        return theme.accentColor
     }
 }
 
 // MARK: - Sidebar Row
 
-private struct SidebarRow: View {
-    let item: SidebarItem
+struct SidebarRowButton: View {
+    enum Disclosure { case expanded, collapsed }
+
+    let title: String
+    let icon: String?
+    let dot: Color?
     let badge: Int?
+    let indent: Int
     let isSelected: Bool
+    let tint: Color
     let theme: ThemeManager
+    var isDropTarget = false
+    var disclosure: Disclosure? = nil
+    var onDisclosure: (() -> Void)? = nil
     let action: () -> Void
 
     @State private var hover = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var tint: Color {
-        if case .mood(let m) = item { return m.color }
-        if case .trash = item { return .red }
-        return theme.accentColor
-    }
+    @Environment(\.isFocused) private var isFocused
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: item.icon)
-                    .font(OmegaTheme.font(.meta, .medium))
-                    .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
-                    .frame(width: 15)
-                Text(item.title)
-                    .font(OmegaTheme.font(.caption, isSelected ? .semibold : .regular))
-                    .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if let badge, badge > 0 {
-                    Text("\(badge)")
-                        .font(OmegaTheme.font(.meta, .medium, design: .rounded))
-                        .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(
-                            Capsule().fill(
-                                isSelected ? tint.opacity(0.18) : theme.secondaryTextColor.opacity(0.12)
-                            )
-                        )
+        HStack(spacing: 4) {
+            if indent > 0 { Spacer().frame(width: CGFloat(indent) * 12) }
+            if let disclosure {
+                Button { onDisclosure?() } label: {
+                    Image(systemName: "chevron.right")
+                        .font(OmegaTheme.font(.meta, .bold))
+                        .foregroundColor(theme.secondaryTextColor)
+                        .rotationEffect(.degrees(disclosure == .expanded ? 90 : 0))
+                        .frame(width: 12, height: 16)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(disclosure == .expanded ? "Collapse \(title)" : "Expand \(title)")
+            } else if dot != nil {
+                Spacer().frame(width: 12)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isSelected ? tint.opacity(0.16) : (hover ? Color.white.opacity(0.05) : .clear))
-            )
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(tint)
-                        .frame(width: 2.5, height: 14)
-                        .offset(x: -1)
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    if let dot {
+                        Circle().fill(dot).frame(width: 8, height: 8).frame(width: 15)
+                    } else if let icon {
+                        Image(systemName: icon)
+                            .font(OmegaTheme.font(.meta, .medium))
+                            .foregroundColor(isSelected ? tint : theme.secondaryTextColor)
+                            .frame(width: 15)
+                    }
+                    Text(title)
+                        .font(OmegaTheme.font(.caption, isSelected ? .semibold : .regular))
+                        .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let badge, badge > 0 {
+                        // Subtle: plain tabular number, no capsule unless selected.
+                        Text("\(badge)")
+                            .font(OmegaTheme.font(.meta, .regular, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(isSelected ? tint : theme.secondaryTextColor.opacity(0.8))
+                    }
                 }
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(item.title)
-        .accessibilityValue(badge.map { $0 > 0 ? "\($0) \($0 == 1 ? "entry" : "entries")" : "" } ?? "")
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isDropTarget ? tint.opacity(0.28) : (isSelected ? tint.opacity(0.16) : (hover ? theme.titleTextColor.opacity(0.05) : .clear)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isDropTarget ? tint.opacity(0.8) : .clear, lineWidth: 1.5)
+        )
+        .overlay(alignment: .leading) {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(tint)
+                    .frame(width: 2.5, height: 14)
+                    .offset(x: -1)
+            }
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityValue(badge.map { $0 > 0 ? "\($0) \($0 == 1 ? "entry" : "entries")" : "" } ?? "")
         .onHover { hover = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
+        .animation(OmegaTheme.Motion.quick.animation(reduceMotion: reduceMotion), value: hover)
+        .animation(OmegaTheme.Motion.quick.animation(reduceMotion: reduceMotion), value: isDropTarget)
     }
 }

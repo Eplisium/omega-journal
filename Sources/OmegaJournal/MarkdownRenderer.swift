@@ -62,7 +62,7 @@ enum MarkdownRenderer {
 
     /// Splits a document into text runs and tables so the host can draw tables as a real grid.
     /// Source line numbers (used by interactive tasks) are unaffected.
-    static func renderSegments(_ markdown: String, style: MarkdownRenderStyle = .default) -> [Segment] {
+    static func renderSegments(_ markdown: String, style: MarkdownRenderStyle = .default, lineOffset: Int = 0) -> [Segment] {
         var segments: [Segment] = []
         var run = AttributedString()
         var runHasContent = false
@@ -73,7 +73,9 @@ enum MarkdownRenderer {
             run = AttributedString(); runHasContent = false
         }
 
-        for item in MarkdownLogic.parseBlocks(markdown) {
+        for parsed in MarkdownLogic.parseBlocks(markdown) {
+            // `lineOffset` keeps source line numbers absolute when a host renders a slice of the body.
+            let item = MarkdownBlockItem(line: parsed.line + lineOffset, block: parsed.block)
             if case let .table(header, alignments, rows) = item.block {
                 flush()
                 func cell(_ t: String, bold: Bool) -> AttributedString {

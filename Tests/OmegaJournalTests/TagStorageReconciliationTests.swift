@@ -8,6 +8,7 @@ import Testing
 /// tags in one store but not the other — the sidebar then under-counted until
 /// the entry happened to be edited again.
 @Suite("Tag storage reconciliation", .serialized)
+@MainActor
 struct TagStorageReconciliationTests {
     private static func makeIsolatedDatabase() throws {
         let root = FileManager.default.temporaryDirectory

@@ -8,6 +8,7 @@ import Testing
 /// 2. Export must throw on unwritable destinations and round-trip empty and
 ///    single-entry journals safely.
 @Suite("Error propagation", .serialized)
+@MainActor
 struct ErrorPropagationTests {
     private static func makeIsolatedDatabase() throws -> (root: URL, db: DatabaseManager) {
         let root = FileManager.default.temporaryDirectory
@@ -177,6 +178,7 @@ private extension JSONDecoder {
 /// Audit item P1 — fetchScopes must return exactly what per-scope
 /// fetchAllEntries calls return, so the batched reload path can't drift.
 @Suite("Fetch scopes equivalence", .serialized)
+@MainActor
 struct FetchScopesEquivalenceTests {
     @MainActor
     @Test("fetchScopes matches per-scope fetchAllEntries for every lifecycle state")

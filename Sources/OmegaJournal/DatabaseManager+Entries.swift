@@ -32,16 +32,26 @@ extension DatabaseManager {
     // Column 2 is `body_enc` (the AES-GCM blob) since V8 — rowToEntry
     // decrypts it. The legacy `body` text column is always empty on disk.
     static let entryColumns =
-        "e.id, e.title, e.body_enc, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden, e.body"
+        "e.id, e.title, e.body_enc, e.mood, e.tags, e.created_at, e.updated_at, e.is_pinned, e.is_favorite, e.deleted_at, e.is_archived, e.word_count, e.is_hidden, e.body, e.journal_id"
 
-    func scopeClause(_ scope: EntryScope) -> String {
+    func scopeClause(_ scope: EntryScope, journalId: String? = nil) -> String {
+        let base: String
         switch scope {
-        case .active: return "e.deleted_at IS NULL AND e.is_archived = 0"
-        case .archived: return "e.deleted_at IS NULL AND e.is_archived = 1"
-        case .trashed: return "e.deleted_at IS NOT NULL"
-        case .all: return "e.deleted_at IS NULL"
-        case .hidden: return "e.deleted_at IS NULL AND e.is_hidden = 1"
+        case .active: base = "e.deleted_at IS NULL AND e.is_archived = 0"
+        case .archived: base = "e.deleted_at IS NULL AND e.is_archived = 1"
+        case .trashed: base = "e.deleted_at IS NOT NULL"
+        case .all: base = "e.deleted_at IS NULL"
+        case .hidden: base = "e.deleted_at IS NULL AND e.is_hidden = 1"
         }
+        return base + journalClause(journalId)
+    }
+
+    /// `AND e.journal_id = '…'` for a journal-scoped fetch. Ids are app-generated
+    /// (UUIDs / "default") and sanitized here, so interpolation is safe.
+    func journalClause(_ journalId: String?) -> String {
+        guard let journalId, !journalId.isEmpty else { return "" }
+        let safe = journalId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        return " AND e.journal_id = '\(safe)'"
     }
 
     func orderClause(_ sort: SortOrder) -> String {
@@ -62,9 +72,9 @@ extension DatabaseManager {
         OmegaCore.sanitizeFTSQuery(raw)
     }
 
-    func fetchAllEntries(search: String = "", sort: SortOrder = .dateDesc, scope: EntryScope = .active) -> [JournalEntry] {
+    func fetchAllEntries(search: String = "", sort: SortOrder = .dateDesc, scope: EntryScope = .active, journalId: String? = nil) -> [JournalEntry] {
         let orderBy = orderClause(sort)
-        let scopeSQL = scopeClause(scope)
+        let scopeSQL = scopeClause(scope, journalId: journalId)
 
         if search.trimmingCharacters(in: .whitespaces).isEmpty {
             let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeSQL) \(orderBy);"
@@ -101,13 +111,13 @@ extension DatabaseManager {
     /// Fetches several scopes in one pass, sharing a single attachments/tags
     /// scan across all of them (reload() used to pay 2 full-table scans per
     /// scope × 4 scopes). Results are keyed by the requested scope.
-    func fetchScopes(_ requests: [(scope: EntryScope, sort: SortOrder)]) -> [EntryScope: [JournalEntry]] {
+    func fetchScopes(_ requests: [(scope: EntryScope, sort: SortOrder)], journalId: String? = nil) -> [EntryScope: [JournalEntry]] {
         let attachments = allAttachmentsByEntry()
         let tags = allTagsByEntry()
         var result: [EntryScope: [JournalEntry]] = [:]
         result.reserveCapacity(requests.count)
         for request in requests {
-            let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeClause(request.scope)) \(orderClause(request.sort));"
+            let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeClause(request.scope, journalId: journalId)) \(orderClause(request.sort));"
             guard let stmt = try? prepare(sql) else {
                 result[request.scope] = []
                 continue
@@ -117,13 +127,13 @@ extension DatabaseManager {
         return result
     }
 
-    func fullTextSearch(_ query: String, scope: EntryScope = .active) -> [JournalEntry] {
+    func fullTextSearch(_ query: String, scope: EntryScope = .active, journalId: String? = nil) -> [JournalEntry] {
         guard let ftsQuery = sanitizeFTSQuery(query) else { return [] }
         let sql = """
             SELECT \(Self.entryColumns)
             FROM entries e
             INNER JOIN entries_fts f ON e.id = f.entry_id
-            WHERE entries_fts MATCH ? AND \(scopeClause(scope))
+            WHERE entries_fts MATCH ? AND \(scopeClause(scope, journalId: journalId))
             ORDER BY rank;
         """
         guard let stmt = try? prepare(sql) else { return [] }
@@ -228,8 +238,9 @@ extension DatabaseManager {
         let tags = tagsStr.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 
         let isHidden = sqlite3_column_int(stmt, 12) != 0
+        let journalId = sqlite3_column_text(stmt, 14).map { String(cString: $0) } ?? JournalDefaults.defaultJournalId
 
-        return JournalEntry(
+        var entry = JournalEntry(
             id: id, title: title, body: body,
             mood: Mood(rawValue: Int(mood)) ?? .neutral,
             tags: tags,
@@ -240,6 +251,8 @@ extension DatabaseManager {
             isHidden: isHidden,
             attachments: []
         )
+        entry.journalId = journalId.isEmpty ? JournalDefaults.defaultJournalId : journalId
+        return entry
     }
 
     /// Saves an entry. Source-compatible with callers that ignore the result;
@@ -288,23 +301,23 @@ extension DatabaseManager {
             }
         }
         let sql = preserveBody ? """
-        INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden, journal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, mood=excluded.mood,
             tags=excluded.tags, updated_at=excluded.updated_at,
             is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
             is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
-            is_hidden=excluded.is_hidden;
+            is_hidden=excluded.is_hidden, journal_id=excluded.journal_id;
         """ : """
-        INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, body_enc, mood, tags, created_at, updated_at, is_pinned, is_favorite, is_archived, deleted_at, word_count, is_hidden, journal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title=excluded.title, body='', body_enc=excluded.body_enc, mood=excluded.mood,
             tags=excluded.tags, updated_at=excluded.updated_at,
             is_pinned=excluded.is_pinned, is_favorite=excluded.is_favorite,
             is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
-            word_count=excluded.word_count, is_hidden=excluded.is_hidden;
+            word_count=excluded.word_count, is_hidden=excluded.is_hidden, journal_id=excluded.journal_id;
         """
         guard let stmt = try? prepare(sql) else {
             reportError("Save failed to prepare: \(String(cString: sqlite3_errmsg(db)))")
@@ -323,7 +336,7 @@ extension DatabaseManager {
         }
         // Placeholders follow column order: id, title, body_enc, mood, tags,
         // created_at, updated_at, is_pinned, is_favorite, is_archived,
-        // deleted_at, word_count, is_hidden (1…13).
+        // deleted_at, word_count, is_hidden, journal_id (1…14).
         bindText(stmt, index: 1, value: entry.id)
         bindText(stmt, index: 2, value: entry.title)
         bindBlob(stmt, index: 3, value: sealedBody)
@@ -341,6 +354,7 @@ extension DatabaseManager {
         }
         sqlite3_bind_int(stmt, 12, Int32(wordCount))
         sqlite3_bind_int(stmt, 13, entry.isHidden ? 1 : 0)
+        bindText(stmt, index: 14, value: entry.journalId.isEmpty ? JournalDefaults.defaultJournalId : entry.journalId)
         if sqlite3_step(stmt) != SQLITE_DONE {
             let msg = String(cString: sqlite3_errmsg(db))
             reportError("Save failed: \(msg)")
@@ -484,8 +498,8 @@ extension DatabaseManager {
         for id in ids { hardDeleteEntry(id: id) }
     }
 
-    func entryCount(scope: EntryScope = .active) -> Int {
-        let sql = "SELECT COUNT(*) FROM entries e WHERE \(scopeClause(scope));"
+    func entryCount(scope: EntryScope = .active, journalId: String? = nil) -> Int {
+        let sql = "SELECT COUNT(*) FROM entries e WHERE \(scopeClause(scope, journalId: journalId));"
         guard let stmt = try? prepare(sql) else { return 0 }
         defer { sqlite3_finalize(stmt) }
         if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int(stmt, 0)) }

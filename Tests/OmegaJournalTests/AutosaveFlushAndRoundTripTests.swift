@@ -13,6 +13,7 @@ import Testing
 /// 4. Renaming a tag to its own name must be a no-op — the merge path deletes
 ///    the old tag row, which for a self-rename is the only row.
 @Suite("Autosave flush and export round-trip", .serialized)
+@MainActor
 struct AutosaveFlushAndRoundTripTests {
     private static func makeIsolatedDatabase() throws {
         let root = FileManager.default.temporaryDirectory

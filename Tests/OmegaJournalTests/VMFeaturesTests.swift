@@ -5,6 +5,7 @@ import OmegaJournalCore
 @testable import OmegaJournal
 
 @Suite("VM saved searches, backlinks, reviews", .serialized)
+@MainActor
 struct VMFeaturesTests {
     private static func isolate() throws {
         let root = FileManager.default.temporaryDirectory
