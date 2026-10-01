@@ -157,13 +157,14 @@ struct HoverGlowModifier: ViewModifier {
 
     @ObservedObject private var theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
             .background(
                 RoundedRectangle(cornerRadius: radius + 2, style: .continuous)
-                    .fill(theme.accentColor.opacity(hovering ? glowStrength * 0.6 : 0))
+                    .fill(theme.accentColor.opacity(hovering && !reduceTransparency ? glowStrength * 0.6 : 0))
                     .blur(radius: 12)
                     .allowsHitTesting(false)
             )

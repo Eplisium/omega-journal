@@ -1,10 +1,23 @@
 import SwiftUI
+import OmegaJournalCore
 
 /// Pure helpers for menu-bar quick capture (unit-tested).
 enum QuickCapture {
     static let notificationKey = "text"
     static let insertedKey = "shell.menuBarQuickCapture"
     static let tag = "quick"
+    static let moodKey = "mood"
+    static let tagsKey = "tags"
+
+    /// Tags for a capture: always includes `quick`, plus any extra the user typed
+    /// (comma/space separated, nested `a/b` allowed). De-duplicated, order preserved.
+    static func tags(from raw: String) -> [String] {
+        var out = [tag]
+        for part in raw.split(whereSeparator: { $0 == "," || $0 == " " }) {
+            if let t = TagPath.normalize(String(part)), !out.contains(t) { out.append(t) }
+        }
+        return out
+    }
 
     /// Trimmed capture text, or nil when there is nothing worth saving.
     static func normalized(_ raw: String) -> String? {
@@ -22,6 +35,8 @@ extension Notification.Name {
 /// entry through the normal `createEntry` path.
 struct QuickCaptureView: View {
     @State private var text = ""
+    @State private var mood: Mood = .neutral
+    @State private var tagText = ""
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -33,6 +48,20 @@ struct QuickCaptureView: View {
                 .frame(width: 280, height: 110)
                 .focused($focused)
                 .accessibilityLabel("Quick capture text")
+            HStack(spacing: 4) {
+                ForEach(Mood.allCases) { m in
+                    Button { mood = m } label: {
+                        Text(m.emoji).frame(width: 28, height: 24)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(mood == m ? m.color.opacity(0.28) : .clear))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Mood: \(m.label)")
+                    .accessibilityAddTraits(mood == m ? .isSelected : [])
+                }
+            }
+            TextField("Extra tags (optional)", text: $tagText)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Extra tags")
             HStack {
                 Button("Open Journal") {
                     NSApp.activate(ignoringOtherApps: true)
@@ -51,7 +80,10 @@ struct QuickCaptureView: View {
     private func save() {
         guard let body = QuickCapture.normalized(text) else { return }
         NotificationCenter.default.post(name: .quickCapture, object: nil,
-                                        userInfo: [QuickCapture.notificationKey: body])
+                                        userInfo: [QuickCapture.notificationKey: body,
+                                                   QuickCapture.moodKey: mood.rawValue,
+                                                   QuickCapture.tagsKey: QuickCapture.tags(from: tagText)])
         text = ""
+        tagText = ""
     }
 }

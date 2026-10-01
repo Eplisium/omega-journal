@@ -62,6 +62,12 @@ struct ShellQuickCaptureTests {
         #expect(QuickCapture.normalized("") == nil)
     }
 
+    @Test("quick capture tags always include quick, normalize, de-duplicate")
+    func quickCaptureTags() {
+        #expect(QuickCapture.tags(from: "") == ["quick"])
+        #expect(QuickCapture.tags(from: "work, #ideas/new quick work") == ["quick", "work", "ideas/new"])
+    }
+
     @Test("reading width clamps and falls back to the default")
     func width() {
         #expect(ReadingPreferences.clampedWidth(0) == ReadingPreferences.defaultMaxWidth)

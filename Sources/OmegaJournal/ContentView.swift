@@ -294,7 +294,13 @@ struct ShellEntryCommands: ViewModifier {
                 // put them back where they were.
                 let resumeId = vm.editingEntryId
                 vm.flushPendingSave()
-                let created = vm.createEntry(body: body, tags: [QuickCapture.tag])
+                let tags = note.userInfo?[QuickCapture.tagsKey] as? [String] ?? [QuickCapture.tag]
+                var created = vm.createEntry(body: body, tags: tags)
+                if let raw = note.userInfo?[QuickCapture.moodKey] as? Int, let m = Mood(rawValue: raw), m != created.mood {
+                    created.mood = m
+                    _ = vm.db.saveEntry(created)
+                    vm.reload()
+                }
                 vm.stopEditing()
                 if let resumeId, let previous = vm.entries.first(where: { $0.id == resumeId }) {
                     vm.startEditing(previous)
