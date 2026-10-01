@@ -83,7 +83,7 @@ struct CommandPaletteView: View {
         }
 
         // Themes
-        for name in ThemePresets.all.keys.sorted() {
+        for name in ThemePresets.all.map(\.name) {
             list.append(Command(title: "Theme: \(name)", subtitle: "Change appearance", icon: "paintpalette", group: "View") {
                 ThemeManager.shared.applyTheme(named: name)
             })

@@ -1,11 +1,24 @@
+import Combine
 import Foundation
+import OmegaJournalCore
 import SwiftUI
 
 // MARK: - Theme Manager
+//
+// Owns the live palette. Presets come from `ThemePresets` (OmegaJournalCore);
+// "Custom" keeps user-picked colors. Persisted via getSetting/setSetting using
+// the original keys (themeName, accentColor, backgroundColor, sidebarColor,
+// cardColor) plus new optional keys, so older databases load unchanged.
 
 @MainActor
 final class ThemeManager: ObservableObject {
     static let shared = ThemeManager()
+
+    // Settings keys
+    static let followSystemKey = "themeFollowSystem"
+    static let lightPresetKey = "themeLightPreset"
+    static let darkPresetKey = "themeDarkPreset"
+    static func accentOverrideKey(_ preset: String) -> String { "themeAccentOverride.\(preset)" }
 
     @Published var accentColor: Color
     @Published var backgroundColor: Color
@@ -16,10 +29,17 @@ final class ThemeManager: ObservableObject {
     @Published var secondaryTextColor: Color
     @Published var themeName: String
     @Published var colorScheme: ColorScheme
+    @Published private(set) var followSystem: Bool
+    @Published private(set) var lightPresetName: String
+    @Published private(set) var darkPresetName: String
+    /// Per-preset accent overrides (preset name -> hex).
+    @Published private(set) var accentOverrides: [String: String]
+
+    private var cancellables = Set<AnyCancellable>()
 
     private init() {
         let db = DatabaseManager.shared
-        let name = db.getSetting("themeName", defaultValue: "Purple")
+        let name = db.getSetting("themeName", defaultValue: ThemePresets.defaultName)
         let accentHex = db.getSetting("accentColor", defaultValue: "#9d6bff")
         let bgHex = db.getSetting("backgroundColor", defaultValue: "#1a0d2e")
         let sidebarHex = db.getSetting("sidebarColor", defaultValue: "#140823")
@@ -30,7 +50,9 @@ final class ThemeManager: ObservableObject {
         let initialCard = Color(hex: cardHex) ?? Color(hex: "#241245")!
         let initialScheme = ThemeManager.scheme(for: initialBackground)
         let textColors = ThemeManager.textColors(for: initialScheme)
-        themeName = name
+
+        // A saved name that is no longer a preset (retired themes) keeps its saved colors as Custom.
+        themeName = (ThemePresets.preset(named: name) != nil || name == ThemePresets.customName) ? name : ThemePresets.customName
         accentColor = initialAccent
         backgroundColor = initialBackground
         sidebarColor = initialSidebar
@@ -39,36 +61,47 @@ final class ThemeManager: ObservableObject {
         titleTextColor = textColors.title
         bodyTextColor = textColors.body
         secondaryTextColor = textColors.secondary
+        followSystem = db.getSetting(Self.followSystemKey, defaultValue: "0") == "1"
+        lightPresetName = db.getSetting(Self.lightPresetKey, defaultValue: ThemePresets.defaultLightName)
+        darkPresetName = db.getSetting(Self.darkPresetKey, defaultValue: ThemePresets.defaultDarkName)
+        var overrides: [String: String] = [:]
+        for p in ThemePresets.all {
+            let v = db.getSetting(Self.accentOverrideKey(p.name), defaultValue: "")
+            if !v.isEmpty, ThemeRGB(hex: v) != nil { overrides[p.name] = v }
+        }
+        accentOverrides = overrides
 
-        // Auto-switch when system appearance changes
+        // Re-derive text colors (and follow the system light/dark pair) when appearance changes.
         NSApp.publisher(for: \.effectiveAppearance)
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.colorScheme = ThemeManager.scheme(for: self.backgroundColor)
-                self.applyTextColors()
+                if self.followSystem {
+                    self.applySystemPair()
+                } else {
+                    self.refreshScheme()
+                }
             }
             .store(in: &cancellables)
+
+        if followSystem { applySystemPair(persistSelection: false) } else { applyPresetText() }
     }
 
-    /// Text/icon color for content drawn on top of the accent color, chosen by
-    /// the accent's relative luminance so light accents don't get white text.
+    // MARK: Derived semantic colors
+
+    /// Text/icon color for content drawn on top of the accent color.
     var onAccentColor: Color { ThemeManager.onAccent(for: accentColor) }
 
     static func onAccent(for color: Color) -> Color {
         let ns = NSColor(color).usingColorSpace(.sRGB) ?? .black
-        func lin(_ c: CGFloat) -> CGFloat { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-        let l = 0.2126 * lin(ns.redComponent) + 0.7152 * lin(ns.greenComponent) + 0.0722 * lin(ns.blueComponent)
+        let c = ThemeRGB(r: ns.redComponent, g: ns.greenComponent, b: ns.blueComponent)
+        let l = c.relativeLuminance
         // Contrast vs white = 1.05/(l+.05); vs black = (l+.05)/.05 — pick the better.
         return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? .black : .white
     }
 
-    private var cancellables = Set<AnyCancellable>()
-
-    // MARK: Semantic colors (design system)
-
     var isDark: Bool { colorScheme == .dark }
 
-    /// Surface levels: 0 = window background, 1 = cards, 2/3 = raised layers.
+    /// Surface levels: 0 = window background, 1 = cards, 2/3 = raised layers (a step toward the text color).
     var surface0: Color { backgroundColor }
     var surface1: Color { cardColor }
     var surface2: Color { surface(mixing: 0.05) }
@@ -83,22 +116,74 @@ final class ThemeManager: ObservableObject {
     var successColor: Color { isDark ? Color(hex: "#4ade80")! : Color(hex: "#15803d")! }
     var warningColor: Color { isDark ? Color(hex: "#fbbf24")! : Color(hex: "#b45309")! }
     var dangerColor: Color { isDark ? Color(hex: "#f87171")! : Color(hex: "#b91c1c")! }
+
+    /// Hairline border color derived from the text color.
     var borderColor: Color { titleTextColor.opacity(isDark ? 0.08 : 0.12) }
 
+    // MARK: Presets
+
+    var currentPreset: ThemePreset? {
+        themeName == ThemePresets.customName ? nil : ThemePresets.preset(named: themeName)
+    }
+
+    func accentOverride(for preset: String) -> Color? {
+        accentOverrides[preset].flatMap { Color(hex: $0) }
+    }
+
+    /// Accent shown for a preset in the gallery (override if set).
+    func effectiveAccentHex(for preset: ThemePreset) -> String {
+        accentOverrides[preset.name] ?? preset.accent
+    }
+
     func applyTheme(named name: String) {
-        guard let preset = ThemePresets.all[name] else { return }
-        themeName = name
-        accentColor = preset.accent
-        backgroundColor = preset.background
-        sidebarColor = preset.sidebar
-        cardColor = preset.card
-        colorScheme = ThemeManager.scheme(for: backgroundColor)
-        applyTextColors()
+        guard let preset = ThemePresets.preset(named: name) else { return }
+        // Picking a preset while following the system updates that side of the pair.
+        if followSystem {
+            if preset.isDark { darkPresetName = name } else { lightPresetName = name }
+            persistPair()
+        }
+        apply(preset)
         persist()
     }
 
+    private func apply(_ preset: ThemePreset) {
+        themeName = preset.name
+        accentColor = Color(hex: effectiveAccentHex(for: preset)) ?? Color(hex: preset.accent)!
+        backgroundColor = Color(hex: preset.background)!
+        sidebarColor = Color(hex: preset.sidebar)!
+        cardColor = Color(hex: preset.card)!
+        colorScheme = preset.isDark ? .dark : .light
+        titleTextColor = Color(hex: preset.title)!
+        bodyTextColor = Color(hex: preset.body)!
+        secondaryTextColor = Color(hex: preset.secondary)!
+    }
+
+    private func applyPresetText() {
+        if let p = currentPreset, p.background.lowercased() == backgroundColor.toHex().lowercased() {
+            apply(p)
+            // Keep a saved accent (override) as stored.
+            if let hex = Color(hex: effectiveAccentHex(for: p)) { accentColor = hex }
+        }
+    }
+
+    /// Sets or clears (nil) the accent override for a preset; applies live if it is the active preset.
+    func setAccentOverride(_ color: Color?, for presetName: String) {
+        let db = DatabaseManager.shared
+        if let color {
+            accentOverrides[presetName] = color.toHex()
+            db.setSetting(Self.accentOverrideKey(presetName), value: color.toHex())
+        } else {
+            accentOverrides[presetName] = nil
+            db.setSetting(Self.accentOverrideKey(presetName), value: "")
+        }
+        if themeName == presetName, let p = ThemePresets.preset(named: presetName) {
+            accentColor = Color(hex: effectiveAccentHex(for: p)) ?? accentColor
+            persist()
+        }
+    }
+
     func applyCustom(accent: Color, background: Color, sidebar: Color, card: Color) {
-        themeName = "Custom"
+        themeName = ThemePresets.customName
         accentColor = accent
         backgroundColor = background
         sidebarColor = sidebar
@@ -108,17 +193,74 @@ final class ThemeManager: ObservableObject {
         persist()
     }
 
+    // MARK: Follow system
+
+    func setFollowSystem(_ on: Bool) {
+        followSystem = on
+        DatabaseManager.shared.setSetting(Self.followSystemKey, value: on ? "1" : "0")
+        if on {
+            // Seed the matching side of the pair from the current preset.
+            if let p = currentPreset {
+                if p.isDark { darkPresetName = p.name } else { lightPresetName = p.name }
+            }
+            persistPair()
+            applySystemPair()
+        }
+    }
+
+    func setPair(light: String? = nil, dark: String? = nil) {
+        if let light, ThemePresets.preset(named: light)?.isDark == false { lightPresetName = light }
+        if let dark, ThemePresets.preset(named: dark)?.isDark == true { darkPresetName = dark }
+        persistPair()
+        if followSystem { applySystemPair() }
+    }
+
+    static func systemIsDark() -> Bool {
+        NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
+    private func applySystemPair(persistSelection: Bool = true) {
+        let name = Self.systemIsDark() ? darkPresetName : lightPresetName
+        guard let preset = ThemePresets.preset(named: name) else { return }
+        apply(preset)
+        if persistSelection { persist() }
+    }
+
+    private func persistPair() {
+        let db = DatabaseManager.shared
+        db.setSetting(Self.lightPresetKey, value: lightPresetName)
+        db.setSetting(Self.darkPresetKey, value: darkPresetName)
+    }
+
+    // MARK: Contrast
+
+    /// Worst-case body-text contrast for the given custom colors (for the editor warning).
+    static func contrast(background: Color, sidebar: Color, card: Color) -> Double {
+        func rgb(_ c: Color) -> ThemeRGB {
+            let ns = NSColor(c).usingColorSpace(.sRGB) ?? .black
+            return ThemeRGB(r: ns.redComponent, g: ns.greenComponent, b: ns.blueComponent)
+        }
+        return ContrastChecker.worstBodyContrast(background: rgb(background), card: rgb(card), sidebar: rgb(sidebar))
+    }
+
+    // MARK: Internals
+
     func refreshScheme() {
-        colorScheme = ThemeManager.scheme(for: backgroundColor)
-        applyTextColors()
+        if let p = currentPreset, p.background.lowercased() == backgroundColor.toHex().lowercased() {
+            colorScheme = p.isDark ? .dark : .light
+            titleTextColor = Color(hex: p.title)!
+            bodyTextColor = Color(hex: p.body)!
+            secondaryTextColor = Color(hex: p.secondary)!
+        } else {
+            colorScheme = ThemeManager.scheme(for: backgroundColor)
+            applyTextColors()
+        }
     }
 
     private static func scheme(for color: Color) -> ColorScheme {
         let nsColor = NSColor(color).usingColorSpace(.sRGB) ?? .black
-        let luminance = (0.2126 * nsColor.redComponent) +
-            (0.7152 * nsColor.greenComponent) +
-            (0.0722 * nsColor.blueComponent)
-        return luminance > 0.55 ? .light : .dark
+        let c = ThemeRGB(r: nsColor.redComponent, g: nsColor.greenComponent, b: nsColor.blueComponent)
+        return ContrastChecker.isLight(c) ? .light : .dark
     }
 
     private static func textColors(for scheme: ColorScheme) -> (title: Color, body: Color, secondary: Color) {
@@ -149,105 +291,7 @@ final class ThemeManager: ObservableObject {
     }
 }
 
-// MARK: - Theme Presets
-
-struct ThemePreset {
-    let name: String
-    let accent: Color
-    let background: Color
-    let sidebar: Color
-    let card: Color
-    let swatchColors: [Color]
-}
-
-enum ThemePresets {
-    static let all: [String: ThemePreset] = [
-        "Purple": ThemePreset(
-            name: "Purple",
-            accent: Color(hex: "#9d6bff")!,
-            background: Color(hex: "#1a0d2e")!,
-            sidebar: Color(hex: "#140823")!,
-            card: Color(hex: "#241245")!,
-            swatchColors: [Color(hex: "#9d6bff")!, Color(hex: "#1a0d2e")!]
-        ),
-        "Midnight": ThemePreset(
-            name: "Midnight",
-            accent: Color(hex: "#4a9eff")!,
-            background: Color(hex: "#0a0e1a")!,
-            sidebar: Color(hex: "#060912")!,
-            card: Color(hex: "#121828")!,
-            swatchColors: [Color(hex: "#4a9eff")!, Color(hex: "#0a0e1a")!]
-        ),
-        "Brave": ThemePreset(
-            name: "Brave",
-            accent: Color(hex: "#FB542B")!,
-            background: Color(hex: "#17191F")!,
-            sidebar: Color(hex: "#101216")!,
-            card: Color(hex: "#242830")!,
-            swatchColors: [Color(hex: "#FB542B")!, Color(hex: "#17191F")!]
-        ),
-        "Forest": ThemePreset(
-            name: "Forest",
-            accent: Color(hex: "#4ec9a0")!,
-            background: Color(hex: "#0a1e16")!,
-            sidebar: Color(hex: "#06140e")!,
-            card: Color(hex: "#102a1f")!,
-            swatchColors: [Color(hex: "#4ec9a0")!, Color(hex: "#0a1e16")!]
-        ),
-        "Sunset": ThemePreset(
-            name: "Sunset",
-            accent: Color(hex: "#ff7e5f")!,
-            background: Color(hex: "#1f0d12")!,
-            sidebar: Color(hex: "#17080c")!,
-            card: Color(hex: "#2e1620")!,
-            swatchColors: [Color(hex: "#ff7e5f")!, Color(hex: "#1f0d12")!]
-        ),
-        "Rose": ThemePreset(
-            name: "Rose",
-            accent: Color(hex: "#e056a0")!,
-            background: Color(hex: "#1c0a1a")!,
-            sidebar: Color(hex: "#15050f")!,
-            card: Color(hex: "#281030")!,
-            swatchColors: [Color(hex: "#e056a0")!, Color(hex: "#1c0a1a")!]
-        ),
-        "Graphite": ThemePreset(
-            name: "Graphite",
-            accent: Color(hex: "#8899aa")!,
-            background: Color(hex: "#161618")!,
-            sidebar: Color(hex: "#0e0e10")!,
-            card: Color(hex: "#202024")!,
-            swatchColors: [Color(hex: "#8899aa")!, Color(hex: "#161618")!]
-        ),
-        "Ocean": ThemePreset(
-            name: "Ocean",
-            accent: Color(hex: "#00b4d8")!,
-            background: Color(hex: "#0a1628")!,
-            sidebar: Color(hex: "#060e1c")!,
-            card: Color(hex: "#132240")!,
-            swatchColors: [Color(hex: "#00b4d8")!, Color(hex: "#0a1628")!]
-        ),
-        "Ember": ThemePreset(
-            name: "Ember",
-            accent: Color(hex: "#ff4500")!,
-            background: Color(hex: "#1a0a0a")!,
-            sidebar: Color(hex: "#120505")!,
-            card: Color(hex: "#2a1414")!,
-            swatchColors: [Color(hex: "#ff4500")!, Color(hex: "#1a0a0a")!]
-        ),
-        "Mint": ThemePreset(
-            name: "Mint",
-            accent: Color(hex: "#6ee7b7")!,
-            background: Color(hex: "#0a1a14")!,
-            sidebar: Color(hex: "#061210")!,
-            card: Color(hex: "#142a22")!,
-            swatchColors: [Color(hex: "#6ee7b7")!, Color(hex: "#0a1a14")!]
-        ),
-    ]
-}
-
 // MARK: - Color Hex Extensions
-
-import Combine
 
 extension Color {
     init?(hex: String) {

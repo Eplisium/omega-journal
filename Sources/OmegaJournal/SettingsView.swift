@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Settings sections
 
@@ -177,11 +178,67 @@ struct SettingsView: View {
             SettingsCard(
                 title: "Theme",
                 icon: "paintpalette",
-                footnote: "Pick a preset, then fine-tune it with custom colors below."
+                footnote: "Pick a preset. Each card previews the sidebar, a card and the accent. Use Custom Colors below for your own."
             ) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 10)], spacing: 10) {
-                    ForEach(ThemePresets.all.keys.sorted(), id: \.self) { name in
-                        themePresetButton(name)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                    ForEach(ThemePresets.all) { preset in
+                        themePresetButton(preset)
+                    }
+                }
+                if let preset = theme.currentPreset {
+                    SettingsRowDivider()
+                    SettingsRow(
+                        title: "Accent override",
+                        subtitle: theme.accentOverrides[preset.name] == nil ? "Using \(preset.name)'s default accent" : "Custom accent for \(preset.name)"
+                    ) {
+                        HStack(spacing: 8) {
+                            ColorPicker("Accent for \(preset.name)", selection: accentOverrideBinding(for: preset), supportsOpacity: false)
+                                .labelsHidden()
+                            if theme.accentOverrides[preset.name] != nil {
+                                SettingsPillButton(title: "Reset", icon: "arrow.counterclockwise", prominent: false) {
+                                    theme.setAccentOverride(nil, for: preset.name)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SettingsCard(
+                title: "System Appearance",
+                icon: "circle.lefthalf.filled",
+                footnote: "When on, Omega Journal switches between your light and dark preset as macOS does."
+            ) {
+                SettingsRow(title: "Follow system appearance") {
+                    Toggle("Follow system appearance", isOn: Binding(
+                        get: { theme.followSystem },
+                        set: { theme.setFollowSystem($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                }
+                if theme.followSystem {
+                    SettingsRowDivider()
+                    SettingsRow(title: "Light preset") {
+                        Picker("Light preset", selection: Binding(
+                            get: { theme.lightPresetName },
+                            set: { theme.setPair(light: $0) }
+                        )) {
+                            ForEach(ThemePresets.lightPresets) { Text($0.name).tag($0.name) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 160)
+                    }
+                    SettingsRowDivider()
+                    SettingsRow(title: "Dark preset") {
+                        Picker("Dark preset", selection: Binding(
+                            get: { theme.darkPresetName },
+                            set: { theme.setPair(dark: $0) }
+                        )) {
+                            ForEach(ThemePresets.darkPresets) { Text($0.name).tag($0.name) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 160)
                     }
                 }
             }
@@ -241,6 +298,19 @@ struct SettingsView: View {
                     ColorPicker("Card color", selection: $customCard, supportsOpacity: false)
                         .labelsHidden()
                 }
+                if customContrast < ContrastChecker.minimumBodyRatio {
+                    SettingsRowDivider()
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(theme.warningColor)
+                            .accessibilityHidden(true)
+                        Text("Low contrast: body text on these colors is \(String(format: "%.1f", customContrast)):1 (WCAG recommends at least 4.5:1). Try a darker or lighter background.")
+                            .font(OmegaTheme.metaFont)
+                            .foregroundColor(theme.warningColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 SettingsRowDivider()
                 HStack {
                     Spacer()
@@ -258,33 +328,92 @@ struct SettingsView: View {
         }
     }
 
-    private func themePresetButton(_ name: String) -> some View {
-        let preset = ThemePresets.all[name]!
-        let isSelected = theme.themeName == name
-        return Button { theme.applyTheme(named: name) } label: {
-            VStack(spacing: 6) {
+    private var customContrast: Double {
+        ThemeManager.contrast(background: customBackground, sidebar: customSidebar, card: customCard)
+    }
+
+    private func accentOverrideBinding(for preset: ThemePreset) -> Binding<Color> {
+        Binding(
+            get: { theme.accentOverride(for: preset.name) ?? Color(hex: preset.accent) ?? theme.accentColor },
+            set: { theme.setAccentOverride($0, for: preset.name) }
+        )
+    }
+
+    /// Swatch card with a live mini-preview (sidebar, card, text lines, accent).
+    private func themePresetButton(_ preset: ThemePreset) -> some View {
+        let isSelected = theme.themeName == preset.name
+        let accent = Color(hex: theme.effectiveAccentHex(for: preset)) ?? theme.accentColor
+        let bg = Color(hex: preset.background) ?? .black
+        let sidebar = Color(hex: preset.sidebar) ?? .black
+        let card = Color(hex: preset.card) ?? .black
+        let text = Color(hex: preset.body) ?? .white
+        let secondary = Color(hex: preset.secondary) ?? .gray
+        return Button { theme.applyTheme(named: preset.name) } label: {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 0) {
-                    preset.background
-                    preset.card
-                    preset.accent
+                    sidebar
+                        .frame(width: 26)
+                        .overlay(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Capsule().fill(accent).frame(width: 14, height: 4)
+                                Capsule().fill(secondary.opacity(0.6)).frame(width: 14, height: 3)
+                                Capsule().fill(secondary.opacity(0.6)).frame(width: 10, height: 3)
+                            }
+                            .padding(.top, 8)
+                        }
+                    ZStack(alignment: .topLeading) {
+                        bg
+                        VStack(alignment: .leading, spacing: 5) {
+                            Capsule().fill(text).frame(width: 46, height: 5)
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(card)
+                                .frame(height: 24)
+                                .overlay(alignment: .leading) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Capsule().fill(text.opacity(0.85)).frame(width: 52, height: 3)
+                                        Capsule().fill(secondary).frame(width: 36, height: 3)
+                                    }
+                                    .padding(.leading, 6)
+                                }
+                            Capsule().fill(accent).frame(width: 30, height: 6)
+                        }
+                        .padding(8)
+                    }
                 }
-                .frame(height: 32)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                Text(name)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(theme.titleTextColor)
+                .frame(height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.borderColor, lineWidth: 1))
+
+                HStack(spacing: 6) {
+                    Text(preset.name)
+                        .font(OmegaTheme.font(.caption, isSelected ? .semibold : .medium))
+                        .foregroundColor(theme.titleTextColor)
+                    Spacer(minLength: 0)
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(OmegaTheme.font(.caption))
+                            .foregroundColor(theme.accentColor)
+                    }
+                }
+                Text(preset.blurb)
+                    .font(OmegaTheme.metaFont)
+                    .foregroundColor(theme.secondaryTextColor)
+                    .lineLimit(1)
             }
-            .padding(7)
+            .padding(8)
             .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(isSelected ? theme.accentColor.opacity(0.15) : theme.cardColor.opacity(0.4))
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(isSelected ? theme.accentColor.opacity(0.14) : theme.cardColor.opacity(0.4))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 9)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .strokeBorder(isSelected ? theme.accentColor : .clear, lineWidth: 1.5)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(preset.name) theme, \(preset.isDark ? "dark" : "light")")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: Goals
