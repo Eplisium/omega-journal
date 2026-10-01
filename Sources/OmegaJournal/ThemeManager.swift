@@ -64,6 +64,27 @@ final class ThemeManager: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: Semantic colors (design system)
+
+    var isDark: Bool { colorScheme == .dark }
+
+    /// Surface levels: 0 = window background, 1 = cards, 2/3 = raised layers.
+    var surface0: Color { backgroundColor }
+    var surface1: Color { cardColor }
+    var surface2: Color { surface(mixing: 0.05) }
+    var surface3: Color { surface(mixing: 0.10) }
+
+    private func surface(mixing amount: Double) -> Color {
+        let base = NSColor(cardColor).usingColorSpace(.sRGB) ?? .gray
+        let target: NSColor = isDark ? .white : .black
+        return Color(nsColor: base.blended(withFraction: amount, of: target) ?? base)
+    }
+
+    var successColor: Color { isDark ? Color(hex: "#4ade80")! : Color(hex: "#15803d")! }
+    var warningColor: Color { isDark ? Color(hex: "#fbbf24")! : Color(hex: "#b45309")! }
+    var dangerColor: Color { isDark ? Color(hex: "#f87171")! : Color(hex: "#b91c1c")! }
+    var borderColor: Color { titleTextColor.opacity(isDark ? 0.08 : 0.12) }
+
     func applyTheme(named name: String) {
         guard let preset = ThemePresets.all[name] else { return }
         themeName = name
