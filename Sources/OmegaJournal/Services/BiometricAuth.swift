@@ -12,10 +12,13 @@ final class BiometricAuth: ObservableObject {
     /// True while the system auth dialog is on screen (the app resigns active then).
     @Published private(set) var isAuthenticating = false
 
-    private init() {}
+    /// Where the idle-relock setting lives; `nil` means `DatabaseManager.shared` (resolved lazily).
+    private let settingsDB: DatabaseManager?
+
+    private init() { settingsDB = nil }
 
     /// Independent instance for tests (the shared one is touched by other suites).
-    init(forTesting: Void) {}
+    init(forTesting: Void, db: DatabaseManager? = nil) { settingsDB = db }
 
     /// Returns a user-facing description of the available biometric type.
     var biometricType: String {
@@ -85,8 +88,7 @@ final class BiometricAuth: ObservableObject {
     static let autoRelockIdleMinutesKey = "autoRelockIdleMinutes"
     private var idleTimer: Task<Void, Never>?
     private var idleMinutes: Int {
-        let raw = DatabaseManager.shared.getSetting(Self.autoRelockIdleMinutesKey, defaultValue: "5")
-        return Int(raw) ?? 5
+        (settingsDB ?? .shared).int(Self.autoRelockIdleMinutesKey, default: 5)
     }
 
     /// Test seam: overrides the idle interval (seconds) instead of the setting.

@@ -39,11 +39,11 @@ enum SmartAssist {
     static let enabledKey = "smartAssistEnabled"
 
     static func isEnabled(_ db: DatabaseManager = .shared) -> Bool {
-        db.getSetting(enabledKey, defaultValue: "false") == "true"
+        db.bool(enabledKey)
     }
 
     static func setEnabled(_ on: Bool, db: DatabaseManager = .shared) {
-        db.setSetting(enabledKey, value: on ? "true" : "false")
+        db.setBool(enabledKey, on)
     }
 
     static var availability: SmartAssistAvailability {

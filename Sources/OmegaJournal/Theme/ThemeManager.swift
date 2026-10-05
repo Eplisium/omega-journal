@@ -12,7 +12,7 @@ import SwiftUI
 
 @MainActor
 final class ThemeManager: ObservableObject {
-    static let shared = ThemeManager()
+    static let shared = ThemeManager(db: .shared)
 
     // Settings keys
     static let followSystemKey = "themeFollowSystem"
@@ -37,13 +37,15 @@ final class ThemeManager: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
 
-    private init() {
-        let db = DatabaseManager.shared
-        let name = db.getSetting("themeName", defaultValue: ThemePresets.defaultName)
-        let accentHex = db.getSetting("accentColor", defaultValue: "#9d6bff")
-        let bgHex = db.getSetting("backgroundColor", defaultValue: "#1a0d2e")
-        let sidebarHex = db.getSetting("sidebarColor", defaultValue: "#140823")
-        let cardHex = db.getSetting("cardColor", defaultValue: "#241245")
+    private let db: DatabaseManager
+
+    init(db: DatabaseManager) {
+        self.db = db
+        let name = db.getSetting(SettingKey.themeName, defaultValue: ThemePresets.defaultName)
+        let accentHex = db.getSetting(SettingKey.accentColor, defaultValue: "#9d6bff")
+        let bgHex = db.getSetting(SettingKey.backgroundColor, defaultValue: "#1a0d2e")
+        let sidebarHex = db.getSetting(SettingKey.sidebarColor, defaultValue: "#140823")
+        let cardHex = db.getSetting(SettingKey.cardColor, defaultValue: "#241245")
         let initialAccent = Color(hex: accentHex) ?? Color(hex: "#9d6bff")!
         let initialBackground = Color(hex: bgHex) ?? Color(hex: "#1a0d2e")!
         let initialSidebar = Color(hex: sidebarHex) ?? Color(hex: "#140823")!
@@ -61,7 +63,7 @@ final class ThemeManager: ObservableObject {
         titleTextColor = textColors.title
         bodyTextColor = textColors.body
         secondaryTextColor = textColors.secondary
-        followSystem = db.getSetting(Self.followSystemKey, defaultValue: "0") == "1"
+        followSystem = db.bool(Self.followSystemKey)
         lightPresetName = db.getSetting(Self.lightPresetKey, defaultValue: ThemePresets.defaultLightName)
         darkPresetName = db.getSetting(Self.darkPresetKey, defaultValue: ThemePresets.defaultDarkName)
         var overrides: [String: String] = [:]
@@ -168,7 +170,6 @@ final class ThemeManager: ObservableObject {
 
     /// Sets or clears (nil) the accent override for a preset; applies live if it is the active preset.
     func setAccentOverride(_ color: Color?, for presetName: String) {
-        let db = DatabaseManager.shared
         if let color {
             accentOverrides[presetName] = color.toHex()
             db.setSetting(Self.accentOverrideKey(presetName), value: color.toHex())
@@ -197,7 +198,7 @@ final class ThemeManager: ObservableObject {
 
     func setFollowSystem(_ on: Bool) {
         followSystem = on
-        DatabaseManager.shared.setSetting(Self.followSystemKey, value: on ? "1" : "0")
+        db.setBool(Self.followSystemKey, on, asDigit: true)
         if on {
             // Seed the matching side of the pair from the current preset.
             if let p = currentPreset {
@@ -227,7 +228,6 @@ final class ThemeManager: ObservableObject {
     }
 
     private func persistPair() {
-        let db = DatabaseManager.shared
         db.setSetting(Self.lightPresetKey, value: lightPresetName)
         db.setSetting(Self.darkPresetKey, value: darkPresetName)
     }
@@ -282,12 +282,11 @@ final class ThemeManager: ObservableObject {
     }
 
     private func persist() {
-        let db = DatabaseManager.shared
-        db.setSetting("themeName", value: themeName)
-        db.setSetting("accentColor", value: accentColor.toHex())
-        db.setSetting("backgroundColor", value: backgroundColor.toHex())
-        db.setSetting("sidebarColor", value: sidebarColor.toHex())
-        db.setSetting("cardColor", value: cardColor.toHex())
+        db.setSetting(SettingKey.themeName, value: themeName)
+        db.setSetting(SettingKey.accentColor, value: accentColor.toHex())
+        db.setSetting(SettingKey.backgroundColor, value: backgroundColor.toHex())
+        db.setSetting(SettingKey.sidebarColor, value: sidebarColor.toHex())
+        db.setSetting(SettingKey.cardColor, value: cardColor.toHex())
     }
 }
 

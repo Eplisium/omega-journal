@@ -62,7 +62,7 @@ struct EditorView: View {
         _stamp = State(initialValue: parts.stamp ?? EntryStamp())
         _mood = State(initialValue: entry.mood)
         _tags = State(initialValue: entry.tags)
-        _fontSize = State(initialValue: Double(DatabaseManager.shared.getSetting("editorFontSize", defaultValue: "15")) ?? 15)
+        _fontSize = State(initialValue: vm.editorFontSize)
         _wordCount = State(initialValue: MarkdownLogic.wordCount(parts.rest))
         _sessionStartWords = State(initialValue: MarkdownLogic.wordCount(parts.rest))
         _charCount = State(initialValue: parts.rest.utf16.count)
@@ -143,7 +143,7 @@ struct EditorView: View {
         .onChange(of: tags) { _, _ in persist() }
         .onChange(of: stamp) { _, _ in persist() }
         .onChange(of: fontSize) { _, new in
-            DatabaseManager.shared.setSetting("editorFontSize", value: "\(Int(new))")
+            vm.editorFontSize = new
         }
         .onDisappear {
             vm.flushPendingSave()

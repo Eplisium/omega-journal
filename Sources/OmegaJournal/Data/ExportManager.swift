@@ -112,8 +112,9 @@ enum ExportManager {
     }
 
     static func jsonData(_ entries: [JournalEntry], attachmentData: ((Attachment) -> Data?)? = nil,
-                         revisionData: ((JournalEntry) -> [JSONRevision])? = nil) throws -> Data {
-        let journalNames = Dictionary(DatabaseManager.shared.fetchJournals().map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+                         revisionData: ((JournalEntry) -> [JSONRevision])? = nil,
+                         db: DatabaseManager = .shared) throws -> Data {
+        let journalNames = Dictionary(db.fetchJournals().map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         let jsonEntries = entries.map { e in
             JSONEntry(
                 id: e.id, title: e.title, body: e.body,

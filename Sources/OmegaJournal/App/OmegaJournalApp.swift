@@ -189,4 +189,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum ShellPrefs {
     static let lockOnResignKey = "shell.lockHiddenOnResignActive"
+    // Sidebar disclosure state (@AppStorage).
+    static let sidebarCollapsedTags = "shell.sidebar.collapsedTags"
+    static let sidebarLibraryExpanded = "shell.sidebar.libraryExpanded"
+    static let sidebarMoodsExpanded = "shell.sidebar.moodsExpanded"
+    static let sidebarNotebooksExpanded = "shell.sidebar.notebooksExpanded"
+    static let sidebarReflectExpanded = "shell.sidebar.reflectExpanded"
+    static let sidebarSmartExpanded = "shell.sidebar.smartExpanded"
+    static let sidebarStorageExpanded = "shell.sidebar.storageExpanded"
+    static let sidebarTagsExpanded = "shell.sidebar.tagsExpanded"
 }

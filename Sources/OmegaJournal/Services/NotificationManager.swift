@@ -41,14 +41,14 @@ extension Notification.Name {
 
 @MainActor
 final class NotificationManager: ObservableObject {
-    static let shared = NotificationManager()
+    static let shared = NotificationManager(db: .shared)
 
     @Published var isAuthorized = false
     @Published var reminderEnabled = false
     @Published var reminderHour = 20
     @Published var reminderMinute = 0
 
-    private let db = DatabaseManager.shared
+    private let db: DatabaseManager
     private let presenter = NotificationPresenter()
 
     /// How many upcoming one-shot reminders are kept scheduled. Each carries a
@@ -60,10 +60,11 @@ final class NotificationManager: ObservableObject {
     /// UNUserNotificationCenter traps outside a real app bundle (e.g. `swift test`).
     private static var centerAvailable: Bool { Bundle.main.bundlePath.hasSuffix(".app") }
 
-    private init() {
-        reminderEnabled = db.getSetting("reminderEnabled", defaultValue: "false") == "true"
-        reminderHour = Int(db.getSetting("reminderHour", defaultValue: "20")) ?? 20
-        reminderMinute = Int(db.getSetting("reminderMinute", defaultValue: "0")) ?? 0
+    init(db: DatabaseManager) {
+        self.db = db
+        reminderEnabled = db.bool(SettingKey.reminderEnabled)
+        reminderHour = db.int(SettingKey.reminderHour, default: 20)
+        reminderMinute = db.int(SettingKey.reminderMinute, default: 0)
         loadReviewSchedule()
         guard Self.centerAvailable else { return }
         UNUserNotificationCenter.current().delegate = presenter

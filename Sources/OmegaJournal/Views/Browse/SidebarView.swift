@@ -10,15 +10,15 @@ struct SidebarView: View {
     @ObservedObject private var goals = GoalManager.shared
 
     // Collapsed/expanded state of every section persists across launches.
-    @AppStorage("shell.sidebar.libraryExpanded") private var libraryExpanded = true
-    @AppStorage("shell.sidebar.reflectExpanded") private var reflectExpanded = true
-    @AppStorage("shell.sidebar.notebooksExpanded") private var notebooksExpanded = true
-    @AppStorage("shell.sidebar.smartExpanded") private var smartExpanded = true
-    @AppStorage("shell.sidebar.tagsExpanded") private var tagsExpanded = true
-    @AppStorage("shell.sidebar.moodsExpanded") private var moodsExpanded = false
-    @AppStorage("shell.sidebar.storageExpanded") private var storageExpanded = true
+    @AppStorage(ShellPrefs.sidebarLibraryExpanded) private var libraryExpanded = true
+    @AppStorage(ShellPrefs.sidebarReflectExpanded) private var reflectExpanded = true
+    @AppStorage(ShellPrefs.sidebarNotebooksExpanded) private var notebooksExpanded = true
+    @AppStorage(ShellPrefs.sidebarSmartExpanded) private var smartExpanded = true
+    @AppStorage(ShellPrefs.sidebarTagsExpanded) private var tagsExpanded = true
+    @AppStorage(ShellPrefs.sidebarMoodsExpanded) private var moodsExpanded = false
+    @AppStorage(ShellPrefs.sidebarStorageExpanded) private var storageExpanded = true
     /// Newline-separated tag paths whose children are folded away.
-    @AppStorage("shell.sidebar.collapsedTags") private var collapsedTagsRaw = ""
+    @AppStorage(ShellPrefs.sidebarCollapsedTags) private var collapsedTagsRaw = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var settingsSection: SettingsSection = .appearance

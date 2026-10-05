@@ -74,7 +74,7 @@ struct WritingGoal: Identifiable {
 
 @MainActor
 final class GoalManager: ObservableObject {
-    static let shared = GoalManager()
+    static let shared = GoalManager(db: .shared)
 
     @Published var goals: [WritingGoal] = []
     /// How streaks are counted. Persisted; defaults to the forgiving daily mode.
@@ -85,9 +85,10 @@ final class GoalManager: ObservableObject {
     static let streakModeKey = "streak_mode"
     static let weeklyStreakTargetKey = "streak_weeklyTarget"
 
-    private let db = DatabaseManager.shared
+    private let db: DatabaseManager
 
-    private init() {
+    init(db: DatabaseManager) {
+        self.db = db
         loadGoals()
     }
 
