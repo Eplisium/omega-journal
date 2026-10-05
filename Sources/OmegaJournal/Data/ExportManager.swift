@@ -271,7 +271,7 @@ enum ExportManager {
     /// Callers must have unlocked a hidden entry first.
     @MainActor
     static func printEntry(_ entry: JournalEntry, accent: NSColor = NSColor(red: 0.49, green: 0.30, blue: 0.93, alpha: 1)) {
-        let info = NSPrintInfo.shared.copy() as! NSPrintInfo
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
         info.leftMargin = 54; info.rightMargin = 54; info.topMargin = 54; info.bottomMargin = 54
         info.isHorizontallyCentered = false
         info.verticalPagination = .automatic

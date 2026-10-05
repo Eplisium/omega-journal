@@ -68,6 +68,9 @@ final class JournalViewModel: ObservableObject {
     /// Undo history is bounded: an unbounded stack of id arrays only grows.
     static let maxUndoDepth = 50
     var cancellables: Set<AnyCancellable> = []
+    /// Distinct writing days, cached against a cheap fingerprint so keystroke-driven
+    /// `entries` updates don't redo calendar math (see `writingDays`).
+    var writingDaysCache: (key: [Double], days: Set<Date>)?
 
     enum EditorMode: String, CaseIterable, Identifiable {
         case write = "Write"
@@ -344,80 +347,6 @@ final class JournalViewModel: ObservableObject {
         sortInPlace()
     }
 
-    // MARK: - Derived collections
-
-    /// Resolves an entry across every lifecycle collection so Archive, Hidden,
-    /// and Trash readers/editors never depend on the active list being present.
-    func entry(id: String?) -> JournalEntry? {
-        guard let id else { return nil }
-        return entries.first { $0.id == id }
-            ?? archivedEntries.first { $0.id == id }
-            ?? trashedEntries.first { $0.id == id }
-            ?? hiddenEntries.first { $0.id == id }
-    }
-
-    var selectedEntry: JournalEntry? { entry(id: selectedEntryId) }
-    var editingEntry: JournalEntry? { entry(id: editingEntryId) }
-    var isEditing: Bool { editingEntryId != nil }
-    var entryCount: Int { entries.count }
-    /// The Journal workspace's transient query result. Never use this for
-    /// global counts, Calendar, goals, or reflective analytics.
-    var libraryEntries: [JournalEntry] { searchResults ?? entries }
-    var isSearchingLibrary: Bool { searchResults != nil }
-
-    /// Entries after the advanced filter is applied — what the list actually shows.
-    var filteredEntries: [JournalEntry] {
-        filter.isActive ? libraryEntries.filter(filter.matches) : libraryEntries
-    }
-
-    /// Filtered entries bucketed into date sections for the grouped list UI.
-    var groupedEntries: [EntrySection] {
-        let cal = Calendar.current
-        let now = Date()
-        var buckets: [(String, Int, [JournalEntry])] = []
-
-        func bucketIndex(for date: Date) -> (String, Int) {
-            if cal.isDateInToday(date) { return ("Today", 0) }
-            if cal.isDateInYesterday(date) { return ("Yesterday", 1) }
-            if let weekAgo = cal.date(byAdding: .day, value: -7, to: now), date >= weekAgo {
-                return ("Earlier This Week", 2)
-            }
-            if let monthAgo = cal.date(byAdding: .day, value: -30, to: now), date >= monthAgo {
-                return ("Earlier This Month", 3)
-            }
-            let year = cal.component(.year, from: date)
-            let month = cal.component(.month, from: date)
-            let label = date.formatted(.dateTime.month(.wide).year())
-            return (label, 1000 - (year * 12 + month))
-        }
-
-        let pinned = filteredEntries.filter(\.isPinned)
-        let rest = filteredEntries.filter { !$0.isPinned }
-
-        if !pinned.isEmpty {
-            // Rank must beat every other bucket — month buckets use
-            // 1000 - (year*12+month), which goes deeply negative for old dates.
-            buckets.append(("Pinned", Int.min, pinned))
-        }
-        for entry in rest {
-            let (label, rank) = bucketIndex(for: entry.createdAt)
-            if let idx = buckets.firstIndex(where: { $0.0 == label }) {
-                buckets[idx].2.append(entry)
-            } else {
-                buckets.append((label, rank, [entry]))
-            }
-        }
-        return buckets
-            .sorted { $0.1 < $1.1 }
-            .map { EntrySection(title: $0.0, entries: $0.2) }
-    }
-
-    struct EntrySection: Identifiable {
-        let title: String
-        let entries: [JournalEntry]
-        var id: String { title }
-    }
-
     // MARK: - Creating entries
 
     @discardableResult
@@ -595,146 +524,6 @@ final class JournalViewModel: ObservableObject {
         db.saveEntry(u)
         updateEntry(u)
         refreshTagCounts()
-    }
-
-    // MARK: - Reflection scope
-
-    /// Private entries contribute to reflective views only after an explicit
-    /// inclusion choice and an active biometric session.
-    var effectiveAnalyticsVisibility: AnalyticsVisibility {
-        analyticsVisibility == .includePrivate && BiometricAuth.shared.isAuthenticated
-            ? .includePrivate
-            : .visibleOnly
-    }
-
-    var analyticsVisibilityLabel: String { effectiveAnalyticsVisibility.label }
-
-    /// Calendar always shows the full active journal, subject to the clearly
-    /// communicated privacy choice. It is never narrowed by library search.
-    var calendarEntries: [JournalEntry] {
-        reflectionEntries(period: .allTime)
-    }
-
-    /// Insights uses its own selected period and privacy scope, independently
-    /// from Journal search and filters.
-    var scopedAnalyticsEntries: [JournalEntry] {
-        reflectionEntries(period: analyticsPeriod)
-    }
-
-    func reflectionEntries(
-        period: AnalyticsPeriod,
-        relativeTo reference: Date = Date()
-    ) -> [JournalEntry] {
-        let records = entries.map {
-            AnalyticsRecord(id: $0.id, date: $0.createdAt, isPrivate: $0.isHidden)
-        }
-        let includedIds = Set(
-            OmegaAnalytics.filteredRecords(
-                records,
-                period: period,
-                visibility: effectiveAnalyticsVisibility,
-                relativeTo: reference
-            )
-            .map(\.id)
-        )
-        return entries.filter { includedIds.contains($0.id) }
-    }
-
-    // MARK: - Stats
-
-    var moodThisWeek: [Mood: Int] {
-        let w = Date().addingTimeInterval(-7 * 24 * 3600)
-        var c: [Mood: Int] = [:]
-        for e in entries where e.createdAt >= w { c[e.mood, default: 0] += 1 }
-        return c
-    }
-    var totalWordCount: Int { entries.reduce(0) { $0 + $1.wordCount } }
-    var averageMood: Double { entries.isEmpty ? 0 : Double(entries.reduce(0) { $0 + $1.mood.rawValue }) / Double(entries.count) }
-    var entriesThisWeek: Int { entries.filter { $0.createdAt >= Date().addingTimeInterval(-7 * 24 * 3600) }.count }
-    var favoriteCount: Int { entries.filter(\.isFavorite).count }
-    var hiddenCount: Int { hiddenEntries.count }
-
-    /// Distinct calendar days with an active entry. Cached against a cheap
-    /// fingerprint so keystroke-driven `entries` updates don't redo calendar math.
-    var writingDaysCache: (key: [Double], days: Set<Date>)?
-
-    var writingDays: Set<Date> {
-        let key = [Double(entries.count), entries.reduce(0) { $0 + $1.createdAt.timeIntervalSince1970 }]
-        if let cache = writingDaysCache, cache.key == key { return cache.days }
-        let cal = Calendar.current
-        let days = Set(entries.map { cal.startOfDay(for: $0.createdAt) })
-        writingDaysCache = (key, days)
-        return days
-    }
-
-    /// Non-punitive streak: see `StreakCalculator` (one rest day per 7 is
-    /// forgiven; weekly-goal mode counts weeks that hit the target).
-    var streakSummary: StreakSummary {
-        GoalManager.shared.streakSummary(writingDays: writingDays)
-    }
-    var writingStreak: Int { streakSummary.current }
-    var longestStreak: Int { streakSummary.longest }
-    var streakUnit: String { streakSummary.unit }
-    /// Gentle "welcome back" copy, owned by Core so all views share one voice.
-    var welcomeBackMessage: String { StreakCopy.welcomeBack(daysAway: streakSummary.daysSinceLastEntry) }
-
-    var entriesThisMonth: Int {
-        let cal = Calendar.current
-        guard let start = cal.dateInterval(of: .month, for: Date())?.start else { return 0 }
-        return entries.filter { $0.createdAt >= start }.count
-    }
-
-    var averageWordsPerEntry: Int {
-        entries.isEmpty ? 0 : totalWordCount / entries.count
-    }
-
-    var totalReadingTime: String {
-        let total = entries.reduce(0) { $0 + $1.readingMinutes }
-        if total < 60 { return "\(total) min" }
-        return "\(total / 60)h \(total % 60)m"
-    }
-
-    /// The weekday the user journals on most, e.g. "Sunday".
-    var mostProductiveDay: String {
-        let cal = Calendar.current
-        var counts: [Int: Int] = [:]
-        for e in entries { counts[cal.component(.weekday, from: e.createdAt), default: 0] += 1 }
-        guard let best = counts.max(by: { $0.value < $1.value })?.key else { return "—" }
-        return cal.weekdaySymbols[best - 1]
-    }
-
-    /// The hour of day the user writes most often, e.g. "9 PM".
-    var mostProductiveHour: String {
-        var counts: [Int: Int] = [:]
-        let cal = Calendar.current
-        for e in entries { counts[cal.component(.hour, from: e.createdAt), default: 0] += 1 }
-        guard let best = counts.max(by: { $0.value < $1.value })?.key else { return "—" }
-        let suffix = best < 12 ? "AM" : "PM"
-        let display = best % 12 == 0 ? 12 : best % 12
-        return "\(display) \(suffix)"
-    }
-
-    /// Words written per day over the last `days`, for the writing-volume chart.
-    func wordsPerDay(days: Int = 30) -> [WordPoint] {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        var map: [Date: Int] = [:]
-        for e in entries {
-            let day = cal.startOfDay(for: e.createdAt)
-            map[day, default: 0] += e.wordCount
-        }
-        return (0..<days).compactMap { i -> WordPoint? in
-            guard let day = cal.date(byAdding: .day, value: -(days - 1 - i), to: today) else { return nil }
-            return WordPoint(date: day, words: map[day] ?? 0)
-        }
-    }
-
-    /// Entry counts per weekday (Sun…Sat) for the weekday-rhythm chart.
-    var entriesByWeekday: [WeekdayCount] {
-        let cal = Calendar.current
-        var counts: [Int: Int] = [:]
-        for e in entries { counts[cal.component(.weekday, from: e.createdAt), default: 0] += 1 }
-        return (1...7).map { WeekdayCount(weekday: $0, symbol: cal.shortWeekdaySymbols[$0 - 1], count: counts[$0] ?? 0) }
     }
 
 }
