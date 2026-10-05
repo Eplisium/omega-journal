@@ -947,11 +947,7 @@ private struct DayEntriesSheet: View {
     @ObservedObject private var theme = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .full
-        return f
-    }()
+    private static let dayFormatter = DateFormatters.fullDate
 
     private var sortedEntries: [JournalEntry] {
         entries.sorted { $0.createdAt < $1.createdAt }

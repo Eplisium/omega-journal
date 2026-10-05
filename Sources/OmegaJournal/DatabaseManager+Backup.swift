@@ -12,10 +12,7 @@ extension DatabaseManager {
 
     /// Local-calendar day stamp used to gate the automatic backup.
     static func backupDayStamp(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
+        DateFormatters.dayStamp.string(from: date)
     }
 
     static let dailyBackupPrefix = "omega_journal_"
@@ -65,10 +62,7 @@ extension DatabaseManager {
     }
 
     static func fileStamp(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd_HH-mm-ss-SSS"
-        return f.string(from: date)
+        DateFormatters.fileStamp.string(from: date)
     }
 
     func backupDatabase(now: Date = Date()) -> URL? {

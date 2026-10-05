@@ -232,8 +232,6 @@ enum ImportExportPanels {
     }
 
     private static func stamp() -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        return fmt.string(from: Date())
+        DateFormatters.dayStamp.string(from: Date())
     }
 }

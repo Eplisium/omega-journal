@@ -49,9 +49,7 @@ struct OnThisDayView: View {
     }
 
     private var todayFormatted: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .full
-        return formatter.string(from: Date())
+        DateFormatters.fullDate.string(from: Date())
     }
 
     private var emptyState: some View {

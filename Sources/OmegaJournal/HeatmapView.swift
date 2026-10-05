@@ -24,21 +24,9 @@ struct HeatmapView: View {
     }
 
     private static let cal = Calendar.current
-    private static let fullDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .full
-        return f
-    }()
-    private static let shortDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEE, MMM d"
-        return f
-    }()
-    private static let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM"
-        return f
-    }()
+    private static let fullDateFormatter = DateFormatters.fullDate
+    private static let shortDateFormatter = DateFormatters.weekdayMonthDay
+    private static let monthFormatter = DateFormatters.monthAbbrev
 
     private let cellSize: CGFloat = 14
     private let cellSpacing: CGFloat = 3.5
