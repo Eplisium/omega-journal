@@ -166,17 +166,25 @@ enum ImportExportPanels {
         vm.importEncryptedExport(from: url, passphrase: passphrase)
     }
 
-    /// Exports only the currently selected entry.
+    /// Exports only the currently selected entry. Every caller (menu ⌃⌘E,
+    /// reader More menu) goes through here, so the hidden-entry auth gate lives
+    /// here too: a locked hidden entry is never written out without Touch ID or
+    /// the account password.
     static func exportCurrentEntry(vm: JournalViewModel) {
         guard let entry = vm.selectedEntry else {
             vm.showToast("No entry selected", isError: true)
             return
         }
-        let safeName = entry.displayTitle
-            .replacingOccurrences(of: "/", with: "-")
-            .prefix(60)
-        save(vm: vm, suggested: "\(safeName).md", type: .plainText) { url in
-            try ExportManager.exportMarkdown([entry], to: url)
+        Task { @MainActor in
+            guard await vm.revealIfNeeded(entry) else { return }
+            // Re-read after unlocking so the export uses the revealed entry.
+            let entry = vm.entry(id: entry.id) ?? entry
+            let safeName = entry.displayTitle
+                .replacingOccurrences(of: "/", with: "-")
+                .prefix(60)
+            save(vm: vm, suggested: "\(safeName).md", type: .plainText) { url in
+                try ExportManager.exportMarkdown([entry], to: url)
+            }
         }
     }
 

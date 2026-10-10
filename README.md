@@ -266,7 +266,7 @@ Hidden entries remain visible as masked cards. Protected content uses LocalAuthe
 
 Reflection requires explicit private inclusion as well as authentication. Full exports request authentication for hidden content; cancelling omits hidden entries and reports the omission. Hidden-state metadata is preserved by the JSON format.
 
-**Known export bypass:** the single-entry **Export Entry… / ⌃⌘E** path does not authenticate a selected locked hidden entry before writing Markdown. Do not assume every export route enforces the hidden-content gate; the full-export authentication behavior above does not cover this path.
+**Single-entry export:** **Export Entry… / ⌃⌘E** asks for Touch ID or your account password before exporting a locked hidden entry.
 
 **Whole-app lock is unfinished:** settings and policy code exist, but the full-window lock overlay is not attached to the application root. Do not rely on it as a working launch/away lock. This is separate from hidden-entry locking.
 
@@ -346,7 +346,6 @@ Imports and exports have format-specific fidelity; neither PDF nor a static webs
 
 These are source-level integration/behavior findings, not promises of fixes or a substitute for runtime QA:
 
-- **Hidden-entry export bypass:** single-entry Export Entry… / ⌃⌘E lacks an authentication check and can export a selected locked hidden entry.
 - **Whole-app lock:** overlay not mounted; do not rely on the settings toggle for protection.
 - **Audio cutoff:** automatic ten-minute stop drops the recording; manually stop and attach earlier.
 - **Check-ins/habits, AI suggestions, review-notification actions:** partially integrated as described above.
