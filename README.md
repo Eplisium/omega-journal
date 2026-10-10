@@ -15,6 +15,7 @@
   <img alt="SQLite" src="https://img.shields.io/badge/storage-SQLite-7C83DB?style=flat-square">
   <img alt="No built-in sync" src="https://img.shields.io/badge/sync-local_only-7C83DB?style=flat-square">
   <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-7C83DB?style=flat-square">
+  <a href="https://github.com/Eplisium/omega-journal/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Eplisium/omega-journal/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
 <p align="center">
