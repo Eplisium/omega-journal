@@ -13,11 +13,15 @@ APP_BUNDLE="$PROJECT_DIR/Omega Journal.app"
 # over via the environment so arbitrary checkout locations work (issue #1).
 export OMEGA_JOURNAL_PROJECT_DIR="$PROJECT_DIR"
 
-# Prefer the newest binary. A plain `find | head -1` can pick a stale
-# release build over a just-compiled debug binary and ship old SQL.
-BINARY=$(find "$BUILD_DIR" -name "$APP_NAME" -type f -not -path "*/dSYM/*" -not -path "*/DWARF/*" -print0 \
-    | xargs -0 ls -t 2>/dev/null | head -1)
-if [ -z "$BINARY" ]; then echo "Error: Binary not found. Run 'swift build' first."; exit 1; fi
+# Build the release binary here and package that exact file. Guessing "the
+# newest binary under .build" shipped stale code more than once: SwiftPM's
+# build layout moved (.build/<triple>/… → .build/out/Products/…) and old
+# products from either layout can be newer than the code you meant to ship.
+echo "Building release binary..."
+swift build -c release --package-path "$PROJECT_DIR"
+BIN_DIR="$(swift build -c release --package-path "$PROJECT_DIR" --show-bin-path)"
+BINARY="$BIN_DIR/$APP_NAME"
+if [ ! -x "$BINARY" ]; then echo "Error: release binary not found at $BINARY"; exit 1; fi
 echo "Found binary: $BINARY"
 
 rm -rf "$APP_BUNDLE"
@@ -56,7 +60,29 @@ if [ -f "$APP_BUNDLE/Contents/Resources/AppIcon.icns" ]; then
 fi
 
 echo "Codesigning..."
-codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 || true
+# Sign with a STABLE identity when one exists. The journal's encryption key
+# lives in the login Keychain, whose access list remembers the app by its
+# code signature. Ad-hoc signatures change on every build, so every rebuild
+# re-triggered "Omega Journal wants to use your confidential information"
+# and blocked launch until the login password was typed. With a certificate
+# identity, "Always Allow" survives rebuilds.
+#   OMEGA_JOURNAL_SIGN_IDENTITY="<name>"  pick one explicitly ("-" = ad-hoc)
+SIGN_IDENTITY="${OMEGA_JOURNAL_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ]; then
+    SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
+fi
+if [ -n "$SIGN_IDENTITY" ] && [ "$SIGN_IDENTITY" != "-" ]; then
+    echo "Signing identity: $SIGN_IDENTITY"
+    if ! codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"; then
+        echo "Warning: signing with '$SIGN_IDENTITY' failed; falling back to ad-hoc (Keychain will re-prompt)."
+        codesign --force --deep --sign - "$APP_BUNDLE"
+    fi
+else
+    echo "No development identity found; signing ad-hoc (Keychain will prompt after each rebuild)."
+    codesign --force --deep --sign - "$APP_BUNDLE"
+fi
+codesign --verify --strict "$APP_BUNDLE"
 
 echo ""
 echo "=== Omega Journal.app created ==="

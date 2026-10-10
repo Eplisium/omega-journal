@@ -30,6 +30,59 @@ extension Notification.Name {
     static let quickCapture = Notification.Name("OmegaJournal.quickCapture")
 }
 
+/// Drives `MenuBarExtra(isInserted:)` for the quick-capture item.
+///
+/// Do NOT bind `isInserted` to an `@AppStorage` property on the `App` struct:
+/// that makes the whole scene graph depend on UserDefaults, and window /
+/// split-view frame autosave writes to UserDefaults on every layout pass. The
+/// result was a launch-time feedback loop (App body → window layout → defaults
+/// write → App body …) that pinned the main thread at 100% CPU before the
+/// window ever appeared. This model publishes only when the one key it owns
+/// actually changes value, and ignores redundant writes from SwiftUI.
+@MainActor
+final class QuickCapturePresence: ObservableObject {
+    @Published private(set) var isInserted: Bool
+
+    private let defaults: UserDefaults
+    private var observer: NSObjectProtocol?
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        isInserted = Self.read(defaults)
+        observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: defaults, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncFromDefaults() }
+        }
+    }
+
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    static func read(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: QuickCapture.insertedKey) as? Bool ?? true
+    }
+
+    /// Re-reads the setting; publishes only on a real change.
+    func syncFromDefaults() {
+        let value = Self.read(defaults)
+        if value != isInserted { isInserted = value }
+    }
+
+    /// Writes from SwiftUI (e.g. the user removing the item from the menu bar)
+    /// are persisted only when they change the value.
+    func set(_ value: Bool) {
+        guard value != isInserted else { return }
+        isInserted = value
+        defaults.set(value, forKey: QuickCapture.insertedKey)
+    }
+
+    var binding: Binding<Bool> {
+        Binding(get: { [unowned self] in isInserted }, set: { [unowned self] in set($0) })
+    }
+}
+
 /// Small popover for the menu-bar extra. It never touches the database itself:
 /// it posts `.quickCapture`, and ContentView's single view model saves the
 /// entry through the normal `createEntry` path.

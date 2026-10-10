@@ -7,7 +7,8 @@ import AppKit
 struct OmegaJournalApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    @AppStorage(QuickCapture.insertedKey) private var showQuickCapture = true
+    // Not @AppStorage: see QuickCapturePresence for the launch hang this caused.
+    @StateObject private var quickCapture = QuickCapturePresence()
 
     var body: some Scene {
         WindowGroup {
@@ -19,7 +20,7 @@ struct OmegaJournalApp: App {
         .defaultSize(width: 1200, height: 780)
         .commands { menuCommands }
 
-        MenuBarExtra("Quick Capture", systemImage: "square.and.pencil", isInserted: $showQuickCapture) {
+        MenuBarExtra("Quick Capture", systemImage: "square.and.pencil", isInserted: quickCapture.binding) {
             QuickCaptureView()
         }
         .menuBarExtraStyle(.window)

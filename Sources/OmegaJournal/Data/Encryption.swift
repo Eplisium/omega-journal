@@ -53,6 +53,15 @@ enum JournalCrypto {
     /// the app stays launchable with an error state.
     static func key() throws -> SymmetricKey {
         if let cachedKey { return cachedKey }
+        // Isolated test/QA runs (temp database via OMEGA_JOURNAL_TEST_DATABASE_PATH)
+        // get an ephemeral in-memory key: they must never read the user's real
+        // journal key, and a freshly built binary would otherwise block launch
+        // on a Keychain access prompt.
+        if let testPath = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"], !testPath.isEmpty {
+            let key = SymmetricKey(size: .bits256)
+            cachedKey = key
+            return key
+        }
         let key = try loadOrCreateKey(service: service, account: account, allowCreate: { !encryptedDataExists() })
         cachedKey = key
         return key
