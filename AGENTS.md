@@ -31,8 +31,10 @@ These env vars are process-global; use a unique `UUID`-suffixed temp directory p
 ## Architecture
 
 ```
-Sources/OmegaJournalCore/   Pure logic only (OmegaCore.swift): FTS sanitizer, markdown
-                            import, fuzzy match, workspace/period definitions. No AppKit, no DB.
+Sources/OmegaJournalCore/   Pure logic only (OmegaCore.swift, EntryGrouping.swift,
+                            MarkdownPlainPreview.swift): FTS sanitizer, markdown
+                            import, fuzzy match, workspace/period definitions,
+                            list date sections. No AppKit, no DB.
 Sources/OmegaJournal/       SwiftUI app: DatabaseManager (all SQL), JournalViewModel, views.
 ```
 
@@ -74,6 +76,13 @@ Rules:
 
 ## App lifetime & notifications
 
+- Launch gate: the window shows `LaunchGateView` first, which fetches the
+  EXISTING Keychain key off the main thread (`JournalCrypto.fetchExistingAppKey`,
+  load-only — it must never mint a key, because no DB probe is registered yet)
+  and only then builds `ContentView`. Nothing in the gate may touch
+  `DatabaseManager.shared` or `ThemeManager.shared` (ThemeManager reads the DB):
+  doing so reintroduces the "app never opens" hang while macOS waits on the
+  Keychain prompt.
 - Quit flow: `applicationWillTerminate` posts `.quitTimeSave`; ContentView's
   `onReceive` calls `vm.flushPendingSave()` synchronously (the 700ms debounced
   autosave must land before `DatabaseManager.shared` deinits and closes the DB).
