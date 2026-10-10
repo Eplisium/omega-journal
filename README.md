@@ -67,9 +67,8 @@ No account, no cloud, no tracking. Just open it and write in Markdown, then find
 ## Install
 
 1. Download the latest **`Omega-Journal-*.dmg`** from [Releases](https://github.com/Eplisium/omega-journal/releases/latest).
-2. Open it and drag **Omega Journal** into **Applications**.
-3. The app isn't notarized by Apple yet, so the first launch needs one extra step: open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway** (or right-click the app → **Open**).
-4. On first launch macOS asks permission for Omega Journal to store its encryption key in your Keychain — choose **Always Allow**.
+2. Open it and drag **Omega Journal** into **Applications**. Releases are signed with a Developer ID and notarized by Apple, so it opens like any other Mac app.
+3. On first launch macOS asks permission for Omega Journal to store its encryption key in your Keychain — choose **Always Allow**.
 
 Requires macOS 14 Sonoma or later.
 
