@@ -95,6 +95,10 @@ struct SidebarView: View {
             }
             .scrollContentBackground(.hidden)
             .focusable()
+            // Keeps ↑/↓ selection, but no focus ring boxing the whole sidebar
+            // on every click — the selected row's highlight already shows
+            // where you are.
+            .focusEffectDisabled()
             .focused($sidebarFocused)
             .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
             .onKeyPress(.downArrow) { moveSelection(1); return .handled }
