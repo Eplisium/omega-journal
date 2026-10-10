@@ -25,3 +25,4 @@ icon_*.png
 
 # Terra edit-tool backups
 .windop-backups/
+dist/

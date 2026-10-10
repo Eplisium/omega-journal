@@ -17,15 +17,66 @@
   <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-7C83DB?style=flat-square">
 </p>
 
-Omega Journal combines a Markdown diary, organized notebooks, and personal reflection tools in a native Mac app. There is no account requirement or built-in cloud sync. Journal content lives locally, with encrypted entry bodies and attachments, flexible exports, and automatic database backups.
+<p align="center">
+  <img src="docs/screenshots/today.png" alt="Omega Journal's Today view: a writing-first home with today's entry, progress, and recent writing" width="900">
+</p>
 
-**Privacy has boundaries:** live database metadata is not encrypted, automatic database backups omit attachment files, and whole-app locking is not fully connected. Read [Privacy and security](#privacy-and-security), [Backups and recovery](#backups-and-recovery), and [Current limitations](#current-limitations) before relying on those features.
+**Omega Journal is a calm, private place to write — a native Mac journal that keeps your words on your Mac.**
+No account, no cloud, no tracking. Just open it and write in Markdown, then find your way back to what mattered with tags, notebooks, a calendar, and gentle insights.
 
-This README describes the current source implementation, not a claim that every feature has passed a fresh end-to-end or accessibility audit. Partially integrated features are called out explicitly.
+<p align="center">
+  <a href="https://github.com/Eplisium/omega-journal/releases/latest"><strong>⬇︎ Download for macOS</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#build-from-source">Build from source</a>
+  &nbsp;·&nbsp;
+  <a href="CONTRIBUTING.md">Contribute</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Eplisium/omega-journal/discussions">Discussions</a>
+</p>
+
+## Why Omega Journal
+
+- **Writing first.** Open the app and start typing. A native Markdown editor with live split preview, focus and typewriter modes, templates, and daily prompts.
+- **Yours, locally.** Entries live in a SQLite database on your Mac. Entry text, attachments, and automatic backups are encrypted with a key kept in your Keychain. No sign-up, no servers.
+- **Find your way back.** Tags, notebooks, smart folders, full-text search with operators, linked entries (`[[like this]]`), a calendar, and On This Day.
+- **Notice patterns, without pressure.** Mood check-ins, writing rhythm, and insights that stay quiet and kind.
+- **Truly native.** SwiftUI + AppKit, keyboard-first, themes, Quick Capture from the menu bar, optional Spotlight title search, and zero third-party dependencies.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/editor.png" alt="Split editor with Markdown source and rendered preview side by side"></td>
+    <td><img src="docs/screenshots/reading.png" alt="Reading an entry with rendered headings, lists, and checklists"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Write in Markdown with live preview</sub></td>
+    <td align="center"><sub>Read entries beautifully rendered</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/calendar.png" alt="Calendar month view with a day inspector"></td>
+    <td><img src="docs/screenshots/insights.png" alt="Insights with writing days, words, mood, and a writing volume chart"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Browse your writing by day</sub></td>
+    <td align="center"><sub>Gentle insights into your rhythm</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots use a demo journal with made-up entries.</sub>
+
+## Install
+
+1. Download the latest **`Omega-Journal-*.dmg`** from [Releases](https://github.com/Eplisium/omega-journal/releases/latest).
+2. Open it and drag **Omega Journal** into **Applications**.
+3. The app isn't notarized by Apple yet, so the first launch needs one extra step: open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway** (or right-click the app → **Open**).
+4. On first launch macOS asks permission for Omega Journal to store its encryption key in your Keychain — choose **Always Allow**.
+
+Requires macOS 14 Sonoma or later.
+
+**Honest about privacy:** some metadata (titles, tags, moods, dates) is stored unencrypted so search stays fast, automatic backups don't include attachment files, and whole-app locking isn't fully wired up yet. See [Privacy and security](#privacy-and-security), [Backups and recovery](#backups-and-recovery), and [Current limitations](#current-limitations).
 
 ## Contents
 
-- [Build and run](#build-and-run)
+- [Build from source](#build-from-source)
 - [Workspaces](#workspaces)
 - [Writing and reading](#writing-and-reading)
 - [Organization and discovery](#organization-and-discovery)
@@ -37,11 +88,13 @@ This README describes the current source implementation, not a claim that every 
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Current limitations](#current-limitations)
 - [Storage and architecture](#storage-and-architecture)
-- [Development and tests](#development-and-tests)
+- [Contributing](#contributing)
 
-## Build and run
+This README describes the current source implementation, not a claim that every feature has passed a fresh end-to-end or accessibility audit. Partially integrated features are called out explicitly.
 
-Requires macOS 14 Sonoma or later and a recent Xcode/Swift toolchain. The package declares Swift tools 5.9; the test suite uses Swift Testing, so use a toolchain that includes that framework. On-device AI infrastructure has separate macOS 26/Apple Intelligence requirements and is not yet a complete user workflow.
+## Build from source
+
+Requires macOS 14 Sonoma or later and a recent Xcode/Swift toolchain (Swift 6+, which includes Swift Testing). On-device AI infrastructure has separate macOS 26/Apple Intelligence requirements and is not yet a complete user workflow.
 
 ```bash
 git clone https://github.com/Eplisium/omega-journal.git
@@ -52,13 +105,11 @@ bash build_app.sh
 open "Omega Journal.app"
 ```
 
-For an existing checkout, start with `cd` into that checkout instead of cloning again.
-
-`swift build` compiles the executable. `build_app.sh` packages **Omega Journal.app** and regenerates the Ω icon, choosing the newest built binary by modification time. Repackage and reopen the bundle after source changes; compiling alone does not update the double-clickable app.
+`swift build` compiles the executable. `build_app.sh` builds a release binary, packages **Omega Journal.app**, and regenerates the Ω icon. Repackage and reopen the bundle after source changes; compiling alone does not update the double-clickable app.
 
 ## Workspaces
 
-- **Today:** start or continue writing, view daily progress and streak information, revisit recent entries, and surface an On This Day memory. The daily prompt card is shown for a small library; prompt-based creation remains available from the menu.
+- **Today:** start or continue writing, see daily goal progress (when goals are set), revisit recent entries, and surface an On This Day memory. The daily prompt card is shown for a small library; prompt-based creation remains available from the menu.
 - **Journal:** library sidebar, entry cards, and a reader/editor. Browse favorites, this week, moods, tags, smart folders, archive, hidden entries, and trash.
 - **Calendar:** month and agenda browsing with entry drill-through.
 - **Insights:** writing activity, mood trends, patterns, and year review.
@@ -339,9 +390,12 @@ Key implementation areas:
 
 Apple frameworks provide SwiftUI/AppKit, SQLite3, CryptoKit/Security, LocalAuthentication, NaturalLanguage, and system integrations. FoundationModels is conditionally used by the unfinished on-device AI service.
 
-## Development and tests
+## Contributing
 
-Read [AGENTS.md](AGENTS.md) before changing the project. Build and test with:
+Contributions are very welcome — from typo fixes to new features. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) (setup takes about five minutes), then pick a
+[good first issue](https://github.com/Eplisium/omega-journal/labels/good%20first%20issue)
+or say hello in [Discussions](https://github.com/Eplisium/omega-journal/discussions).
 
 ```bash
 swift build
@@ -349,18 +403,11 @@ swift test
 bash build_app.sh
 ```
 
-The test suite uses **Swift Testing**, not XCTest. Coverage includes core parsing/rendering, search, organization, encryption, data safety, archive/trash lifecycle, autosave/export round-trips, tag reconciliation, revisions, and reflection calculations. Test presence is not a claim of a current passing run or full UI coverage.
+The test suite uses **Swift Testing**, not XCTest. Coverage includes core parsing/rendering, search, organization, encryption, data safety, archive/trash lifecycle, autosave/export round-trips, tag reconciliation, revisions, and reflection calculations.
 
-**Never run database tests against a personal journal.** Tests constructing a database/view model must use isolated disposable paths before the shared instance initializes:
+**Never run database tests against a personal journal.** Tests constructing a database/view model must use isolated disposable paths (`OMEGA_JOURNAL_TEST_DATABASE_PATH`, `OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH`) before the shared instance initializes. [AGENTS.md](AGENTS.md) documents the deeper architecture rules: flushing pending autosave before immediate mutations, transactional multi-statement writes, keeping tag stores synchronized, and idempotent migrations.
 
-```text
-OMEGA_JOURNAL_TEST_DATABASE_PATH
-OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH
-```
-
-These environment variables are process-global. Follow the existing test isolation patterns; do not initialize the default database as a test fixture.
-
-Implementation rules include flushing pending autosave before immediate mutations, transactional multi-statement writes, keeping tag stores synchronized, and preserving hidden/lifecycle state through import/export. Database migrations affect real data and must be idempotent with failure-safe behavior.
+Please report security issues privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 
