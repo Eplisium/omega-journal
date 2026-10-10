@@ -113,7 +113,8 @@ struct CalendarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    reflectiveScopeControl
+                    // Only relevant when hidden entries exist; otherwise it's noise.
+                    if vm.hiddenCount > 0 { reflectiveScopeControl }
                     monthSummary
 
                     switch displayMode {

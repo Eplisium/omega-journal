@@ -39,7 +39,8 @@ struct InsightsWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
-                scopeCard
+                // Only relevant when hidden entries exist; otherwise it's noise.
+                if vm.hiddenCount > 0 { scopeCard }
                 reflectionSummary
 
                 if entries.isEmpty {

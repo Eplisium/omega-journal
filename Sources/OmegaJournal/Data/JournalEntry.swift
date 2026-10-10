@@ -67,13 +67,15 @@ struct JournalEntry: Identifiable, Hashable {
 
     var displayTitle: String { title.isEmpty ? "Untitled" : title }
 
+    /// One-line list/card preview with Markdown syntax removed (headings,
+    /// bullets, tasks, quotes, emphasis) so rows read as prose. Only the first
+    /// few lines are processed — rows truncate to ~2 lines anyway.
     var preview: String {
-        let stripped = EntryStampCodec.split(body).rest
-            .replacingOccurrences(of: "```", with: "")
-            .replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
+        let text = MarkdownPlainPreview.lines(EntryStampCodec.split(body).rest, limit: 8)
+            .joined(separator: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return stripped.isEmpty ? "No content" : stripped
+        return text.isEmpty ? "No content" : text
     }
 
     var bodyAsAttributed: AttributedString {

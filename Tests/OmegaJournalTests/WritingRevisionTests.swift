@@ -146,6 +146,15 @@ struct WritingRevisionTests {
         #expect(e.preview == "Hello world")
     }
 
+    @Test("list previews read as text, not Markdown syntax")
+    func previewStripsMarkdownEverywhere() {
+        var e = JournalEntry.new()
+        e.body = "It's live!\n\n### What went well\n- Kept the scope **tiny**\n- [ ] Write a post\n> A quote"
+        #expect(e.preview == "It's live! What went well • Kept the scope tiny ☐ Write a post A quote")
+        e.body = "   \n\n"
+        #expect(e.preview == "No content")
+    }
+
     @MainActor
     @Test("hidden entry revisions are gated while locked; restore keeps the old text as a kept version")
     func hiddenGatingAndRestore() throws {
