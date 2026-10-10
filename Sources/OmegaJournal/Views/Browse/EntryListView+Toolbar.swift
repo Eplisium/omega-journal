@@ -64,12 +64,10 @@ extension EntryListView {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "line.3.horizontal.decrease.circle\(vm.filter.isActive ? ".fill" : "")")
-                            .font(OmegaTheme.font(.meta))
-                        if vm.filter.activeCount > 0 {
-                            Text("\(vm.filter.activeCount)")
-                                .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
-                        }
+                        Text(vm.filter.activeCount > 0 ? "Filters \(vm.filter.activeCount)" : "Filters")
                     }
+                    .font(OmegaTheme.font(.meta, .medium))
+                    .fixedSize()
                     .foregroundColor(vm.filter.isActive ? theme.accentColor : theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
@@ -91,7 +89,7 @@ extension EntryListView {
                     .accessibilityLabel("Save this search")
                 }
 
-                sortSegmentedControl
+                sortMenu
 
                 Button {
                     withAnimation(reduceMotion ? nil : .default) {
@@ -127,34 +125,70 @@ extension EntryListView {
         .padding(.bottom, 8)
     }
 
-    // MARK: Segmented sort (Latest | Oldest | A–Z)
+    // MARK: Sort menu
 
-    var sortSegmentedControl: some View {
-        HStack(spacing: 2) {
-            segment("Latest", active: vm.sortOrder == .dateDesc) { vm.setSortOrder(.dateDesc) }
-            segment("Oldest", active: vm.sortOrder == .dateAsc) { vm.setSortOrder(.dateAsc) }
-            segment("A–Z", active: vm.sortOrder == .titleAsc) { vm.setSortOrder(.titleAsc) }
+    /// One compact, labeled menu instead of a three-button strip. It also
+    /// exposes every sort the app supports (length, mood, recently edited…),
+    /// which the old strip silently hid.
+    var sortMenu: some View {
+        Menu {
+            Picker("Sort by", selection: Binding(get: { vm.sortOrder }, set: { vm.setSortOrder($0) })) {
+                ForEach(SortOrder.allCases) { order in
+                    Label(order.rawValue, systemImage: order.icon).tag(order)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.up.arrow.down")
+                Text(vm.sortOrder.shortLabel)
+            }
+            .font(OmegaTheme.font(.meta, .medium))
+            .foregroundColor(theme.secondaryTextColor)
         }
-        .padding(2)
-        .background(
-            Capsule().fill(theme.cardColor.opacity(0.7))
-        )
-        .overlay(Capsule().strokeBorder(theme.titleTextColor.opacity(0.08), lineWidth: 1))
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .omegaTooltip("Sort: \(vm.sortOrder.rawValue)")
+        .accessibilityLabel("Sort entries")
+        .accessibilityValue(vm.sortOrder.rawValue)
     }
 
-    func segment(_ label: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(OmegaTheme.font(.meta, active ? .semibold : .regular))
-                .foregroundColor(active ? theme.onAccentColor : theme.secondaryTextColor)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 3.5)
-                .background(
-                    Capsule().fill(active ? theme.accentColor : .clear)
-                )
+    /// Removable chips for every active filter, so constraints are never
+    /// invisible once the filter panel is closed.
+    @ViewBuilder
+    var activeFilterChips: some View {
+        let chips = vm.filter.chips
+        if !chips.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(chips) { chip in
+                        Button {
+                            vm.filter = vm.filter.removing(chip.facet)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(chip.label).lineLimit(1)
+                                Image(systemName: "xmark").font(OmegaTheme.font(.meta, .bold))
+                            }
+                            .font(OmegaTheme.font(.meta, .medium))
+                            .foregroundColor(theme.accentColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(theme.accentColor.opacity(0.16)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove filter \(chip.label)")
+                    }
+                    Button("Clear all") { vm.filter = .empty }
+                        .buttonStyle(.plain)
+                        .font(OmegaTheme.font(.meta, .medium))
+                        .foregroundColor(theme.secondaryTextColor)
+                        .accessibilityLabel("Clear all filters")
+                }
+                .padding(.horizontal, 12)
+            }
+            .padding(.bottom, 6)
         }
-        .buttonStyle(.plain)
-        .omegaTooltip(active ? "Sorted by \(label)" : "Sort by \(label)")
     }
 
     // MARK: Bulk action bar

@@ -10,8 +10,9 @@ import OmegaJournalCore
 /// Everything else (sidebar entry, header, styling) is automatic.
 enum SettingsSection: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
-    case goals = "Writing Goals"
-    case data = "Data & Storage"
+    case goals = "Writing"
+    case privacy = "Privacy & Security"
+    case data = "Data & Backups"
     case about = "About"
 
     var id: String { rawValue }
@@ -20,6 +21,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .appearance: "paintpalette.fill"
         case .goals: "target"
+        case .privacy: "lock.shield.fill"
         case .data: "externaldrive.fill"
         case .about: "info.circle.fill"
         }
@@ -28,8 +30,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .appearance: "Themes, colors, and personalization"
-        case .goals: "Targets that shape your writing rhythm"
-        case .data: "Export, import, and manage your library"
+        case .goals: "Goals, reminders, and quick capture"
+        case .privacy: "Encryption, hidden entries, and Spotlight"
+        case .data: "Backups, export, import, and storage"
         case .about: "Keyboard shortcuts and app info"
         }
     }
@@ -57,6 +60,17 @@ struct SettingsView: View {
     @AppStorage(ReadingPreferences.showCoverKey) private var readingShowCover = true
     @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
 
+    /// Sized from the journal window (never the sheet itself, which would feed
+    /// back into its own size) and captured once per presentation.
+    static var preferredSize: CGSize {
+        let candidates = [NSApp.mainWindow, NSApp.keyWindow].compactMap { $0 }
+        let host = candidates.map { $0.sheetParent ?? $0 }.first?.frame.size ?? CGSize(width: 1100, height: 760)
+        return CGSize(width: min(900, max(680, host.width - 120)),
+                      height: min(760, max(540, host.height - 100)))
+    }
+
+    @State private var sheetSize = SettingsView.preferredSize
+
     init(vm: JournalViewModel, initialSection: SettingsSection = .appearance) {
         self._vm = ObservedObject(wrappedValue: vm)
         self._section = State(initialValue: initialSection)
@@ -68,7 +82,9 @@ struct SettingsView: View {
             Divider().opacity(0.2)
             content
         }
-        .frame(width: 680, height: 540)
+        // Use the room the main window offers (the old fixed 680×540 sheet hid
+        // most theme cards and data controls below the fold).
+        .frame(width: sheetSize.width, height: sheetSize.height)
         .background(theme.backgroundColor)
         .confirmationDialog(
             "Empty Trash?",
@@ -165,7 +181,8 @@ struct SettingsView: View {
                     switch section {
                     case .appearance: appearancePane
                     case .goals:
-                        VStack(alignment: .leading, spacing: 18) { goalsPane; ReflectionSettingsPanels(vm: vm) }
+                        VStack(alignment: .leading, spacing: 18) { goalsPane; quickCaptureCard; ReflectionSettingsPanels(vm: vm) }
+                    case .privacy: privacyPane
                     case .data:
                         VStack(alignment: .leading, spacing: 18) { dataPane; DataSafetyPanels(vm: vm) }
                     case .about: aboutPane
@@ -432,7 +449,7 @@ struct SettingsView: View {
         SettingsCard(
             title: "Writing Goals",
             icon: "target",
-            footnote: "Targets appear in the sidebar and drive your streak. Click any target to type a new one — press Return or click away to save."
+            footnote: "Daily targets show as progress on Today. Click any target to type a new one — press Return or click away to save."
         ) {
             ForEach(Array(goals.goals.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { SettingsRowDivider() }
@@ -463,14 +480,25 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Data
+    // MARK: Privacy
 
-    private var dataPane: some View {
+    private var privacyPane: some View {
         VStack(alignment: .leading, spacing: 18) {
+            SettingsCard(title: "What's protected", icon: "lock.doc") {
+                SettingsRow(
+                    title: "Encrypted on disk",
+                    subtitle: "Entry text, attachments, and automatic backups (AES-256-GCM; the key lives in your Keychain)."
+                ) { Image(systemName: "checkmark.shield.fill").foregroundColor(.green).accessibilityHidden(true) }
+                SettingsRowDivider()
+                SettingsRow(
+                    title: "Stored as plain metadata",
+                    subtitle: "Titles, tags, moods, dates, and word counts — so search and filters stay fast. Anyone signed in to your Mac account could read these."
+                ) { Image(systemName: "info.circle").foregroundColor(theme.secondaryTextColor).accessibilityHidden(true) }
+            }
             SettingsCard(
-                title: "Privacy & Security",
+                title: "Hidden Entries & Spotlight",
                 icon: "lock.shield",
-                footnote: "Encrypted (AES-256-GCM, key in your Keychain): entry bodies, attachments, and automatic backups. NOT encrypted: titles, tags, moods, timestamps, and word counts — they are stored as plain metadata so search and filtering stay fast. Anyone with access to your Mac account could read those fields. Hidden entries are masked in the app and need Touch ID or your password to reveal."
+                footnote: "Hidden entries are masked everywhere in the app and need Touch ID or your password to reveal."
             ) {
                 SettingsRow(
                     title: "Lock hidden entries when I switch apps",
@@ -492,7 +520,14 @@ struct SettingsView: View {
                             if on { SpotlightIndexer.shared.scheduleReindex(db: vm.db) } else { SpotlightIndexer.shared.removeAll() }
                         }
                 }
-                SettingsRowDivider()
+            }
+        }
+    }
+
+    // MARK: Writing — quick capture
+
+    private var quickCaptureCard: some View {
+        SettingsCard(title: "Quick Capture", icon: "bolt") {
                 SettingsRow(
                     title: "Global new-entry hotkey (⌥⌘J)",
                     subtitle: "Opens Omega Journal with a fresh entry from any app."
@@ -502,8 +537,13 @@ struct SettingsView: View {
                         .toggleStyle(.switch)
                         .onChange(of: globalHotkeyEnabled) { _, _ in GlobalHotkey.shared.syncRegistration() }
                 }
-            }
+        }
+    }
 
+    // MARK: Data
+
+    private var dataPane: some View {
+        VStack(alignment: .leading, spacing: 18) {
             SettingsCard(title: "Export", icon: "square.and.arrow.up") {
                 HStack(spacing: 8) {
                     SettingsPillButton(title: "Markdown", icon: "arrow.down.doc") {

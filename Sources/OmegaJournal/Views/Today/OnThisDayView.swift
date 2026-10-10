@@ -5,6 +5,9 @@ import SwiftUI
 struct OnThisDayView: View {
     @ObservedObject var vm: JournalViewModel
     let onOpenEntry: (JournalEntry) -> Void
+    /// Empty-state next steps: start today's entry, or browse past writing.
+    var onWriteToday: (() -> Void)? = nil
+    var onBrowseCalendar: (() -> Void)? = nil
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
 
@@ -71,6 +74,28 @@ struct OnThisDayView: View {
                     .foregroundColor(.secondary.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
+            }
+            HStack(spacing: 10) {
+                if let onWriteToday {
+                    Button(action: onWriteToday) {
+                        Label("Write today's entry", systemImage: "square.and.pencil")
+                            .font(OmegaTheme.font(.body, .semibold))
+                            .foregroundColor(theme.onAccentColor)
+                            .padding(.horizontal, 16).padding(.vertical, 9)
+                            .background(Capsule().fill(theme.accentColor))
+                    }
+                    .buttonStyle(.plain)
+                }
+                if let onBrowseCalendar {
+                    Button(action: onBrowseCalendar) {
+                        Label("Browse the calendar", systemImage: "calendar")
+                            .font(OmegaTheme.font(.body, .medium))
+                            .foregroundColor(theme.accentColor)
+                            .padding(.horizontal, 14).padding(.vertical, 9)
+                            .background(Capsule().strokeBorder(theme.accentColor.opacity(0.45), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

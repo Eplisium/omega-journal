@@ -31,44 +31,20 @@ extension JournalViewModel {
 
     /// Filtered entries bucketed into date sections for the grouped list UI.
     var groupedEntries: [EntrySection] {
-        let cal = Calendar.current
-        let now = Date()
-        var buckets: [(String, Int, [JournalEntry])] = []
+        sections(for: filteredEntries, fallbackTitle: "Entries")
+    }
 
-        func bucketIndex(for date: Date) -> (String, Int) {
-            if cal.isDateInToday(date) { return ("Today", 0) }
-            if cal.isDateInYesterday(date) { return ("Yesterday", 1) }
-            if let weekAgo = cal.date(byAdding: .day, value: -7, to: now), date >= weekAgo {
-                return ("Earlier This Week", 2)
-            }
-            if let monthAgo = cal.date(byAdding: .day, value: -30, to: now), date >= monthAgo {
-                return ("Earlier This Month", 3)
-            }
-            let year = cal.component(.year, from: date)
-            let month = cal.component(.month, from: date)
-            let label = date.formatted(.dateTime.month(.wide).year())
-            return (label, 1000 - (year * 12 + month))
-        }
+    /// Whether the current sort is chronological, so date sections make sense.
+    var groupsByDate: Bool { sortOrder == .dateDesc || sortOrder == .dateAsc }
 
-        let pinned = filteredEntries.filter(\.isPinned)
-        let rest = filteredEntries.filter { !$0.isPinned }
-
-        if !pinned.isEmpty {
-            // Rank must beat every other bucket — month buckets use
-            // 1000 - (year*12+month), which goes deeply negative for old dates.
-            buckets.append(("Pinned", Int.min, pinned))
-        }
-        for entry in rest {
-            let (label, rank) = bucketIndex(for: entry.createdAt)
-            if let idx = buckets.firstIndex(where: { $0.0 == label }) {
-                buckets[idx].2.append(entry)
-            } else {
-                buckets.append((label, rank, [entry]))
-            }
-        }
-        return buckets
-            .sorted { $0.1 < $1.1 }
-            .map { EntrySection(title: $0.0, entries: $0.2) }
+    /// Splits an already-sorted entry list into display sections. Section order
+    /// always follows list order (see `EntryGrouping`), so "Latest" can never
+    /// show an older month above a newer entry again.
+    func sections(for list: [JournalEntry], fallbackTitle: String, groupByDate: Bool? = nil) -> [EntrySection] {
+        let byId = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let items = list.map { EntryGroupItem(id: $0.id, date: $0.createdAt, isPinned: $0.isPinned) }
+        return EntryGrouping.sections(for: items, groupByDate: groupByDate ?? groupsByDate, fallbackTitle: fallbackTitle)
+            .map { EntrySection(title: $0.title, entries: $0.ids.compactMap { byId[$0] }) }
     }
 
     struct EntrySection: Identifiable {

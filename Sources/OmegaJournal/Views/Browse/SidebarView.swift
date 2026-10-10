@@ -8,6 +8,7 @@ struct SidebarView: View {
     @Binding var selection: SidebarItem?
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var goals = GoalManager.shared
+    @ObservedObject private var auth = BiometricAuth.shared
 
     // Collapsed/expanded state of every section persists across launches.
     @AppStorage(ShellPrefs.sidebarLibraryExpanded) private var libraryExpanded = true
@@ -26,6 +27,9 @@ struct SidebarView: View {
     @State private var showTagManager = false
     @State private var journalDraft: JournalDraft?
     @State private var dropTarget: String?
+    @State private var showAllTags = false
+    /// Tags shown before "Show all" — keeps the sidebar scannable.
+    static let collapsedTagLimit = 6
     @FocusState private var sidebarFocused: Bool
 
     struct JournalDraft: Identifiable { let id = UUID(); var journal: Journal? }
@@ -41,8 +45,6 @@ struct SidebarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    if !vm.entries.isEmpty { streakCard }
-
                     section("TODAY") {
                         row(.today)
                     }
@@ -65,6 +67,16 @@ struct SidebarView: View {
 
                     smartFoldersSection
 
+                    // Storage sits above the open-ended lists so Archive / Hidden /
+                    // Trash never get pushed below the fold by a long tag list.
+                    disclosureSection("STORAGE", isExpanded: $storageExpanded) {
+                        row(.archive, badge: vm.archivedEntries.count, dropTargetId: "archive") { ids in
+                            vm.dropEntriesOnArchive(ids: ids)
+                        }
+                        row(.hidden, badge: vm.hiddenCount)
+                        row(.trash, badge: vm.trashedEntries.count)
+                    }
+
                     disclosureSection("MOODS", isExpanded: $moodsExpanded) {
                         ForEach(Mood.allCases) { mood in
                             let count = vm.moodCounts[mood] ?? 0
@@ -74,14 +86,6 @@ struct SidebarView: View {
 
                     if !vm.tagTree.isEmpty {
                         tagsSection
-                    }
-
-                    disclosureSection("STORAGE", isExpanded: $storageExpanded) {
-                        row(.archive, badge: vm.archivedEntries.count, dropTargetId: "archive") { ids in
-                            vm.dropEntriesOnArchive(ids: ids)
-                        }
-                        row(.hidden, badge: vm.hiddenCount)
-                        row(.trash, badge: vm.trashedEntries.count)
                     }
 
                     goalsCard
@@ -127,8 +131,8 @@ struct SidebarView: View {
     private var keyboardOrder: [SidebarItem] {
         var items: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .insights, .onThisDay]
         items += (vm.smartFolders.filter(\.isPinned) + vm.smartFolders.filter { !$0.isPinned }).map { .smartFolder($0.id) }
-        items += TagTree.flatten(vm.tagTree, collapsed: collapsedTags).map { .tag($0.path) }
         items += [.archive, .hidden, .trash]
+        items += visibleTagNodes.map { .tag($0.path) }
         return items
     }
 
@@ -149,6 +153,12 @@ struct SidebarView: View {
         }) {
             notebookRow(nil)
             ForEach(vm.journals) { j in notebookRow(j) }
+            if !auth.isAuthenticated && vm.hiddenCount > 0 {
+                Text("Counts exclude hidden entries while locked.")
+                    .font(OmegaTheme.font(.meta))
+                    .foregroundColor(theme.secondaryTextColor.opacity(0.8))
+                    .padding(.horizontal, 8).padding(.top, 2)
+            }
         }
     }
 
@@ -159,7 +169,8 @@ struct SidebarView: View {
         let name = journal?.name ?? "All notebooks"
         return SidebarRowButton(
             title: name, icon: nil, dot: color, badge: count, indent: 0,
-            isSelected: isActive, tint: color, theme: theme, isDropTarget: dropTarget == "nb:\(journal?.id ?? "")"
+            isSelected: isActive, tint: color, theme: theme, isDropTarget: dropTarget == "nb:\(journal?.id ?? "")",
+            style: .scope
         ) {
             vm.setActiveJournal(journal?.id)
         }
@@ -180,6 +191,7 @@ struct SidebarView: View {
             return true
         }, isTargeted: { dropTarget = $0 ? "nb:\(journal?.id ?? "")" : (dropTarget == "nb:\(journal?.id ?? "")" ? nil : dropTarget) })
         .accessibilityLabel(isActive ? "\(name), current notebook" : "Switch to \(name)")
+        .omegaTooltip(isActive ? "Showing \(name)" : "Show only \(name)")
     }
 
     // MARK: Smart folders
@@ -227,11 +239,40 @@ struct SidebarView: View {
         disclosureSection("TAGS", isExpanded: $tagsExpanded, trailing: {
             sectionAddButton("Manage tags", icon: "slider.horizontal.3") { showTagManager = true }
         }) {
-            let nodes = TagTree.flatten(vm.tagTree, collapsed: collapsedTags)
-            ForEach(nodes.prefix(60)) { node in
+            ForEach(visibleTagNodes) { node in
                 tagRow(node)
             }
+            let total = allTagNodes.count
+            if total > Self.collapsedTagLimit {
+                Button {
+                    withAnimation(OmegaTheme.Motion.quick.animation(reduceMotion: reduceMotion)) { showAllTags.toggle() }
+                } label: {
+                    Text(showAllTags ? "Show fewer" : "Show all \(total) tags")
+                        .font(OmegaTheme.font(.meta, .medium))
+                        .foregroundColor(theme.accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
+    }
+
+    private var allTagNodes: [TagNode] {
+        TagTree.flatten(vm.tagTree, collapsed: collapsedTags)
+    }
+
+    /// The selected tag always stays visible, even when the list is shortened.
+    private var visibleTagNodes: [TagNode] {
+        let all = allTagNodes
+        if showAllTags || all.count <= Self.collapsedTagLimit { return Array(all.prefix(200)) }
+        var shown = Array(all.prefix(Self.collapsedTagLimit))
+        if case .tag(let path) = selection, !shown.contains(where: { $0.path == path }),
+           let selected = all.first(where: { $0.path == path }) {
+            shown.append(selected)
+        }
+        return shown
     }
 
     private func tagRow(_ node: TagNode) -> some View {
@@ -299,45 +340,6 @@ struct SidebarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-
-    // MARK: Streak card
-
-    private var streakCard: some View {
-        HStack(spacing: 12) {
-            VStack(spacing: 1) {
-                HStack(spacing: 3) {
-                    Image(systemName: "flame.fill")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(vm.writingStreak > 0 ? .orange : theme.secondaryTextColor.opacity(0.5))
-                    Text("\(vm.writingStreak)")
-                        .font(OmegaTheme.font(.heading, .bold, design: .rounded))
-                        .foregroundColor(theme.titleTextColor)
-                }
-                Text(vm.writingStreak == 0 ? "fresh start" : "\(vm.streakUnit)\(vm.writingStreak == 1 ? "" : "s") showing up")
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-            }
-            Divider().frame(height: 26).opacity(0.25)
-            VStack(spacing: 1) {
-                Text("\(vm.entriesThisMonth)")
-                    .font(OmegaTheme.font(.heading, .bold, design: .rounded))
-                    .foregroundColor(theme.titleTextColor)
-                Text("this month")
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(theme.cardColor.opacity(0.6))
-        )
-        .hoverGlow(radius: 11, glow: 0.3, border: 0.35, lift: false)
-        .padding(.bottom, 10)
     }
 
     // MARK: Goals card
@@ -527,6 +529,10 @@ struct SidebarView: View {
 
 struct SidebarRowButton: View {
     enum Disclosure { case expanded, collapsed }
+    /// `.destination` rows are where you are (filled highlight). `.scope` rows
+    /// filter the current destination (notebooks) and show a checkmark instead,
+    /// so two rows never look like competing "current page" selections.
+    enum Style { case destination, scope }
 
     let title: String
     let icon: String?
@@ -539,7 +545,10 @@ struct SidebarRowButton: View {
     var isDropTarget = false
     var disclosure: Disclosure? = nil
     var onDisclosure: (() -> Void)? = nil
+    var style: Style = .destination
     let action: () -> Void
+
+    private var showsFill: Bool { isSelected && style == .destination }
 
     @State private var hover = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -577,12 +586,18 @@ struct SidebarRowButton: View {
                         .foregroundColor(isSelected ? theme.titleTextColor : theme.bodyTextColor)
                         .lineLimit(1)
                     Spacer(minLength: 4)
+                    if isSelected && style == .scope {
+                        Image(systemName: "checkmark")
+                            .font(OmegaTheme.font(.meta, .bold))
+                            .foregroundColor(tint)
+                            .accessibilityHidden(true)
+                    }
                     if let badge, badge > 0 {
                         // Subtle: plain tabular number, no capsule unless selected.
                         Text("\(badge)")
                             .font(OmegaTheme.font(.meta, .regular, design: .rounded))
                             .monospacedDigit()
-                            .foregroundColor(isSelected ? tint : theme.secondaryTextColor.opacity(0.8))
+                            .foregroundColor(showsFill ? tint : theme.secondaryTextColor.opacity(0.8))
                     }
                 }
                 .contentShape(Rectangle())
@@ -593,14 +608,14 @@ struct SidebarRowButton: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isDropTarget ? tint.opacity(0.28) : (isSelected ? tint.opacity(0.16) : (hover ? theme.titleTextColor.opacity(0.05) : .clear)))
+                .fill(isDropTarget ? tint.opacity(0.28) : (showsFill ? tint.opacity(0.16) : (hover ? theme.titleTextColor.opacity(0.05) : .clear)))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(isDropTarget ? tint.opacity(0.8) : .clear, lineWidth: 1.5)
         )
         .overlay(alignment: .leading) {
-            if isSelected {
+            if showsFill {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(tint)
                     .frame(width: 2.5, height: 14)

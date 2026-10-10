@@ -23,7 +23,7 @@ struct FilterBar: View {
                 }
             }
 
-            // Mood chips
+            // Mood chips + date range
             HStack(spacing: 4) {
                 ForEach(Mood.allCases) { mood in
                     let on = vm.filter.moods.contains(mood)
@@ -55,16 +55,21 @@ struct FilterBar: View {
                 }
                 .labelsHidden()
                 .font(OmegaTheme.font(.meta))
-                .frame(width: 118)
+                .fixedSize()
+                .accessibilityLabel("Date range")
             }
 
-            // Toggles
+            // Toggles get their own row so labels never wrap mid-word in a
+            // narrow list column; the length stepper sits on the next row.
             HStack(spacing: 5) {
                 toggle("Favorites", "star.fill", $vm.filter.favoritesOnly)
                 toggle("Pinned", "pin.fill", $vm.filter.pinnedOnly)
                 toggle("Files", "paperclip", $vm.filter.withAttachmentsOnly)
-                Spacer()
-                Text("Min words")
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 5) {
+                Text("Minimum words")
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                 Stepper("", value: $vm.filter.minWords, in: 0...2000, step: 50)
@@ -72,7 +77,9 @@ struct FilterBar: View {
                 Text("\(vm.filter.minWords)")
                     .font(OmegaTheme.font(.meta, design: .rounded))
                     .foregroundColor(theme.bodyTextColor)
-                    .frame(width: 26, alignment: .leading)
+                    .monospacedDigit()
+                    .fixedSize()
+                Spacer(minLength: 0)
             }
 
             // Tag chips
@@ -109,7 +116,9 @@ struct FilterBar: View {
             HStack(spacing: 3) {
                 Image(systemName: icon).font(OmegaTheme.font(.meta))
                 Text(label).font(OmegaTheme.font(.meta, binding.wrappedValue ? .semibold : .regular))
+                    .lineLimit(1)
             }
+            .fixedSize()
             .foregroundColor(binding.wrappedValue ? theme.accentColor : theme.secondaryTextColor)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
@@ -118,5 +127,6 @@ struct FilterBar: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(binding.wrappedValue ? [.isSelected] : [])
     }
 }

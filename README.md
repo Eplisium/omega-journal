@@ -229,7 +229,7 @@ Ordinary Markdown, JSON, HTML, and PDF exports contain readable content. They do
 
 Automatic database backup is attempted during database startup at most once per local calendar day; failures can retry on the next launch. The latest **seven daily backups** are retained. This is launch-triggered, not an always-running daily scheduler.
 
-Settings → Data & Storage includes manual backup, an extra backup folder, integrity checking, backup verification, and restore. Additional safety snapshots are taken before migrations and restores. Restore validates the database and schema compatibility, snapshots the current journal, and attempts rollback on failure.
+Settings → Data & Backups includes manual backup, an extra backup folder, integrity checking, backup verification, and restore. Additional safety snapshots are taken before migrations and restores. Restore validates the database and schema compatibility, snapshots the current journal, and attempts rollback on failure.
 
 **Recovery boundaries:**
 

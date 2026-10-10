@@ -16,7 +16,12 @@ struct ReflectionWorkspaceView: View {
             case .insights:
                 InsightsView(vm: vm)
             case .onThisDay:
-                OnThisDayView(vm: vm, onOpenEntry: openJournalEntry)
+                OnThisDayView(
+                    vm: vm,
+                    onOpenEntry: openJournalEntry,
+                    onWriteToday: { selection = .all; vm.createEntry() },
+                    onBrowseCalendar: { selection = .calendar }
+                )
             case .today, .none:
                 today
             default:

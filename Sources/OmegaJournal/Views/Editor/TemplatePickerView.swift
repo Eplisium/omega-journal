@@ -21,7 +21,7 @@ struct TemplatePickerView: View {
                     Text("Start from a Template")
                         .font(OmegaTheme.font(.bodyLarge, .semibold))
                         .foregroundColor(theme.titleTextColor)
-                    Text("Variables like {{date}} and {{prompt}} fill in when you start an entry")
+                    Text("Pick a starting point — you can change anything once you're writing.")
                         .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
@@ -77,6 +77,14 @@ struct TemplatePickerView: View {
         vm.loadTemplates()
     }
 
+    private func previewText(for template: EntryTemplate) -> String {
+        guard !template.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "A blank page" }
+        let filled = TemplateExpander.expand(template.body, context: TemplateContext(
+            date: Date(), prompt: PromptGenerator.today(), moodLabel: Mood.neutral.label))
+        let text = MarkdownPlainPreview.text(filled, limit: 4)
+        return text.isEmpty ? "A blank page" : text
+    }
+
     private func templateCard(_ template: EntryTemplate) -> some View {
         Button {
             vm.createEntry(from: template)
@@ -92,7 +100,9 @@ struct TemplatePickerView: View {
                 Text(template.name)
                     .font(OmegaTheme.font(.body, .semibold))
                     .foregroundColor(theme.titleTextColor)
-                Text(template.body.isEmpty ? "Empty page" : template.body)
+                // Rendered, filled-in preview (today's date/prompt) instead of
+                // raw Markdown and {{variables}}.
+                Text(previewText(for: template))
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                     .lineLimit(4)
@@ -126,6 +136,7 @@ struct TemplatePickerView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Template \(template.name)")
+        .omegaTooltip("Start a new entry from “\(template.name)” · right-click to edit")
         .contextMenu {
             Button { isNew = false; editing = template } label: { Label("Edit Template…", systemImage: "pencil") }
             Button {
@@ -224,7 +235,7 @@ struct TemplateEditorView: View {
                 .accessibilityLabel("Default tags")
 
             HStack {
-                Text("Body")
+                Text("Body · Markdown; variables fill in when an entry starts")
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
                 Spacer()

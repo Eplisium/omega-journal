@@ -198,14 +198,18 @@ struct EditorView: View {
                     Text("Done").font(OmegaTheme.font(.caption, .medium))
                 }
                 .foregroundColor(theme.accentColor)
+                .fixedSize()
             }
             .buttonStyle(.plain)
+            .layoutPriority(2)
             .accessibilityLabel("Done editing")
             .help("Done (⌘↩)")
 
             Divider().frame(height: 16).opacity(0.25)
 
-            // Mood picker
+            // Mood picker: the full emoji row when there's room, otherwise a
+            // compact menu so the toolbar never squeezes "Done" or the modes.
+            ViewThatFits(in: .horizontal) {
             HStack(spacing: 2) {
                 ForEach(Mood.allCases) { m in
                     Button { mood = m } label: {
@@ -228,20 +232,32 @@ struct EditorView: View {
                     .accessibilityAddTraits(mood == m ? .isSelected : [])
                 }
             }
+                Menu {
+                    ForEach(Mood.allCases) { m in
+                        Button("\(m.emoji)  \(m.label)") { mood = m }
+                    }
+                } label: {
+                    Text(mood.emoji).font(OmegaTheme.font(.bodyLarge))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Mood: \(mood.label). Change mood")
+            }
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: mood)
 
             Spacer()
 
             // Editor mode switcher
+            // Labeled, so the three modes are self-explanatory.
             Picker("", selection: $vm.editorMode) {
                 ForEach(JournalViewModel.EditorMode.allCases) { m in
-                    Image(systemName: m.icon).accessibilityLabel(m.rawValue).tag(m)
+                    Text(m.rawValue).tag(m)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 108)
-            .omegaTooltip("Write / Split / Preview")
+            .fixedSize()
+            .omegaTooltip("Write, split view, or preview")
             .accessibilityLabel("Editor mode")
 
             Menu {
@@ -275,24 +291,44 @@ struct EditorView: View {
             .accessibilityLabel("Focus and typography")
             .popover(isPresented: $showFocusPopover, arrowEdge: .bottom) { WritingFocusSettingsView() }
 
-            ActionButton(icon: "mappin.and.ellipse", color: theme.accentColor, active: !stamp.isEmpty, tooltip: "Place & weather") {
-                showStampPopover.toggle()
+            ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
+                attachFile()
             }
-            .accessibilityLabel("Place and weather")
+            .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
+
+            // Less frequent tools share one labeled menu instead of four more icons.
+            Menu {
+                Button { showStampPopover = true } label: {
+                    Label(stamp.isEmpty ? "Add Place & Weather…" : "Edit Place & Weather…", systemImage: "mappin.and.ellipse")
+                }
+                Button { showRecorder = true } label: {
+                    Label("Record Voice Memo…", systemImage: "mic")
+                }
+                Divider()
+                Button {
+                    vm.flushPendingSave()
+                    if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
+                    showHistory = true
+                } label: {
+                    Label("Version History…", systemImage: "clock.arrow.circlepath")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(OmegaTheme.font(.bodyLarge, .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("More: place & weather, voice memo, version history")
+            .accessibilityLabel("More editor tools")
             .popover(isPresented: $showStampPopover, arrowEdge: .bottom) { EntryStampEditor(stamp: $stamp) }
-
-            ActionButton(icon: "mic", color: theme.accentColor, active: entry.attachments.contains { $0.isAudio }, tooltip: "Record voice memo") {
-                showRecorder.toggle()
-            }
-            .accessibilityLabel("Record voice memo")
-            .popover(isPresented: $showRecorder, arrowEdge: .bottom) { AudioRecorderPopover(vm: vm, entry: entry) }
-
-            ActionButton(icon: "clock.arrow.circlepath", color: theme.accentColor, active: false, tooltip: "Version history") {
-                vm.flushPendingSave()
-                if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
-                showHistory = true
-            }
-            .accessibilityLabel("Version history")
+            .background(
+                Color.clear
+                    .popover(isPresented: $showRecorder, arrowEdge: .bottom) { AudioRecorderPopover(vm: vm, entry: entry) }
+            )
             .sheet(isPresented: $showHistory) {
                 RevisionHistoryView(vm: vm, entry: vm.entry(id: entry.id) ?? entry) { newTitle, newBody in
                     title = newTitle
@@ -301,11 +337,6 @@ struct EditorView: View {
                     stamp = parts.stamp ?? EntryStamp()
                 }
             }
-
-            ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
-                attachFile()
-            }
-            .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
 
             ActionButton(icon: "arrow.up.left.and.arrow.down.right", color: theme.accentColor, active: false, tooltip: "Zen Mode (⌃⌘F)") {
                 withAnimation(reduceMotion ? nil : .default) { vm.isZenMode = true }

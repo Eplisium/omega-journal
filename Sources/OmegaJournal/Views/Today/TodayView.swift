@@ -22,12 +22,12 @@ struct TodayView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 26) {
                 welcomeHeader
-                heroCard
-                statLine
+                // Writing comes first: either continue today's entry or start one.
+                if todaysEntry != nil { heroCard } else { startWritingCard }
+                if !vm.entries.isEmpty { statLine }
                 if hasDailyGoals { progressCard }
-                if vm.entries.count < 5 { writingPrompt }
 
                 if !recentEntries.isEmpty {
                     recentWriting
@@ -46,40 +46,94 @@ struct TodayView: View {
         .background(theme.backgroundColor)
     }
 
+    /// Greeting + date + one gentle status line. The primary Write action
+    /// lives in the hero card directly below, not floating at the far right.
     private var welcomeHeader: some View {
-        HStack(alignment: .bottom, spacing: 20) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text(greeting)
-                    .font(OmegaTheme.font(.meta, .semibold, design: .serif))
-                    .foregroundColor(theme.titleTextColor)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(todayLabel.uppercased())
+                .font(OmegaTheme.font(.meta, .semibold))
+                .tracking(0.9)
+                .foregroundColor(theme.secondaryTextColor)
 
-                Text(todayLabel)
-                    .font(OmegaTheme.font(.body, .medium))
-                    .foregroundColor(theme.secondaryTextColor)
+            Text(greeting)
+                .font(OmegaTheme.font(.title, .bold, design: .serif))
+                .foregroundColor(theme.titleTextColor)
+                .accessibilityAddTraits(.isHeader)
 
-                Text(vm.entries.isEmpty
-                     ? "A private place to put down a thought."
-                     : "\(StreakCopy.streakLine(vm.streakSummary)) · \(vm.entriesThisMonth) entries this month")
-                    .font(OmegaTheme.font(.body))
-                    .foregroundColor(theme.bodyTextColor)
-            }
+            Text(StreakCopy.welcomeBack(daysAway: vm.entries.isEmpty ? nil : vm.streakSummary.daysSinceLastEntry))
+                .font(OmegaTheme.font(.body))
+                .foregroundColor(theme.bodyTextColor)
+        }
+    }
 
-            Spacer(minLength: 16)
+    // MARK: Hero — start writing
+
+    /// Shown when nothing has been written today: one clear invitation with a
+    /// primary action, plus today's prompt and templates as quieter options.
+    private var startWritingCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("What's on your mind?")
+                .font(OmegaTheme.font(.heading, .semibold, design: .serif))
+                .foregroundColor(theme.titleTextColor)
 
             Button {
                 openJournal()
-                vm.createEntry()
+                vm.createEntryFromPrompt()
             } label: {
-                Label("Write", systemImage: "square.and.pencil")
-                    .font(OmegaTheme.font(.body, .semibold))
-                    .foregroundColor(theme.onAccentColor)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(theme.accentColor))
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(theme.accentColor)
+                    Text(PromptGenerator.today())
+                        .font(OmegaTheme.font(.body, design: .serif))
+                        .foregroundColor(theme.bodyTextColor)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Write a new journal entry")
+            .omegaTooltip("Start an entry with today's prompt")
+            .accessibilityLabel("Write about today's prompt: \(PromptGenerator.today())")
+
+            HStack(spacing: 12) {
+                Button {
+                    openJournal()
+                    vm.createEntry()
+                } label: {
+                    Label("Write entry", systemImage: "square.and.pencil")
+                        .font(OmegaTheme.font(.body, .semibold))
+                        .foregroundColor(theme.onAccentColor)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(theme.accentColor))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Write a new journal entry")
+
+                Button {
+                    NotificationCenter.default.post(name: .newFromTemplate, object: nil)
+                } label: {
+                    Label("Use a template", systemImage: "doc.text")
+                        .font(OmegaTheme.font(.body, .medium))
+                        .foregroundColor(theme.accentColor)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Capsule().strokeBorder(theme.accentColor.opacity(0.45), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Start an entry from a template")
+            }
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(theme.cardColor.opacity(0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(theme.accentColor.opacity(0.22), lineWidth: 1)
+        )
     }
 
     // MARK: Hero — today's entry
@@ -159,16 +213,6 @@ struct TodayView: View {
         }
     }
 
-    // MARK: Stat cards
-
-    private var statRow: some View {
-        HStack(spacing: 14) {
-            statCard(value: "\(vm.entriesThisWeek)", label: "Entries this week", detail: StreakCopy.streakLine(vm.streakSummary))
-            statCard(value: vm.totalWordCount.formatted(), label: "Words written", detail: "\(vm.entries.count) entries total")
-            statCard(value: "\(vm.entriesThisMonth)", label: "This month", detail: "Every entry counts")
-        }
-    }
-
     /// One quiet line instead of three cards: the numbers stay, the visual weight goes.
     private var statLine: some View {
         HStack(spacing: 14) {
@@ -197,7 +241,7 @@ struct TodayView: View {
     }
 
     private var statText: some View {
-        Text("\(vm.entriesThisWeek) this week  ·  \(vm.entriesThisMonth) this month  ·  \(vm.totalWordCount.formatted()) words  ·  \(StreakCopy.streakLine(vm.streakSummary))")
+        Text("\(vm.entriesThisWeek) this week  ·  \(vm.entriesThisMonth) this month  ·  \(vm.totalWordCount.formatted()) words written")
             .font(OmegaTheme.font(.caption))
             .foregroundColor(theme.secondaryTextColor)
             .accessibilityElement(children: .combine)
@@ -222,99 +266,6 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.42)))
-    }
-
-    private func statCard(value: String, label: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(value)
-                .font(OmegaTheme.font(.bodyLarge, .bold, design: .serif))
-                .foregroundColor(theme.titleTextColor)
-            Text(label)
-                .font(OmegaTheme.font(.meta, .semibold))
-                .foregroundColor(theme.bodyTextColor)
-            Text(detail)
-                .font(OmegaTheme.font(.meta))
-                .foregroundColor(theme.secondaryTextColor)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(theme.cardColor.opacity(0.5))
-        )
-        .hoverGlow(radius: 13, glow: 0.26, border: 0.3, lift: false)
-    }
-
-    private var writingPrompt: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 7) {
-                Image(systemName: "sparkles")
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.accentColor)
-                Text("TODAY'S PROMPT")
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .tracking(0.9)
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-
-            Text(PromptGenerator.today())
-                .font(OmegaTheme.font(.caption, .medium, design: .serif))
-                .foregroundColor(theme.titleTextColor)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Button {
-                openJournal()
-                vm.createEntryFromPrompt()
-            } label: {
-                Label("Write about this", systemImage: "arrow.right")
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.accentColor)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(22)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(theme.cardColor.opacity(0.62))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(theme.accentColor.opacity(0.22), lineWidth: 1)
-        )
-    }
-
-    private var progressAndShortcuts: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("TODAY'S PROGRESS")
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .tracking(0.8)
-                    .foregroundColor(theme.secondaryTextColor)
-
-                ForEach(goals.goals.filter { $0.type == .dailyWords || $0.type == .dailyEntries }) { goal in
-                    TodayGoalRow(goal: goal)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.42)))
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("RETURN TO")
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .tracking(0.8)
-                    .foregroundColor(theme.secondaryTextColor)
-
-                HStack(spacing: 8) {
-                    TodayShortcut(icon: "books.vertical", title: "Journal", subtitle: "All entries", action: openJournal)
-                    TodayShortcut(icon: "calendar", title: "Calendar", subtitle: "Browse time", action: openCalendar)
-                    TodayShortcut(icon: "chart.line.uptrend.xyaxis", title: "Insights", subtitle: "Reflect", action: openInsights)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.42)))
-        }
     }
 
     private var recentWriting: some View {
@@ -473,35 +424,5 @@ private struct TodayGoalRow: View {
             }
             .frame(height: 5)
         }
-    }
-}
-
-private struct TodayShortcut: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    let action: () -> Void
-    @ObservedObject private var theme = ThemeManager.shared
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
-                Image(systemName: icon)
-                    .font(OmegaTheme.font(.bodyLarge, .medium))
-                    .foregroundColor(theme.accentColor)
-                Text(title)
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .foregroundColor(theme.bodyTextColor)
-                Text(subtitle)
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.backgroundColor.opacity(0.45)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Open \(title)")
     }
 }

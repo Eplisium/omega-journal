@@ -76,7 +76,9 @@ struct DetailView: View {
 
                     Text(vm.entries.isEmpty
                          ? "Your journal is empty. Let's change that."
-                         : "\(vm.entries.count) entries · \(vm.totalWordCount.formatted()) words · \(StreakCopy.streakLine(vm.streakSummary))")
+                         : vm.streakSummary.current > 0
+                            ? "\(vm.entries.count) entries · \(StreakCopy.streakLine(vm.streakSummary))"
+                            : "Pick an entry to read, or start something new.")
                         .font(OmegaTheme.font(.caption))
                         .foregroundColor(theme.secondaryTextColor)
                 }

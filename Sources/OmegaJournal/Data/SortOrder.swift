@@ -13,6 +13,19 @@ enum SortOrder: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Compact label for the list header's sort menu.
+    var shortLabel: String {
+        switch self {
+        case .dateDesc: "Latest"
+        case .dateAsc: "Oldest"
+        case .updatedDesc: "Edited"
+        case .titleAsc: "A–Z"
+        case .titleDesc: "Z–A"
+        case .wordsDesc: "Longest"
+        case .moodDesc: "Mood"
+        }
+    }
+
     var icon: String {
         switch self {
         case .dateDesc: "arrow.down.circle"

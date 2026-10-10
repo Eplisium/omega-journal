@@ -216,33 +216,30 @@ struct ReadView: View {
                 }
                     .accessibilityLabel("Delete Forever")
             } else {
-                ActionButton(icon: "pencil", color: theme.accentColor, active: true, tooltip: "Edit (⌘E)") {
+                // Primary actions are labeled and few; everything else lives in
+                // one labeled "More" menu, with destructive actions separated.
+                Button {
                     vm.startEditing(entry)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                        .font(OmegaTheme.font(.meta, .semibold))
+                        .foregroundColor(theme.onAccentColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(theme.accentColor))
                 }
-                    .accessibilityLabel("Edit (⌘E)")
-                ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: theme.accentColor, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin" : "Pin") {
-                    vm.togglePin(entry)
-                }
-                    .accessibilityLabel(entry.isPinned ? "Unpin" : "Pin")
+                .buttonStyle(.plain)
+                .omegaTooltip("Edit (⌘E)")
+                .accessibilityLabel("Edit (⌘E)")
+
                 ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite, tooltip: entry.isFavorite ? "Unfavorite" : "Favorite") {
                     vm.toggleFavorite(entry)
                 }
                     .accessibilityLabel(entry.isFavorite ? "Unfavorite" : "Favorite")
-                ActionButton(icon: "clock.arrow.circlepath", color: theme.accentColor, active: false, tooltip: "Version history") {
-                    Task {
-                        guard await vm.revealIfNeeded(entry) else { return }
-                        showHistory = true
-                    }
+                ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: theme.accentColor, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin" : "Pin") {
+                    vm.togglePin(entry)
                 }
-                    .accessibilityLabel("Version history")
-                ActionButton(icon: "doc.on.doc", color: theme.accentColor, active: false, tooltip: "Duplicate") {
-                    vm.duplicate(entry)
-                }
-                    .accessibilityLabel("Duplicate")
-                ActionButton(icon: "doc.on.clipboard", color: theme.accentColor, active: false, tooltip: "Copy as Markdown") {
-                    vm.copyAsMarkdown(entry)
-                }
-                    .accessibilityLabel("Copy as Markdown")
+                    .accessibilityLabel(entry.isPinned ? "Unpin" : "Pin")
 
                 Spacer()
 
@@ -271,43 +268,75 @@ struct ReadView: View {
                     }
                     .accessibilityLabel("Table of contents")
                 }
-                ActionButton(icon: "printer", color: theme.accentColor, active: false, tooltip: "Print this entry (⌘P)") {
-                    Task {
-                        guard await vm.revealIfNeeded(entry) else { return }
-                        ExportManager.printEntry(entry, accent: NSColor(theme.accentColor))
-                    }
-                }
-                .keyboardShortcut("p", modifiers: .command)
-                .accessibilityLabel("Print this entry")
-                ActionButton(icon: "square.and.arrow.up", color: theme.accentColor, active: false, tooltip: "Export this entry") {
-                    Task {
-                        guard await vm.revealIfNeeded(entry) else { return }
-                        ImportExportPanels.exportCurrentEntry(vm: vm)
-                    }
-                }
-                    .accessibilityLabel("Export this entry")
-                ActionButton(icon: entry.isArchived ? "tray.and.arrow.up" : "archivebox", color: theme.accentColor, active: entry.isArchived, tooltip: entry.isArchived ? "Unarchive" : "Archive") {
-                    vm.toggleArchive(entry)
-                }
-                    .accessibilityLabel(entry.isArchived ? "Unarchive" : "Archive")
-                ActionButton(icon: entry.isHidden ? "lock.open" : "lock", color: theme.accentColor, active: entry.isHidden, tooltip: entry.isHidden ? "Unhide" : "Hide") {
-                    vm.toggleHidden(entry)
-                }
-                    .accessibilityLabel(entry.isHidden ? "Unhide" : "Hide")
                 if entry.isHidden && biometricAuth.isAuthenticated {
                     ActionButton(icon: "lock.fill", color: theme.accentColor, active: true, tooltip: "Lock hidden entries (⌘L)") {
                         vm.lockHiddenEntries()
                     }
                         .accessibilityLabel("Lock hidden entries (⌘L)")
                 }
-                ActionButton(icon: "trash", color: .red, active: false, tooltip: "Move to Trash", isDestructive: true) {
-                    vm.deleteEntry(entry)
-                }
-                    .accessibilityLabel("Move to Trash")
+
+                moreMenu
             }
         }
+        // ⌘P keeps working even though Print moved into the More menu.
+        .background(
+            Button("") { printEntry() }
+                .keyboardShortcut("p", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+                .disabled(isTrash)
+        )
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private func printEntry() {
+        Task {
+            guard await vm.revealIfNeeded(entry) else { return }
+            ExportManager.printEntry(entry, accent: NSColor(theme.accentColor))
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button {
+                Task {
+                    guard await vm.revealIfNeeded(entry) else { return }
+                    showHistory = true
+                }
+            } label: { Label("Version History…", systemImage: "clock.arrow.circlepath") }
+            Button { vm.duplicate(entry) } label: { Label("Duplicate", systemImage: "doc.on.doc") }
+            Button { vm.copyAsMarkdown(entry) } label: { Label("Copy as Markdown", systemImage: "doc.on.clipboard") }
+            Divider()
+            Button { printEntry() } label: { Label("Print…  ⌘P", systemImage: "printer") }
+            Button {
+                Task {
+                    guard await vm.revealIfNeeded(entry) else { return }
+                    ImportExportPanels.exportCurrentEntry(vm: vm)
+                }
+            } label: { Label("Export…", systemImage: "square.and.arrow.up") }
+            Divider()
+            Button { vm.toggleArchive(entry) } label: {
+                Label(entry.isArchived ? "Unarchive" : "Archive", systemImage: entry.isArchived ? "tray.and.arrow.up" : "archivebox")
+            }
+            Button { vm.toggleHidden(entry) } label: {
+                Label(entry.isHidden ? "Unhide" : "Hide", systemImage: entry.isHidden ? "lock.open" : "lock")
+            }
+            Divider()
+            Button(role: .destructive) { vm.deleteEntry(entry) } label: {
+                Label("Move to Trash", systemImage: "trash")
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis.circle")
+                .font(OmegaTheme.font(.meta, .medium))
+                .foregroundColor(theme.secondaryTextColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .omegaTooltip("More actions")
+        .accessibilityLabel("More actions")
     }
 
     // MARK: Header

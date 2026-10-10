@@ -12,7 +12,7 @@ struct OmegaJournalApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            LaunchGateView()
                 .frame(minWidth: 940, minHeight: 620)
         }
         .windowStyle(.titleBar)

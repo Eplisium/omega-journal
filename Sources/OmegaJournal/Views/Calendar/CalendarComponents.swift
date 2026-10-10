@@ -104,7 +104,7 @@ struct CalendarDayCell: View {
         let isFuture = calendar.startOfDay(for: day) > calendar.startOfDay(for: Date())
         let fillColor = isSelected
             ? theme.accentColor.opacity(0.22)
-            : (averageMood?.color.opacity(0.17) ?? theme.cardColor.opacity(0.38))
+            : (averageMood?.color.opacity(0.17) ?? theme.cardColor.opacity(isFuture ? 0.16 : 0.38))
 
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 7) {
@@ -122,11 +122,10 @@ struct CalendarDayCell: View {
 
                 Spacer(minLength: 2)
 
-                if safeEntries.isEmpty {
-                    Text(isFuture ? "Future" : "No entry")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor.opacity(isFuture ? 0.5 : 0.82))
-                } else {
+                // Empty days stay quiet: the date number (dimmed for the future)
+                // says enough, so the grid isn't a wall of "No entry" labels.
+                // VoiceOver still announces "no entries" via the label below.
+                if !safeEntries.isEmpty {
                     HStack(spacing: 5) {
                         if let mood = averageMood {
                             Circle()

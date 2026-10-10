@@ -209,20 +209,34 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeNSView(context: Context) -> NSScrollView {
-        // Same construction as NSTextView.scrollableTextView(), but with a subclass that can
-        // intercept image paste.
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        let textView = OmegaTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
-        textView.minSize = NSSize(width: 0, height: 0)
+    /// Builds the scroll view + text view pair. Same construction as
+    /// `NSTextView.scrollableTextView()`, with two differences: an `OmegaTextView`
+    /// subclass (image paste, centred column) and a `WrappingScrollView` that
+    /// pins the document width to the visible width.
+    ///
+    /// The old version created the text view 400pt wide inside a 0pt scroll
+    /// view. With `.width` autoresizing the text view only ever grows by the
+    /// clip view's *delta*, so it stayed 400pt wider than the pane forever and
+    /// every line wrapped past the right edge (prose was clipped, never visible).
+    static func makeScrollableTextView() -> (NSScrollView, OmegaTextView) {
+        let scrollView = WrappingScrollView()
+        let contentSize = scrollView.contentSize
+        let textView = OmegaTextView(frame: NSRect(origin: .zero, size: contentSize))
+        textView.minSize = NSSize(width: 0, height: contentSize.height)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
         scrollView.documentView = textView
+        return (scrollView, textView)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let (scrollView, textView) = Self.makeScrollableTextView()
         textView.onPasteImage = { data, ext in context.coordinator.parent.onPasteImage?(data, ext) ?? false }
 
         textView.delegate = context.coordinator
@@ -807,6 +821,20 @@ extension NSTextView {
 }
 
 
+/// Scroll view that keeps its document view exactly as wide as the visible area,
+/// so wrapped text can never run off the right edge — regardless of the initial
+/// frame, sidebar toggles, split/preview switches or scroller style changes.
+final class WrappingScrollView: NSScrollView {
+    override func tile() {
+        super.tile()
+        guard let doc = documentView else { return }
+        let width = contentSize.width
+        if abs(doc.frame.width - width) > 0.5 {
+            doc.setFrameSize(NSSize(width: width, height: doc.frame.height))
+        }
+    }
+}
+
 /// NSTextView that hands pasted images to the host (as attachments) instead of dropping them.
 final class OmegaTextView: NSTextView {
     var onPasteImage: ((Data, String) -> Bool)?
@@ -817,7 +845,14 @@ final class OmegaTextView: NSTextView {
     var padsForTypewriter = false { didSet { if oldValue != padsForTypewriter { refreshInsets() } } }
 
     override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
+        var size = newSize
+        // Never be wider than the visible area: a wider document view wraps
+        // text past the pane's right edge where it can't be seen.
+        if !isHorizontallyResizable, let scroll = enclosingScrollView {
+            let visible = scroll.contentSize.width
+            if visible > 0 { size.width = visible }
+        }
+        super.setFrameSize(size)
         refreshInsets()
     }
 

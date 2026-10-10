@@ -104,6 +104,31 @@ enum JournalCrypto {
                        kSecAttrAccount as String: account] as CFDictionary)
     }
 
+    // MARK: - Launch prefetch
+
+    /// Strictly load-only Keychain read, safe to run OFF the main thread before
+    /// the database is open (it never mints a key — with no data probes
+    /// registered yet, creating one could orphan existing encrypted entries).
+    /// Touches no shared state; the caller hands the result to
+    /// `adoptPrefetchedKey(_:)` on the main thread.
+    nonisolated static func fetchExistingKey(service: String, account: String) -> SymmetricKey? {
+        try? loadOrCreateKey(service: service, account: account, allowCreate: { false })
+    }
+
+    nonisolated static func fetchExistingAppKey() -> SymmetricKey? {
+        if let testPath = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"], !testPath.isEmpty {
+            return nil // isolated runs use an ephemeral key; never read the real one
+        }
+        return fetchExistingKey(service: "com.omegajournal.encryption", account: "journal-content-key")
+    }
+
+    /// Main thread only: caches a prefetched key so database startup and entry
+    /// decryption don't hit the Keychain (and block the UI) again.
+    @MainActor static func adoptPrefetchedKey(_ key: SymmetricKey?) {
+        guard cachedKey == nil, let key else { return }
+        cachedKey = key
+    }
+
     // MARK: - Seal / open
 
     static func encrypt(_ plaintext: Data) throws -> Data {

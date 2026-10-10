@@ -73,19 +73,11 @@ struct EntryListView: View {
 
     /// Grouped sections for the currently displayed set.
     var sections: [JournalViewModel.EntrySection] {
-        guard selection == .all || selection == nil else {
-            // Pinned entries always lead, in every collection view.
-            let pinned = displayed.filter(\.isPinned)
-            let rest = displayed.filter { !$0.isPinned }
-            var result: [JournalViewModel.EntrySection] = []
-            if !pinned.isEmpty { result.append(.init(title: "Pinned", entries: pinned)) }
-            if !rest.isEmpty { result.append(.init(title: collectionTitle, entries: rest)) }
-            return displayed.isEmpty ? [] : result
-        }
-        let ids = Set(displayed.map(\.id))
-        return vm.groupedEntries
-            .map { JournalViewModel.EntrySection(title: $0.title, entries: $0.entries.filter { ids.contains($0.id) }) }
-            .filter { !$0.entries.isEmpty }
+        // Pinned entries always lead. The main library gets date sections for
+        // chronological sorts; collections stay one continuous list.
+        let isLibrary = selection == .all || selection == nil
+        return vm.sections(for: displayed, fallbackTitle: collectionTitle,
+                           groupByDate: isLibrary && vm.groupsByDate)
     }
 
     var body: some View {
@@ -95,8 +87,14 @@ struct EntryListView: View {
                 hiddenBanner
             }
             searchBar
-            SearchOperatorBar(vm: vm)
-            if showFilters { FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity)) }
+            // Search syntax helpers only appear while searching, not as
+            // permanent programmer-style chrome above every list.
+            if searchFocused || !vm.searchText.isEmpty { SearchOperatorBar(vm: vm) }
+            if showFilters {
+                FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                activeFilterChips
+            }
             if vm.isBulkSelecting { bulkActionBar.transition(.move(edge: .top).combined(with: .opacity)) }
             if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
             Divider().opacity(0.25)
