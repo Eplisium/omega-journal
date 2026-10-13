@@ -5,34 +5,63 @@ import OmegaJournalCore
 extension DatabaseManager {
     // MARK: - Attachments
 
+    /// Reduces an untrusted attachment name (imports, drag & drop) to a single
+    /// safe path component: no directories, no `/` or `:`, never `.`/`..`/empty.
+    static func sanitizedAttachmentFilename(_ raw: String) -> String {
+        let last = (raw as NSString).lastPathComponent
+        let cleaned = last.unicodeScalars
+            .filter { $0 != "/" && $0 != ":" && $0 != "\0" && !CharacterSet.controlCharacters.contains($0) }
+            .map(String.init).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.isEmpty || cleaned == "." || cleaned == ".." { return "attachment" }
+        return cleaned
+    }
+
+    /// On-disk location of an attachment, or nil when the stored id/filename would
+    /// resolve outside `attachmentsDir/<id>/` (malicious or corrupted rows).
+    func attachmentFileURL(id: String, filename: String) -> URL? {
+        let base = URL(fileURLWithPath: attachmentsDir, isDirectory: true).standardizedFileURL
+        let dir = base.appendingPathComponent(id, isDirectory: true).standardizedFileURL
+        let file = dir.appendingPathComponent(filename).standardizedFileURL
+        guard !id.isEmpty, !filename.isEmpty,
+              dir.path.hasPrefix(base.path + "/"), !dir.path.dropFirst(base.path.count + 1).contains("/"),
+              file.path.hasPrefix(dir.path + "/"), !file.path.dropFirst(dir.path.count + 1).contains("/")
+        else { return nil }
+        return file
+    }
+
     /// Decrypts an attachment file for display or external opening. Returns
     /// nil if the file is missing or fails authentication (corrupted/wrong key).
     func readAttachmentData(_ attachment: Attachment) -> Data? {
-        let dir = (attachmentsDir as NSString).appendingPathComponent(attachment.id)
-        let filePath = (dir as NSString).appendingPathComponent(attachment.filename)
-        return try? JournalCrypto.readEncrypted(from: URL(fileURLWithPath: filePath))
+        guard let url = attachmentFileURL(id: attachment.id, filename: attachment.filename) else { return nil }
+        return try? JournalCrypto.readEncrypted(from: url)
     }
 
     /// Writes a decrypted copy to a caller-managed temp file for NSWorkspace
     /// opening. The caller should remove it after use; the plaintext lives
     /// only transiently in the system temp directory.
     func openAttachmentExternally(_ attachment: Attachment) -> URL? {
-        let dir = (attachmentsDir as NSString).appendingPathComponent(attachment.id)
-        let filePath = (dir as NSString).appendingPathComponent(attachment.filename)
+        guard let url = attachmentFileURL(id: attachment.id, filename: attachment.filename) else { return nil }
         return try? JournalCrypto.decryptedTemporaryFile(
-            from: URL(fileURLWithPath: filePath),
-            preferredName: attachment.filename)
+            from: url,
+            preferredName: Self.sanitizedAttachmentFilename(attachment.filename))
     }
 
-    func saveAttachment(entryId: String, data: Data, filename: String, mimeType: String = "") -> Attachment? {
+    func saveAttachment(entryId: String, data: Data, filename rawFilename: String, mimeType: String = "") -> Attachment? {
         let id = UUID().uuidString
+        // The name may come from an untrusted import file: never let it pick
+        // the directory (`../../omega_journal.sqlite3` would overwrite the DB).
+        let filename = Self.sanitizedAttachmentFilename(rawFilename)
         let dir = (attachmentsDir as NSString).appendingPathComponent(id)
+        guard let fileURL = attachmentFileURL(id: id, filename: filename) else {
+            reportError("Refused to save attachment with an unsafe name")
+            return nil
+        }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         // Stored encrypted (S1): the plaintext bytes never touch disk. The
         // filename is used as the on-disk name but the content is sealed.
-        let filePath = (dir as NSString).appendingPathComponent(filename)
         do {
-            try JournalCrypto.writeEncrypted(data, to: URL(fileURLWithPath: filePath))
+            try JournalCrypto.writeEncrypted(data, to: fileURL)
         } catch {
             reportError("Failed to save attachment: \(error.localizedDescription)")
             return nil
