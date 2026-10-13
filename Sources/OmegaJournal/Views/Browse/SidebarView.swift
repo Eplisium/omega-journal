@@ -28,8 +28,7 @@ struct SidebarView: View {
     @State private var journalDraft: JournalDraft?
     @State private var dropTarget: String?
     /// Persisted like every other sidebar disclosure, so the long tag list
-    /// stays open across launches and workspace switches (the reflective and
-    /// journal layouts each build their own SidebarView).
+    /// stays open across launches.
     @AppStorage(ShellSidebarPrefs.showAllTagsKey) private var showAllTags = false
     /// Tags shown before "Show all" — keeps the sidebar scannable.
     static let collapsedTagLimit = 6
