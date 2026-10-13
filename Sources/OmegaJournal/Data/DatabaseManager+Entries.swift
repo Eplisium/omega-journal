@@ -46,12 +46,17 @@ extension DatabaseManager {
         return base + journalClause(journalId)
     }
 
-    /// `AND e.journal_id = '…'` for a journal-scoped fetch. Ids are app-generated
-    /// (UUIDs / "default") and sanitized here, so interpolation is safe.
+    /// `AND e.journal_id = '…'` for a journal-scoped fetch. Imported notebooks keep
+    /// their exported ids verbatim (`travel.2025`, `o'brien`), so the id is quoted
+    /// as a standard SQL string literal (`'` doubled) instead of being stripped of
+    /// punctuation — stripping silently filtered such notebooks to nothing.
+    /// Shared with `tagsWithCounts`, so every journal-scoped query agrees.
     func journalClause(_ journalId: String?) -> String {
         guard let journalId, !journalId.isEmpty else { return "" }
-        let safe = journalId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        return " AND e.journal_id = '\(safe)'"
+        // A NUL would truncate the SQL text; such an id can't match any row.
+        guard !journalId.unicodeScalars.contains("\0") else { return " AND 0" }
+        let literal = journalId.replacingOccurrences(of: "'", with: "''")
+        return " AND e.journal_id = '\(literal)'"
     }
 
     func orderClause(_ sort: SortOrder) -> String {
