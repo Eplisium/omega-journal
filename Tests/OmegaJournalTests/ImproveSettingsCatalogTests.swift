@@ -106,3 +106,39 @@ struct ImproveSettingsStorageLocationTests {
         #expect(shown.hasSuffix(root.lastPathComponent))
     }
 }
+
+@Suite("Improve Settings: sheet sizing")
+struct ImproveSettingsSheetSizingTests {
+    @Test("fits inside the smallest journal window with room for the toolbar")
+    func fitsMinimumWindow() {
+        let host = CGSize(width: 940, height: 672)   // 940×620 content + title bar
+        let size = SettingsSheetSizing.size(forHost: host)
+        #expect(size.width <= host.width - 40)
+        #expect(size.height <= host.height - 80)
+        #expect(size.width >= 680)                     // two-column rows still fit
+    }
+
+    /// Regression: with no main/key window the old code assumed a 1100×760
+    /// host and produced a 900×660 sheet that overflowed a 940×672 window.
+    @Test("no host window falls back to the minimum window, not a larger guess")
+    func noHostFallback() {
+        let size = SettingsSheetSizing.size(forHost: nil)
+        #expect(size == SettingsSheetSizing.size(forHost: SettingsSheetSizing.fallbackHost))
+        #expect(size.height + 52 <= 672)               // 52pt toolbar the sheet hangs below
+    }
+
+    @Test("big windows cap the sheet so lines stay readable", arguments: [
+        CGSize(width: 1600, height: 1000), CGSize(width: 2560, height: 1440),
+    ])
+    func capsOnLargeWindows(host: CGSize) {
+        let size = SettingsSheetSizing.size(forHost: host)
+        #expect(size == SettingsSheetSizing.maximum)
+    }
+
+    @Test("an unusually small host still yields a sheet no larger than the host")
+    func tinyHost() {
+        let host = CGSize(width: 600, height: 450)
+        let size = SettingsSheetSizing.size(forHost: host)
+        #expect(size.width <= host.width && size.height <= host.height)
+    }
+}

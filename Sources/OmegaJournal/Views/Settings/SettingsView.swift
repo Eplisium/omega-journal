@@ -71,12 +71,17 @@ struct SettingsView: View {
     @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
 
     /// Sized from the journal window (never the sheet itself, which would feed
-    /// back into its own size) and captured once per presentation.
+    /// back into its own size) and captured once per presentation. When the app
+    /// is not active (Settings opened from the menu while another app is key)
+    /// there is no main/key window; fall back to any visible journal window and
+    /// then to the minimum window size — never a guessed larger size, which made
+    /// the sheet hang off the bottom of a small window.
     static var preferredSize: CGSize {
-        let candidates = [NSApp.mainWindow, NSApp.keyWindow].compactMap { $0 }
-        let host = candidates.map { $0.sheetParent ?? $0 }.first?.frame.size ?? CGSize(width: 1100, height: 760)
-        return CGSize(width: min(900, max(680, host.width - 120)),
-                      height: min(760, max(540, host.height - 100)))
+        let focused = [NSApp.mainWindow, NSApp.keyWindow].compactMap { $0 }.map { $0.sheetParent ?? $0 }
+        let visible = NSApp.windows.filter {
+            $0.isVisible && $0.sheetParent == nil && !($0 is NSPanel) && $0.styleMask.contains(.titled)
+        }
+        return SettingsSheetSizing.size(forHost: (focused + visible).first?.frame.size)
     }
 
     @State private var sheetSize = SettingsView.preferredSize

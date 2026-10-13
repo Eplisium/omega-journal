@@ -117,6 +117,26 @@ public enum SettingsCatalog {
     }
 }
 
+// MARK: - Settings sheet sizing (pure)
+
+public enum SettingsSheetSizing {
+    /// The journal window's minimum frame (940×620 content + title bar/toolbar).
+    /// Used when no host window can be found, so the sheet can never be taller
+    /// or wider than the smallest window it might attach to.
+    public static let fallbackHost = CGSize(width: 940, height: 672)
+    public static let preferredMinimum = CGSize(width: 680, height: 540)
+    public static let maximum = CGSize(width: 900, height: 760)
+
+    /// Uses most of the host window, clamped to a comfortable range, and never
+    /// exceeds the host minus room for the toolbar the sheet hangs below.
+    public static func size(forHost host: CGSize?) -> CGSize {
+        let h = host ?? fallbackHost
+        let width = min(maximum.width, max(preferredMinimum.width, h.width - 120), h.width - 40)
+        let height = min(maximum.height, max(preferredMinimum.height, h.height - 100), h.height - 80)
+        return CGSize(width: max(320, width), height: max(320, height))
+    }
+}
+
 // MARK: - Storage location (pure)
 
 public enum SettingsStorageLocation {
