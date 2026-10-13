@@ -152,11 +152,14 @@ extension MarkdownLogic {
         let safeTitle = title.replacingOccurrences(of: "]", with: "").replacingOccurrences(of: "[", with: "")
             .replacingOccurrences(of: "|", with: "-").replacingOccurrences(of: "\n", with: " ")
         var end = NSMaxRange(context.range)
-        // Anything the user typed after the caret up to a closing `]]` on the same line is part of the partial.
-        var close = end
-        while close < ns.length, ns.character(at: close) != 10, ns.character(at: close) != 93 { close += 1 }
-        if close < ns.length, ns.character(at: close) == 93 {
-            end = close + 1
+        // The rest of the word under the caret is part of the partial (stops at whitespace or brackets/pipe).
+        func isWordUnit(_ c: unichar) -> Bool {
+            !(c == 91 || c == 93 || c == 124 || c == 32 || c == 9 || c == 10 || c == 13)
+        }
+        while end < ns.length, isWordUnit(ns.character(at: end)) { end += 1 }
+        // Only closers directly after it (auto-paired) are consumed; later text is left alone.
+        if end < ns.length, ns.character(at: end) == 93 {
+            end += 1
             if end < ns.length, ns.character(at: end) == 93 { end += 1 }
         }
         let range = NSRange(location: context.range.location, length: end - context.range.location)
