@@ -10,7 +10,7 @@ import OmegaJournalCore
 // the markdown source as the user types.
 
 /// Formatting operations the toolbar and ⌘-shortcuts can apply to the editor.
-enum MarkdownCommand {
+enum MarkdownCommand: CaseIterable {
     case bold, italic, code, strikethrough
     case heading1, heading2, heading3
     case bulletList, numberedList, checkbox, quote
@@ -82,6 +82,41 @@ enum MarkdownCommand {
         case .toggleTask: "Toggle Task Done"
         }
     }
+
+    /// Menu-bar shortcut (Format menu in `OmegaJournalApp`), shown in tooltips
+    /// and the editor's Format menu so moving a command off the toolbar never
+    /// hides how to reach it from the keyboard.
+    var shortcutHint: String {
+        switch self {
+        case .bold: "⌘B"
+        case .italic: "⌘I"
+        case .strikethrough: "⇧⌘X"
+        case .code: "⇧⌘E"
+        case .heading1: "⌃⌘1"
+        case .heading2: "⌃⌘2"
+        case .heading3: "⌃⌘3"
+        case .bulletList: "⇧⌘8"
+        case .numberedList: "⇧⌘7"
+        case .checkbox: "⇧⌘L"
+        case .toggleTask: "⇧⌘D"
+        case .quote: "⇧⌘'"
+        case .link: "⇧⌘K"
+        case .codeBlock: "⇧⌘J"
+        case .divider: "⇧⌘-"
+        }
+    }
+
+    /// Everyday commands kept as one-click toolbar icons.
+    static let toolbarPrimary: [MarkdownCommand] = [.bold, .italic, .heading1, .heading2, .bulletList, .checkbox, .link]
+
+    /// The editor's labeled Format menu: every command, grouped like the
+    /// menu-bar Format menu, so nothing is lost by trimming the icon row.
+    static let formatMenuSections: [[MarkdownCommand]] = [
+        [.bold, .italic, .strikethrough, .code],
+        [.heading1, .heading2, .heading3],
+        [.bulletList, .numberedList, .checkbox, .toggleTask, .quote],
+        [.link, .codeBlock, .divider],
+    ]
 }
 
 /// Lets SwiftUI parents send formatting commands down into the NSTextView.
@@ -90,7 +125,9 @@ final class MarkdownEditorController: ObservableObject {
     fileprivate weak var textView: NSTextView?
 
     func apply(_ command: MarkdownCommand) {
-        textView?.applyMarkdownCommand(command)
+        // A source hidden behind the preview never takes format edits.
+        guard let tv = textView, tv.enclosingScrollView?.isHidden != true else { return }
+        tv.applyMarkdownCommand(command)
     }
 
     func focus() {
@@ -206,7 +243,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
     var onSelectionWords: ((Int) -> Void)?
     /// Called when the pasteboard holds an image and no text. Return true if consumed.
     var onPasteImage: ((Data, String) -> Bool)?
-
+    /// False while the source is covered by the preview: the view stays mounted
+    /// (caret, scroll position and undo survive a Preview round trip) but is
+    /// hidden from clicks, the key-view loop and VoiceOver, and gives up focus.
+    var isActive: Bool = true
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     /// Builds the scroll view + text view pair. Same construction as
@@ -260,6 +300,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
 
         controller.textView = textView
+        scrollView.isHidden = !isActive
         context.coordinator.applyHighlighting(to: textView, full: true)
         return scrollView
     }
@@ -297,6 +338,17 @@ struct MarkdownTextEditor: NSViewRepresentable {
         if isTypewriterMode {
             context.coordinator.centerCaret(in: textView, scrollView: scrollView)
         }
+        Self.applyActive(isActive, scrollView: scrollView, textView: textView)
+    }
+
+    /// Hides/shows the source without tearing it down. Hiding drops first
+    /// responder so typing can't land in invisible text.
+    static func applyActive(_ active: Bool, scrollView: NSScrollView, textView: NSTextView) {
+        guard scrollView.isHidden == active else { return }
+        if !active, let window = textView.window, window.firstResponder === textView {
+            window.makeFirstResponder(nil)
+        }
+        scrollView.isHidden = !active
     }
 
     // MARK: Coordinator
@@ -853,7 +905,6 @@ final class WrappingScrollView: NSScrollView {
 /// NSTextView that hands pasted images to the host (as attachments) instead of dropping them.
 final class OmegaTextView: NSTextView {
     var onPasteImage: ((Data, String) -> Bool)?
-
     /// Centred column width (0 = fill). The inset grows with the view so the text column stays centred.
     var columnWidth: Double = 0 { didSet { if oldValue != columnWidth { refreshInsets() } } }
     /// Typewriter mode pads the document so the first/last lines can reach the vertical centre.

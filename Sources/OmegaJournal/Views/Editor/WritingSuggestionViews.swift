@@ -192,40 +192,19 @@ struct WritingFooterView: View {
     let saveState: JournalViewModel.SaveState
     var onStartSprint: (Int) -> Void
     var onStopSprint: () -> Void
+    /// Test seam: the save indicator's frame in window coordinates whenever it lays out.
+    var onSaveIndicatorFrame: ((CGRect) -> Void)? = nil
 
     @ObservedObject private var theme = ThemeManager.shared
 
+    /// Widest footer that fits. The save state is in every variant (and in
+    /// Zen mode, where it used to be replaced by an "exit zen" hint), with
+    /// layout priority so it is the last thing a narrow column squeezes.
     var body: some View {
-        HStack(spacing: 12) {
-            Label("\(wordCount) words", systemImage: "text.word.spacing")
-            if selectionWords > 0 { Text("(\(selectionWords) selected)") }
-            if !isZen {
-                Text("·")
-                Text("\(charCount) chars")
-                Text("·")
-                Text(readingTime)
-                if attachmentCount > 0 {
-                    Text("·")
-                    Label("\(attachmentCount)", systemImage: "paperclip")
-                }
-            }
-            Spacer()
-
-            if ring.target > 0 { goalRing }
-
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                sessionLabel(now: context.date)
-            }
-
-            sprintMenu
-
-            if isZen {
-                Text("⎋ exit zen").foregroundColor(theme.secondaryTextColor.opacity(0.7))
-            } else {
-                Text(saveState == .pending ? "Saving…" : "Saved")
-                    .foregroundColor(theme.secondaryTextColor.opacity(0.7))
-                    .accessibilityLabel(saveState == .pending ? "Saving" : "All changes saved")
-            }
+        ViewThatFits(in: .horizontal) {
+            row(showDetails: true, showSession: true)
+            row(showDetails: false, showSession: true)
+            row(showDetails: false, showSession: false)
         }
         .font(OmegaTheme.font(.meta))
         .foregroundColor(theme.secondaryTextColor)
@@ -233,6 +212,64 @@ struct WritingFooterView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .background(theme.cardColor.opacity(0.3))
+    }
+
+    private func row(showDetails: Bool, showSession: Bool) -> some View {
+        HStack(spacing: 12) {
+            Label("\(wordCount) words", systemImage: "text.word.spacing")
+                .fixedSize()
+            if selectionWords > 0 { Text("(\(selectionWords) selected)").fixedSize() }
+            if !isZen && showDetails {
+                Text("·")
+                Text("\(charCount) chars").fixedSize()
+                Text("·")
+                Text(readingTime).fixedSize()
+                if attachmentCount > 0 {
+                    Text("·")
+                    Label("\(attachmentCount)", systemImage: "paperclip").fixedSize()
+                }
+            }
+            Spacer(minLength: 8)
+
+            if showSession {
+                if ring.target > 0 { goalRing }
+
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    sessionLabel(now: context.date)
+                }
+                .fixedSize()
+            }
+
+            sprintMenu
+
+            if isZen {
+                Text("⎋ exit zen").foregroundColor(theme.secondaryTextColor.opacity(0.7)).fixedSize()
+            }
+            saveIndicator
+        }
+    }
+
+    private var saveIndicator: some View {
+        let pending = saveState == .pending
+        return HStack(spacing: 4) {
+            Image(systemName: pending ? "arrow.triangle.2.circlepath" : "checkmark.circle")
+            Text(EditorSaveIndicator.label(isPending: pending))
+        }
+        .foregroundColor(theme.secondaryTextColor.opacity(pending ? 0.9 : 0.7))
+        .fixedSize()
+        .layoutPriority(3)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(EditorSaveIndicator.accessibilityLabel(isPending: pending))
+        .accessibilityIdentifier("editor-save-state")
+        .background {
+            if let report = onSaveIndicatorFrame {
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { report(geo.frame(in: .global)) }
+                        .onChange(of: geo.frame(in: .global)) { _, f in report(f) }
+                }
+            }
+        }
     }
 
     private var goalRing: some View {
@@ -297,7 +334,7 @@ struct WritingFooterView: View {
                     Button("Start \(m)-minute sprint") { onStartSprint(m) }
                 }
             } label: {
-                Image(systemName: "bolt")
+                Label("Start writing sprint", systemImage: "bolt").labelStyle(.iconOnly)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)

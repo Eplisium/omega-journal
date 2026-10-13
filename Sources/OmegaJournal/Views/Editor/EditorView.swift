@@ -53,6 +53,11 @@ struct EditorView: View {
     @State private var suggestion: EditorSuggestion?
     @State private var suggestionIndex = 0
 
+    // Split layout: measured content width, and the visible tab when Split
+    // falls back to one pane at a time in a narrow column.
+    @State private var contentWidth: Double = 0
+    @State private var splitTabShowsPreview = false
+
     init(vm: JournalViewModel, entry: JournalEntry) {
         self.vm = vm
         self.entry = entry
@@ -188,7 +193,39 @@ struct EditorView: View {
 
     // MARK: Top bar
 
+    /// Picks the widest top bar that fits. At the 940pt minimum window the
+    /// detail column is ~458pt; the old single layout needed ~540pt of
+    /// fixed-size controls, so the whole split view overflowed the window and
+    /// clipped prose, the formatting row and the save status on the right.
     private var topBar: some View {
+        ViewThatFits(in: .horizontal) {
+            topBarRow(compactMood: false, iconModes: false)
+            topBarRow(compactMood: true, iconModes: false)
+            topBarRow(compactMood: true, iconModes: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        // Popovers/sheets live outside ViewThatFits so they're attached once,
+        // anchored at the trailing tools.
+        .overlay(alignment: .trailing) {
+            Color.clear.frame(width: 110, height: 1)
+                .popover(isPresented: $showFocusPopover, arrowEdge: .bottom) { WritingFocusSettingsView() }
+                .background(Color.clear.popover(isPresented: $showStampPopover, arrowEdge: .bottom) { EntryStampEditor(stamp: $stamp) })
+                .background(Color.clear.popover(isPresented: $showRecorder, arrowEdge: .bottom) { AudioRecorderPopover(vm: vm, entry: entry) })
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+        }
+        .sheet(isPresented: $showHistory) {
+            RevisionHistoryView(vm: vm, entry: vm.entry(id: entry.id) ?? entry) { newTitle, newBody in
+                title = newTitle
+                let parts = EntryStampCodec.split(newBody)
+                body_ = parts.rest
+                stamp = parts.stamp ?? EntryStamp()
+            }
+        }
+    }
+
+    private func topBarRow(compactMood: Bool, iconModes: Bool) -> some View {
         HStack(spacing: 10) {
             Button {
                 vm.stopEditing()
@@ -207,59 +244,103 @@ struct EditorView: View {
 
             Divider().frame(height: 16).opacity(0.25)
 
-            // Mood picker: the full emoji row when there's room, otherwise a
-            // compact menu so the toolbar never squeezes "Done" or the modes.
-            ViewThatFits(in: .horizontal) {
-            HStack(spacing: 2) {
-                ForEach(Mood.allCases) { m in
-                    Button { mood = m } label: {
-                        Text(m.emoji)
-                            .font(OmegaTheme.font(.bodyLarge))
-                            .frame(width: 26, height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(mood == m ? m.color.opacity(0.28) : .clear)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(mood == m ? m.color.opacity(0.65) : .clear, lineWidth: 1)
-                            )
-                            .scaleEffect(mood == m && !reduceMotion ? 1.05 : 1.0)
-                    }
-                    .buttonStyle(.plain)
-                    .omegaTooltip(m.label)
-                    .accessibilityLabel("Mood: \(m.label)")
-                    .accessibilityAddTraits(mood == m ? .isSelected : [])
-                }
-            }
-                Menu {
-                    ForEach(Mood.allCases) { m in
-                        Button("\(m.emoji)  \(m.label)") { mood = m }
-                    }
-                } label: {
-                    Text(mood.emoji).font(OmegaTheme.font(.bodyLarge))
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .accessibilityLabel("Mood: \(mood.label). Change mood")
-            }
-            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: mood)
+            if compactMood { moodMenu } else { moodRow }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // Editor mode switcher
-            // Labeled, so the three modes are self-explanatory.
-            Picker("", selection: $vm.editorMode) {
-                ForEach(JournalViewModel.EditorMode.allCases) { m in
+            modePicker(iconOnly: iconModes)
+
+            ActionButton(icon: "text.alignleft", color: theme.accentColor, active: isTypewriter || dimOthers || columnWidth > 0, tooltip: "Focus & typography") {
+                showFocusPopover.toggle()
+            }
+            .accessibilityLabel("Focus and typography")
+
+            ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
+                attachFile()
+            }
+            .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
+
+            moreMenu
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: mood)
+    }
+
+    private var moodRow: some View {
+        HStack(spacing: 2) {
+            ForEach(Mood.allCases) { m in
+                Button { mood = m } label: {
+                    Text(m.emoji)
+                        .font(OmegaTheme.font(.bodyLarge))
+                        .frame(width: 26, height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(mood == m ? m.color.opacity(0.28) : .clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(mood == m ? m.color.opacity(0.65) : .clear, lineWidth: 1)
+                        )
+                        .scaleEffect(mood == m && !reduceMotion ? 1.05 : 1.0)
+                }
+                .buttonStyle(.plain)
+                .omegaTooltip(m.label)
+                .accessibilityLabel("Mood: \(m.label)")
+                .accessibilityAddTraits(mood == m ? .isSelected : [])
+            }
+        }
+    }
+
+    private var moodMenu: some View {
+        Menu {
+            ForEach(Mood.allCases) { m in
+                Button("\(m.emoji)  \(m.label)") { mood = m }
+            }
+        } label: {
+            Text(mood.emoji).font(OmegaTheme.font(.bodyLarge))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Mood: \(mood.label). Change mood")
+    }
+
+    /// Labeled Write / Split / Preview; icon-only (still named for VoiceOver
+    /// and tooltips) when the column is too narrow for the words.
+    private func modePicker(iconOnly: Bool) -> some View {
+        Picker("Editor mode", selection: $vm.editorMode) {
+            ForEach(JournalViewModel.EditorMode.allCases) { m in
+                if iconOnly {
+                    Label(m.rawValue, systemImage: m.icon).labelStyle(.iconOnly).tag(m)
+                } else {
                     Text(m.rawValue).tag(m)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .omegaTooltip("Write, split view, or preview")
-            .accessibilityLabel("Editor mode")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .omegaTooltip("Write, split view, or preview")
+        .accessibilityLabel("Editor mode")
+    }
 
+    /// Less frequent tools share one menu: place/weather, voice memo, history,
+    /// text size, find & replace and Zen. Their keyboard shortcuts still work
+    /// (hidden buttons + app menus) and are shown here.
+    private var moreMenu: some View {
+        Menu {
+            Button { showStampPopover = true } label: {
+                Label(stamp.isEmpty ? "Add Place & Weather…" : "Edit Place & Weather…", systemImage: "mappin.and.ellipse")
+            }
+            Button { showRecorder = true } label: {
+                Label("Record Voice Memo…", systemImage: "mic")
+            }
+            Button {
+                vm.flushPendingSave()
+                if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
+                showHistory = true
+            } label: {
+                Label("Version History…", systemImage: "clock.arrow.circlepath")
+            }
+            Divider()
             Menu {
                 ForEach(Self.fontSizes, id: \.self) { size in
                     Button {
@@ -270,95 +351,48 @@ struct EditorView: View {
                     }
                 }
                 Divider()
-                Button("Larger") { stepFontSize(1) }
-                Button("Smaller") { stepFontSize(-1) }
+                Button("Larger  ⌘=") { stepFontSize(1) }
+                Button("Smaller  ⌘-") { stepFontSize(-1) }
             } label: {
-                Image(systemName: "textformat.size")
-                    .font(OmegaTheme.font(.bodyLarge, .medium))
-                    .foregroundColor(.secondary)
-                    .frame(width: 36, height: 36)
-                    .contentShape(Rectangle())
+                Label("Text Size (\(Int(fontSize)) pt)", systemImage: "textformat.size")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Text size")
-            .accessibilityLabel("Text size")
-
-            ActionButton(icon: "text.alignleft", color: theme.accentColor, active: isTypewriter || dimOthers || columnWidth > 0, tooltip: "Focus & typography") {
-                showFocusPopover.toggle()
+            Button { controller.showFind(replace: true) } label: {
+                Label("Find and Replace…  ⌥⇧⌘F", systemImage: "magnifyingglass")
             }
-            .accessibilityLabel("Focus and typography")
-            .popover(isPresented: $showFocusPopover, arrowEdge: .bottom) { WritingFocusSettingsView() }
-
-            ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
-                attachFile()
-            }
-            .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
-
-            // Less frequent tools share one labeled menu instead of four more icons.
-            Menu {
-                Button { showStampPopover = true } label: {
-                    Label(stamp.isEmpty ? "Add Place & Weather…" : "Edit Place & Weather…", systemImage: "mappin.and.ellipse")
-                }
-                Button { showRecorder = true } label: {
-                    Label("Record Voice Memo…", systemImage: "mic")
-                }
-                Divider()
-                Button {
-                    vm.flushPendingSave()
-                    if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
-                    showHistory = true
-                } label: {
-                    Label("Version History…", systemImage: "clock.arrow.circlepath")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(OmegaTheme.font(.bodyLarge, .medium))
-                    .foregroundColor(.secondary)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("More: place & weather, voice memo, version history")
-            .accessibilityLabel("More editor tools")
-            .popover(isPresented: $showStampPopover, arrowEdge: .bottom) { EntryStampEditor(stamp: $stamp) }
-            .background(
-                Color.clear
-                    .popover(isPresented: $showRecorder, arrowEdge: .bottom) { AudioRecorderPopover(vm: vm, entry: entry) }
-            )
-            .sheet(isPresented: $showHistory) {
-                RevisionHistoryView(vm: vm, entry: vm.entry(id: entry.id) ?? entry) { newTitle, newBody in
-                    title = newTitle
-                    let parts = EntryStampCodec.split(newBody)
-                    body_ = parts.rest
-                    stamp = parts.stamp ?? EntryStamp()
-                }
-            }
-
-            ActionButton(icon: "arrow.up.left.and.arrow.down.right", color: theme.accentColor, active: false, tooltip: "Zen Mode (⌃⌘F)") {
+            .disabled(!paneLayout.showsSource)
+            Button {
                 withAnimation(reduceMotion ? nil : .default) { vm.isZenMode = true }
+            } label: {
+                Label("Zen Mode  ⌃⌘F", systemImage: "arrow.up.left.and.arrow.down.right")
             }
-            .accessibilityLabel("Enter Zen mode")
+        } label: {
+            // The Label title is what VoiceOver reads for a Menu (a modifier
+            // label on the Menu itself is ignored).
+            Label("More editor tools", systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
+                .font(OmegaTheme.font(.bodyLarge, .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More: place & weather, voice memo, version history, text size, find & replace, Zen mode")
+        .accessibilityLabel("More editor tools")
     }
 
     // MARK: Formatting toolbar
 
+    /// Everyday formatting as icons, then one labeled Format menu holding
+    /// every command (with its shortcut), then tags. The old row of 15 icons
+    /// scrolled the Tags control out of a narrow column.
     private var formattingToolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 2) {
-                group([.bold, .italic, .strikethrough, .code])
-                sep
-                group([.heading1, .heading2, .heading3])
-                sep
-                group([.bulletList, .numberedList, .checkbox, .quote])
-                sep
-                group([.link, .codeBlock, .divider, .toggleTask])
+                group(MarkdownCommand.toolbarPrimary)
+                    .disabled(!paneLayout.showsSource)
+                formatMenu
                 sep
 
                 Button { showTagField.toggle(); if showTagField { tagFieldFocused = true } } label: {
@@ -420,6 +454,35 @@ struct EditorView: View {
         .background(theme.cardColor.opacity(0.3))
     }
 
+    private var formatMenu: some View {
+        Menu {
+            ForEach(Array(MarkdownCommand.formatMenuSections.enumerated()), id: \.offset) { index, section in
+                if index > 0 { Divider() }
+                ForEach(section, id: \.label) { cmd in
+                    Button { controller.apply(cmd) } label: {
+                        Label("\(cmd.label)  \(cmd.shortcutHint)", systemImage: cmd.icon)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text("Format").font(OmegaTheme.font(.meta, .medium))
+                Image(systemName: "chevron.down").font(OmegaTheme.font(.meta))
+                    .accessibilityHidden(true)
+            }
+            .foregroundColor(theme.bodyTextColor)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Format")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 4)
+        .disabled(!paneLayout.showsSource)
+        .help("All formatting commands and their shortcuts")
+        .accessibilityLabel("Format")
+    }
+
     private var tagSuggestions: [String] {
         TagPath.suggestions(prefix: tagInput, from: vm.allTags.map(\.tag), excluding: tags, limit: 5)
     }
@@ -450,27 +513,88 @@ struct EditorView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .omegaTooltip(cmd.label)
+            .omegaTooltip("\(cmd.label) (\(cmd.shortcutHint))")
             .accessibilityLabel(cmd.label)
         }
     }
 
     // MARK: Content
 
+    private var paneMode: EditorPaneMode {
+        switch vm.editorMode {
+        case .write: .write
+        case .split: .split
+        case .preview: .preview
+        }
+    }
+
+    private var paneLayout: EditorPaneLayout {
+        EditorLayoutPolicy.layout(mode: paneMode, availableWidth: contentWidth, tabShowsPreview: splitTabShowsPreview)
+    }
+
+    /// The writing pane keeps one structural position in every mode, so
+    /// write → split → preview → write never rebuilds the NSTextView: caret,
+    /// selection, scroll position and undo all survive. In Preview the source
+    /// stays mounted underneath (hidden, unfocusable) and the preview covers it.
     private var contentArea: some View {
-        HStack(spacing: 0) {
-            if vm.editorMode != .preview {
-                writingPane
-                    .frame(maxWidth: vm.editorMode == .split ? .infinity : nil)
-            }
-            if vm.editorMode == .split {
+        let layout = paneLayout
+        return VStack(spacing: 0) {
+            if case .tabbed(let showingPreview) = layout {
+                splitTabs(showingPreview: showingPreview)
                 Divider().opacity(0.25)
             }
-            if vm.editorMode != .write {
-                previewPane
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 0) {
+                ZStack {
+                    writingPane
+                        .opacity(layout.showsSource ? 1 : 0)
+                        .allowsHitTesting(layout.showsSource)
+                        .accessibilityHidden(!layout.showsSource)
+                    if layout.previewCoversSource {
+                        previewPane
+                            .background(theme.backgroundColor)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                if layout == .sideBySide {
+                    Divider().opacity(0.25)
+                    previewPane
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { contentWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in contentWidth = w }
+            }
+        )
+        .onChange(of: layout.showsSource) { _, shows in
+            // Coming back from the preview: the caret is where the writer left it.
+            if shows && !vm.isZenMode { DispatchQueue.main.async { controller.focus() } }
+        }
+    }
+
+    /// Split in a column too narrow for two readable panes: one pane at a time.
+    private func splitTabs(showingPreview: Bool) -> some View {
+        HStack(spacing: 8) {
+            Picker("Split pane", selection: $splitTabShowsPreview) {
+                Text("Source").tag(false)
+                Text("Preview").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityLabel("Split pane")
+            Text("Widen to see both")
+                .font(OmegaTheme.font(.meta))
+                .foregroundColor(theme.secondaryTextColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
     private var writingPane: some View {
@@ -498,6 +622,7 @@ struct EditorView: View {
                 .font(OmegaTheme.font(.title, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .focused($titleFocused)
+                .disabled(!paneLayout.showsSource)
                 .accessibilityLabel("Entry title")
                 .padding(.horizontal, vm.isZenMode ? 20 : 18)
                 .padding(.top, vm.isZenMode ? 10 : 18)
@@ -520,7 +645,8 @@ struct EditorView: View {
                 onCommandReturn: { vm.stopEditing() },
                 onEscape: { handleEscape() },
                 onSelectionWords: { selectionWords = $0 },
-                onPasteImage: { data, ext in pasteImage(data, ext: ext) }
+                onPasteImage: { data, ext in pasteImage(data, ext: ext) },
+                isActive: paneLayout.showsSource
             )
             .overlay(alignment: .topLeading) {
                 if let popover = suggestionPopover { popover }
