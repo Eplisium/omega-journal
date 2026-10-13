@@ -83,7 +83,7 @@ public struct EntryStamp: Equatable, Sendable {
 }
 
 public enum EntryStampCodec {
-    private static let tailRegex = try! NSRegularExpression(pattern: #"(?:\r?\n)*<!--\s*stamp:\s*([^>]*?)\s*-->\s*$"#)
+    private static let tailRegex = try! NSRegularExpression(pattern: #"(?:\r?\n\r?\n)?<!--\s*stamp:\s*([^>]*?)\s*-->\s*$"#)
     private static var allowed: CharacterSet {
         var c = CharacterSet.alphanumerics
         c.insert(charactersIn: " ,.°+_()'/")
