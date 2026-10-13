@@ -17,6 +17,7 @@ struct FilterBar: View {
                 Spacer()
                 if vm.filter.isActive {
                     Button("Reset") { vm.filter = .empty }
+                        .accessibilityLabel("Reset all filters")
                         .buttonStyle(.plain)
                         .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.accentColor)
@@ -44,6 +45,10 @@ struct FilterBar: View {
                     }
                     .buttonStyle(.plain)
                     .omegaTooltip(mood.label)
+                    // The emoji alone reads as e.g. "grinning face", not the mood.
+                    .accessibilityLabel(A11yDescriptions.filterChipLabel(kind: "mood", name: mood.label))
+                    .accessibilityValue(A11yDescriptions.filterChipValue(isOn: on))
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
 
                 Spacer()
@@ -72,8 +77,9 @@ struct FilterBar: View {
                 Text("Minimum words")
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
-                Stepper("", value: $vm.filter.minWords, in: 0...2000, step: 50)
+                Stepper("Minimum words", value: $vm.filter.minWords, in: 0...2000, step: 50)
                     .labelsHidden()
+                    .accessibilityValue("\(vm.filter.minWords) words")
                 Text("\(vm.filter.minWords)")
                     .font(OmegaTheme.font(.meta, design: .rounded))
                     .foregroundColor(theme.bodyTextColor)
@@ -101,6 +107,9 @@ struct FilterBar: View {
                                     )
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(A11yDescriptions.filterChipLabel(kind: "tag", name: item.tag))
+                            .accessibilityValue(A11yDescriptions.filterChipValue(isOn: on))
+                            .accessibilityAddTraits(on ? .isSelected : [])
                         }
                     }
                 }
@@ -127,6 +136,8 @@ struct FilterBar: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(A11yDescriptions.filterChipLabel(kind: "", name: label))
+        .accessibilityValue(A11yDescriptions.filterChipValue(isOn: binding.wrappedValue))
         .accessibilityAddTraits(binding.wrappedValue ? [.isSelected] : [])
     }
 }

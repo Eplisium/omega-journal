@@ -247,7 +247,7 @@ struct CommandPaletteView: View {
                     hint("↩", "run")
                     hint("esc", "close")
                     Spacer()
-                    Text("\(rows.count) results")
+                    Text(A11yDescriptions.paletteResultCount(rows.count))
                         .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
@@ -276,6 +276,9 @@ struct CommandPaletteView: View {
             highlighted = max(0, min(rows.count - 1, highlighted + 1))
             return .handled
         }
+        // A labelled container (not a label smeared over every child) that
+        // keeps its rows individually reachable.
+        .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .accessibilityLabel("Command palette")
     }
@@ -318,6 +321,10 @@ struct CommandPaletteView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // ↑/↓ move a visual highlight, not keyboard focus — expose it.
+        .accessibilityLabel(cmd.subtitle.isEmpty ? cmd.title : "\(cmd.title), \(cmd.subtitle)")
+        .accessibilityValue(cmd.group)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
