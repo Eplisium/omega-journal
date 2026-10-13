@@ -18,12 +18,32 @@ struct CommandPaletteView: View {
     // MARK: Command model
 
     struct Command: Identifiable {
-        let id = UUID()
+        /// Stable across renders (group + key, where key defaults to the title
+        /// and is the entry id for entry rows) so ForEach keeps row identity.
+        let id: String
         let title: String
         let subtitle: String
         let icon: String
         let group: String
         let run: () -> Void
+
+        init(title: String, subtitle: String, icon: String, group: String, key: String? = nil,
+             run: @escaping () -> Void) {
+            self.id = group + "|" + (key ?? title)
+            self.title = title
+            self.subtitle = subtitle
+            self.icon = icon
+            self.group = group
+            self.run = run
+        }
+    }
+
+    /// Jump-to-entry subtitle. Word count is body-derived, so it is omitted
+    /// for a locked hidden entry (title/mood/date only).
+    nonisolated static func entrySubtitle(for entry: JournalEntry, hiddenLocked: Bool) -> String {
+        let base = "\(entry.mood.emoji) \(entry.createdAt.formatted(date: .abbreviated, time: .omitted))"
+        guard ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked) else { return base }
+        return base + " · \(entry.wordCount)w"
     }
 
     private var commands: [Command] {
@@ -112,12 +132,14 @@ struct CommandPaletteView: View {
         }
 
         // Jump-to-entry
+        let locked = vm.hiddenLocked
         for entry in vm.entries.prefix(200) {
             list.append(Command(
                 title: entry.displayTitle,
-                subtitle: "\(entry.mood.emoji) \(entry.createdAt.formatted(date: .abbreviated, time: .omitted)) · \(entry.wordCount)w",
+                subtitle: Self.entrySubtitle(for: entry, hiddenLocked: locked),
                 icon: "doc.text",
-                group: "Entries"
+                group: "Entries",
+                key: entry.id
             ) {
                 selection = .all
                 vm.select(entry)
@@ -134,10 +156,11 @@ struct CommandPaletteView: View {
 
     private var results: [Command] {
         let q = query.trimmingCharacters(in: .whitespaces)
+        let all = commands   // build once per results pass
         guard !q.isEmpty else {
-            return Array(commands.filter { $0.group != "Entries" }.prefix(24))
+            return Array(all.filter { $0.group != "Entries" }.prefix(24))
         }
-        let fuzzy = commands
+        let fuzzy = all
             .compactMap { cmd -> (Command, Int)? in
                 guard let s = fuzzyScore(q, cmd.title) ?? fuzzyScore(q, cmd.subtitle).map({ $0 / 2 }) else { return nil }
                 return (cmd, s)
@@ -151,7 +174,7 @@ struct CommandPaletteView: View {
         let content = vm.contentSearchHits(q, limit: 8).filter { !shown.contains($0.entry.displayTitle) }.map { hit in
             Command(title: hit.entry.displayTitle,
                     subtitle: hit.snippet?.text ?? "\(hit.entry.mood.emoji) \(hit.entry.createdAt.formatted(date: .abbreviated, time: .omitted))",
-                    icon: "text.magnifyingglass", group: "In entries") {
+                    icon: "text.magnifyingglass", group: "In entries", key: hit.entry.id) {
                 selection = .all
                 vm.select(hit.entry)
             }
@@ -160,6 +183,9 @@ struct CommandPaletteView: View {
     }
 
     var body: some View {
+        // Results are computed once per render and shared by the list, the
+        // count and the key handlers below.
+        let rows = results
         ZStack(alignment: .top) {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
@@ -194,11 +220,11 @@ struct CommandPaletteView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(results.enumerated()), id: \.element.id) { index, cmd in
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, cmd in
                                 resultRow(cmd, index: index)
                                     .id(index)
                             }
-                            if results.isEmpty {
+                            if rows.isEmpty {
                                 Text("No matching commands")
                                     .font(OmegaTheme.font(.caption))
                                     .foregroundColor(theme.secondaryTextColor)
@@ -221,7 +247,7 @@ struct CommandPaletteView: View {
                     hint("↩", "run")
                     hint("esc", "close")
                     Spacer()
-                    Text("\(results.count) results")
+                    Text("\(rows.count) results")
                         .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
@@ -247,7 +273,7 @@ struct CommandPaletteView: View {
             return .handled
         }
         .onKeyPress(.downArrow) {
-            highlighted = max(0, min(results.count - 1, highlighted + 1))
+            highlighted = max(0, min(rows.count - 1, highlighted + 1))
             return .handled
         }
         .accessibilityAddTraits(.isModal)

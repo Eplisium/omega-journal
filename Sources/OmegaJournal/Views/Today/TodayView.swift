@@ -1,6 +1,24 @@
 import SwiftUI
 import OmegaJournalCore
 
+// MARK: - Today hero content
+
+/// Body-derived text for the Today hero card. A locked hidden entry shows its
+/// title/mood/date only (the masked-card rule): no preview and no tags.
+struct TodayHeroContent: Equatable {
+    static let maskedPreview = "Hidden · unlock to read"
+
+    let preview: String
+    let tags: [String]
+    let isMasked: Bool
+
+    init(entry: JournalEntry, hiddenLocked: Bool) {
+        isMasked = !ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked)
+        preview = isMasked ? Self.maskedPreview : entry.preview
+        tags = isMasked ? [] : entry.tags
+    }
+}
+
 // MARK: - Today workspace
 
 /// A calm starting point for writing. It intentionally surfaces only a few
@@ -14,6 +32,7 @@ struct TodayView: View {
 
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var goals = GoalManager.shared
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var recentEntries: [JournalEntry] {
@@ -147,6 +166,7 @@ struct TodayView: View {
     @ViewBuilder
     private var heroCard: some View {
         if let entry = todaysEntry {
+            let hero = TodayHeroContent(entry: entry, hiddenLocked: !biometricAuth.isAuthenticated)
             Button { openEntry(entry) } label: {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 6) {
@@ -157,8 +177,8 @@ struct TodayView: View {
                             .font(OmegaTheme.font(.meta, .medium))
                             .foregroundColor(theme.secondaryTextColor)
                         Spacer()
-                        if !entry.tags.isEmpty {
-                            ForEach(entry.tags.prefix(2), id: \.self) { tag in
+                        if !hero.tags.isEmpty {
+                            ForEach(hero.tags.prefix(2), id: \.self) { tag in
                                 Text("#\(tag)")
                                     .font(OmegaTheme.font(.meta, .medium))
                                     .foregroundColor(theme.accentColor.opacity(0.9))
@@ -179,7 +199,7 @@ struct TodayView: View {
                         .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
 
-                    Text(entry.preview)
+                    Text(hero.preview)
                         .font(OmegaTheme.font(.caption))
                         .foregroundColor(theme.bodyTextColor)
                         .lineLimit(2)

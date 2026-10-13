@@ -38,16 +38,19 @@ struct EntryListView: View {
             let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
             base = vm.libraryEntries.filter { $0.createdAt >= cutoff }
         case .mood(let m): base = vm.libraryEntries.filter { $0.mood == m }
-        case .tag(let t): base = vm.libraryEntries.filter { $0.tags.contains(t) }
+        case .tag(let t): base = EntryFilter.entries(vm.libraryEntries, taggedWith: t, hiddenLocked: vm.hiddenLocked)
         case .smartFolder(let id):
             base = vm.smartFolder(id: id).map { vm.smartFolderEntries($0, from: vm.libraryEntries) } ?? []
-        case .onThisDay: base = vm.onThisDay
+        // Same privacy-scoped source as the sidebar badge and Today/On This Day surfaces.
+        case .onThisDay: base = vm.reflectiveOnThisDay
         case .archive: base = vm.entriesMatchingCurrentSearch(in: vm.archivedEntries)
         case .hidden: base = vm.entriesMatchingCurrentSearch(in: vm.hiddenEntries)
         case .trash: base = vm.entriesMatchingCurrentSearch(in: vm.trashedEntries)
         default: base = vm.libraryEntries
         }
-        return vm.filter.isActive ? base.filter(vm.filter.matches) : base
+        guard vm.filter.isActive else { return base }
+        let locked = vm.hiddenLocked
+        return base.filter { vm.filter.matches($0, hiddenLocked: locked) }
     }
 
     var displayedIDs: [String] { displayed.map(\.id) }
@@ -256,7 +259,7 @@ struct EntryListView: View {
                                 )
                             }
                         } header: {
-                            if sections.count > 1 || section.title == "Pinned" {
+                            if sections.count > 1 || section.isPinned {
                                 sectionHeader(section)
                             }
                         }
@@ -297,7 +300,7 @@ struct EntryListView: View {
 
     func sectionHeader(_ section: JournalViewModel.EntrySection) -> some View {
         HStack(spacing: 5) {
-            if section.title == "Pinned" {
+            if section.isPinned {
                 Image(systemName: "pin.fill")
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.accentColor)

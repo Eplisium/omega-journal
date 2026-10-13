@@ -55,7 +55,15 @@ struct JournalEntry: Identifiable, Hashable {
 
     var isTrashed: Bool { deletedAt != nil }
 
-    var wordCount: Int { body.isEmpty ? 0 : body.split(whereSeparator: { $0.isWhitespace }).count }
+    var wordCount: Int { Self.countWords(body) }
+
+    /// Words in an entry body, excluding the trailing `<!-- stamp: ... -->`
+    /// comment. Same whitespace semantics as the editor footer
+    /// (`MarkdownLogic.wordCount`), so saved counts match what the user saw.
+    static func countWords(_ body: String) -> Int {
+        guard !body.isEmpty else { return 0 }
+        return MarkdownLogic.wordCount(EntryStampCodec.split(body).rest)
+    }
     var characterCount: Int { body.count }
 
     var readingMinutes: Int { OmegaCore.readingMinutes(forWordCount: wordCount) }
@@ -109,8 +117,9 @@ struct EntryFilter: Equatable, Codable {
             switch self {
             case .any: return nil
             case .today: return cal.startOfDay(for: now)
-            case .last7: return cal.date(byAdding: .day, value: -7, to: cal.startOfDay(for: now))
-            case .last30: return cal.date(byAdding: .day, value: -30, to: cal.startOfDay(for: now))
+            // Today counts as one of the N days (matches AnalyticsPeriod).
+            case .last7: return cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))
+            case .last30: return cal.date(byAdding: .day, value: -29, to: cal.startOfDay(for: now))
             case .thisMonth: return cal.dateInterval(of: .month, for: now)?.start
             case .thisYear: return cal.dateInterval(of: .year, for: now)?.start
             }
@@ -141,7 +150,12 @@ struct EntryFilter: Equatable, Codable {
         return n
     }
 
-    func matches(_ entry: JournalEntry) -> Bool {
+    /// Privacy: while `hiddenLocked`, a hidden entry exposes only title, mood
+    /// and date (its masked card). Content-derived facets — tags, word count,
+    /// attachments — must never match it, or the filter would leak them.
+    func matches(_ entry: JournalEntry, hiddenLocked: Bool) -> Bool {
+        let masked = !ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked)
+        if masked && (!tags.isEmpty || withAttachmentsOnly || minWords > 0) { return false }
         if !moods.isEmpty && !moods.contains(entry.mood) { return false }
         if !tags.isEmpty && tags.isDisjoint(with: Set(entry.tags)) { return false }
         if let start = dateRange.startDate, entry.createdAt < start { return false }
@@ -150,5 +164,15 @@ struct EntryFilter: Equatable, Codable {
         if withAttachmentsOnly && entry.attachments.isEmpty { return false }
         if minWords > 0 && entry.wordCount < minWords { return false }
         return true
+    }
+
+    /// The sidebar `.tag` collection: entries carrying `tag` or a descendant
+    /// (`work` → `work/alpha`, matching the badge count), never a locked
+    /// hidden entry (its tags are private).
+    static func entries(_ list: [JournalEntry], taggedWith tag: String, hiddenLocked: Bool) -> [JournalEntry] {
+        list.filter { entry in
+            ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked)
+                && entry.tags.contains { TagPath.isSameOrDescendant($0, of: tag) }
+        }
     }
 }

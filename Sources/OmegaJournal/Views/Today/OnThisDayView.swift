@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - On This Day View
 
@@ -103,7 +104,7 @@ struct OnThisDayView: View {
     }
 
     private func memoryCard(_ entry: JournalEntry) -> some View {
-        let yearsAgo = Calendar.current.dateComponents([.year], from: entry.createdAt, to: Date()).year ?? 0
+        let yearsAgo = OnThisDayGrouping.yearsAgo(entry.createdAt)
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {

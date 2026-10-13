@@ -163,16 +163,17 @@ extension JournalViewModel {
     }
 
     func onThisDay(in source: [JournalEntry]) -> [JournalEntry] {
-        let cal = Calendar.current
-        let today = Date()
-        let month = cal.component(.month, from: today)
-        let day = cal.component(.day, from: today)
-        let thisYear = cal.component(.year, from: today)
+        Self.onThisDay(in: source)
+    }
+
+    /// Entries on `reference`'s month/day in other years, newest first. On
+    /// Feb 28 of a non-leap year, Feb 29 memories are included too.
+    nonisolated static func onThisDay(in source: [JournalEntry], reference: Date = Date(),
+                                      calendar cal: Calendar = .current) -> [JournalEntry] {
+        let thisYear = cal.component(.year, from: reference)
         return source.filter { e in
-            let eYear = cal.component(.year, from: e.createdAt)
-            return eYear != thisYear &&
-                cal.component(.month, from: e.createdAt) == month &&
-                cal.component(.day, from: e.createdAt) == day
+            cal.component(.year, from: e.createdAt) != thisYear
+                && OnThisDayGrouping.isSameMonthDay(e.createdAt, as: reference, calendar: cal)
         }
         .sorted { $0.createdAt > $1.createdAt }
     }

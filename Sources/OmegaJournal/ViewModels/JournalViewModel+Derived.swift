@@ -26,7 +26,9 @@ extension JournalViewModel {
 
     /// Entries after the advanced filter is applied — what the list actually shows.
     var filteredEntries: [JournalEntry] {
-        filter.isActive ? libraryEntries.filter(filter.matches) : libraryEntries
+        guard filter.isActive else { return libraryEntries }
+        let locked = hiddenLocked
+        return libraryEntries.filter { filter.matches($0, hiddenLocked: locked) }
     }
 
     /// Filtered entries bucketed into date sections for the grouped list UI.
@@ -44,13 +46,16 @@ extension JournalViewModel {
         let byId = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let items = list.map { EntryGroupItem(id: $0.id, date: $0.createdAt, isPinned: $0.isPinned) }
         return EntryGrouping.sections(for: items, groupByDate: groupByDate ?? groupsByDate, fallbackTitle: fallbackTitle)
-            .map { EntrySection(title: $0.title, entries: $0.ids.compactMap { byId[$0] }) }
+            .map { EntrySection(id: $0.id, title: $0.title, isPinned: $0.isPinned, entries: $0.ids.compactMap { byId[$0] }) }
     }
 
     struct EntrySection: Identifiable {
+        /// Stable id from `EntryGroupSection.id` — unique even when a
+        /// collection is itself titled "Pinned".
+        let id: String
         let title: String
+        let isPinned: Bool
         let entries: [JournalEntry]
-        var id: String { title }
     }
 
     // MARK: - Reflection scope

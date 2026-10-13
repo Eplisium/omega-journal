@@ -310,7 +310,12 @@ struct EntryRow: View {
             Menu("Set Mood") {
                 ForEach(Mood.allCases) { mood in
                     Button { vm.setMood(mood, for: entry) } label: {
-                        Label("\(mood.emoji)  \(mood.label)", systemImage: vm.selectedEntry?.mood == mood ? "checkmark" : "")
+                        // Checkmark follows THIS row's entry, not the selection.
+                        if let icon = Self.moodMenuIcon(for: mood, current: entry.mood) {
+                            Label("\(mood.emoji)  \(mood.label)", systemImage: icon)
+                        } else {
+                            Text("\(mood.emoji)  \(mood.label)")
+                        }
                     }
                 }
             }
@@ -326,5 +331,10 @@ struct EntryRow: View {
                 Label("Move to Trash", systemImage: "trash")
             }
         }
+    }
+
+    /// Context-menu mood icon: a checkmark for the row entry's current mood, else none.
+    nonisolated static func moodMenuIcon(for mood: Mood, current: Mood) -> String? {
+        mood == current ? "checkmark" : nil
     }
 }
