@@ -54,10 +54,17 @@ enum ImportExportPanels {
     /// entries are omitted. Includes archived and trashed entries so backups
     /// capture the complete lifecycle state.
     /// Returns the entries plus how many hidden entries were left out.
-    private static func entriesForExport(vm: JournalViewModel) async -> (entries: [JournalEntry], omittedHidden: Int) {
-        var all = vm.entries + vm.archivedEntries + vm.trashedEntries
+    /// Every stored entry in EVERY notebook (active, archived, hidden and trashed),
+    /// read from the database — `vm.entries` & co. are filtered to the active notebook.
+    static func fullExportEntries(vm: JournalViewModel) -> [JournalEntry] {
+        var all = vm.db.fetchAllEntriesForExport()
         var seen = Set<String>()
         all.removeAll { !seen.insert($0.id).inserted }
+        return all
+    }
+
+    private static func entriesForExport(vm: JournalViewModel) async -> (entries: [JournalEntry], omittedHidden: Int) {
+        let all = fullExportEntries(vm: vm)
         let hasHidden = all.contains(where: \.isHidden)
         if hasHidden && !BiometricAuth.shared.isAuthenticated {
             if await BiometricAuth.shared.authenticate() {
@@ -82,7 +89,9 @@ enum ImportExportPanels {
             panel.canCreateDirectories = true
             guard panel.runModal() == .OK, let url = panel.url else { return }
             do {
-                try ExportManager.exportEncrypted(entries, to: url, passphrase: passphrase, attachmentData: { vm.db.readAttachmentData($0) })
+                try ExportManager.exportEncrypted(entries, to: url, passphrase: passphrase,
+                                                  attachmentData: { vm.db.readAttachmentData($0) },
+                                                  revisionData: { vm.db.exportRevisions(for: $0) })
                 vm.showToast("Encrypted export saved" + (omitted > 0 ? " — \(omitted) hidden not included" : ""), isError: omitted > 0)
             } catch { vm.showToast("Export failed: \(error.localizedDescription)", isError: true) }
         }

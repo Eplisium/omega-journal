@@ -26,8 +26,59 @@ public struct ExportableEntry: Equatable, Sendable {
 public enum ExportFormats {
     static func iso(_ d: Date) -> String {
         let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
+        // Fractional seconds keep re-imports matching the stored timestamp
+        // (`ImportParsers.parseDate` accepts both forms).
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f.string(from: d)
+    }
+
+    // MARK: Attachment links
+
+    private static let attachmentLinkRegex = try! NSRegularExpression(
+        pattern: #"\]\(omega-attachment://([^)\s#]+)(#w=\d{1,4})?\)"#)
+
+    /// Rewrites `](omega-attachment://<name>)` links to `](<relative path>)` using
+    /// `paths` (stored attachment filename → exported relative path). Unknown names are left alone.
+    public static func rewriteAttachmentLinks(_ body: String, paths: [String: String]) -> String {
+        guard !paths.isEmpty, body.contains("omega-attachment://") else { return body }
+        let ns = body as NSString
+        var out = ""
+        var last = 0
+        for m in attachmentLinkRegex.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+            let raw = ns.substring(with: m.range(at: 1))
+            let name = raw.removingPercentEncoding ?? raw
+            guard let rel = paths[name] else { continue }
+            let frag = m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ""
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            out += "](\(percentEncode(rel))\(frag))"
+            last = m.range.location + m.range.length
+        }
+        out += ns.substring(from: last)
+        return out
+    }
+
+    private static let relativeLinkRegex = try! NSRegularExpression(pattern: #"\]\(([^)\s#]+)(#w=\d{1,4})?\)"#)
+
+    /// Inverse of `rewriteAttachmentLinks` for imports: `](<relative path>)` → `](omega-attachment://<stored name>)`
+    /// for every path in `names` (relative path as written in the note → stored attachment filename).
+    public static func restoreAttachmentLinks(_ body: String, names: [String: String]) -> String {
+        guard !names.isEmpty else { return body }
+        let ns = body as NSString
+        var out = ""
+        var last = 0
+        for m in relativeLinkRegex.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+            let raw = ns.substring(with: m.range(at: 1))
+            guard let stored = names[raw] ?? names[raw.removingPercentEncoding ?? raw] else { continue }
+            let frag = m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ""
+            var allowed = CharacterSet.alphanumerics
+            allowed.insert(charactersIn: "-._~")
+            let enc = stored.addingPercentEncoding(withAllowedCharacters: allowed) ?? stored
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            out += "](omega-attachment://\(enc)\(frag))"
+            last = m.range.location + m.range.length
+        }
+        out += ns.substring(from: last)
+        return out
     }
 
     static func yamlQuote(_ s: String) -> String {

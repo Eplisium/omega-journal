@@ -159,8 +159,9 @@ enum ExportManager {
     /// Full JSON export (attachments included) sealed with a passphrase — readable on any Mac.
     static func exportEncrypted(_ entries: [JournalEntry], to url: URL, passphrase: String,
                                 attachmentData: ((Attachment) -> Data?)? = nil,
+                                revisionData: ((JournalEntry) -> [JSONRevision])? = nil,
                                 iterations: UInt32 = PassphraseVault.defaultIterations) throws {
-        let plain = try jsonData(entries, attachmentData: attachmentData)
+        let plain = try jsonData(entries, attachmentData: attachmentData, revisionData: revisionData)
         try PassphraseVault.seal(plain, passphrase: passphrase, iterations: iterations).write(to: url, options: .atomic)
     }
 
@@ -180,27 +181,46 @@ enum ExportManager {
         let fm = FileManager.default
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let stems = ExportFormats.uniqueNames(entries.map { ExportFormats.fileStem(exportable($0)) })
+        var used = Set<String>()
         for (e, stem) in zip(entries, stems) {
-            let files = try writeAttachments(for: e, into: dir.appendingPathComponent("attachments", isDirectory: true),
-                                             attachmentData: attachmentData)
-            let md = ExportFormats.markdownWithFrontMatter(exportable(e, attachmentFiles: files))
+            let written = try writeAttachments(for: e, into: dir.appendingPathComponent("attachments", isDirectory: true),
+                                               attachmentData: attachmentData, used: &used)
+            // Inline `omega-attachment://<name>` refs point at the exported copy, so the
+            // folder reads correctly elsewhere and the importer can map them back.
+            var paths: [String: String] = [:]
+            for w in written where paths[w.original] == nil { paths[w.original] = "attachments/\(w.exported)" }
+            var entry = e
+            entry.body = ExportFormats.rewriteAttachmentLinks(e.body, paths: paths)
+            let md = ExportFormats.markdownWithFrontMatter(exportable(entry, attachmentFiles: written.map(\.exported)))
             try md.write(to: dir.appendingPathComponent("\(stem).md"), atomically: true, encoding: .utf8)
         }
         return entries.count
     }
 
-    /// Writes an entry's attachments with collision-free names; returns the file names written.
+    /// Writes an entry's attachments with collision-free names (two same-named files on one
+    /// entry no longer overwrite each other); returns (stored name, exported name) pairs.
     private static func writeAttachments(for e: JournalEntry, into dir: URL,
-                                         attachmentData: ((Attachment) -> Data?)?) throws -> [String] {
+                                         attachmentData: ((Attachment) -> Data?)?,
+                                         used: inout Set<String>) throws -> [(original: String, exported: String)] {
         guard let read = attachmentData, !e.attachments.isEmpty else { return [] }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var names: [String] = []
+        var names: [(original: String, exported: String)] = []
         for a in e.attachments {
             guard let data = read(a) else { continue }
-            let safe = a.filename.components(separatedBy: CharacterSet(charactersIn: "/\\:")).joined(separator: "-")
-            let name = "\(e.id.prefix(8))-\(safe)"
+            let safe = DatabaseManager.sanitizedAttachmentFilename(
+                a.filename.components(separatedBy: CharacterSet(charactersIn: "/\\:")).joined(separator: "-"))
+            let base = "\(e.id.prefix(8))-\(safe)"
+            var name = base
+            var n = 2
+            while used.contains(name.lowercased()) {
+                let ext = (base as NSString).pathExtension
+                let stem = (base as NSString).deletingPathExtension
+                name = ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)"
+                n += 1
+            }
+            used.insert(name.lowercased())
             try data.write(to: dir.appendingPathComponent(name), options: .atomic)
-            names.append(name)
+            names.append((a.filename, name))
         }
         return names
     }
@@ -215,9 +235,10 @@ enum ExportManager {
         try fm.createDirectory(at: entriesDir, withIntermediateDirectories: true)
         let stems = ExportFormats.uniqueNames(entries.map { ExportFormats.fileStem(exportable($0)) })
         var index: [(ExportableEntry, String)] = []
+        var used = Set<String>()
         for (e, stem) in zip(entries, stems) {
             let files = try writeAttachments(for: e, into: dir.appendingPathComponent("attachments", isDirectory: true),
-                                             attachmentData: attachmentData)
+                                             attachmentData: attachmentData, used: &used).map(\.exported)
             let ex = exportable(e, attachmentFiles: files)
             let fileName = "\(stem).html"
             let page = ExportFormats.entryPage(ex, theme: theme, indexHref: "../index.html", attachmentsHref: "../attachments")
