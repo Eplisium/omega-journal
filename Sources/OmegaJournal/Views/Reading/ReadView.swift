@@ -347,14 +347,20 @@ struct ReadView: View {
                 .font(OmegaTheme.font(.title, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
 
+            // Locked hidden entries show mood + date only: word count, reading
+            // time and the place stamp are body-derived (Core helper gates them).
+            let chips = A11yDescriptions.readerMetaChips(
+                mood: entry.mood.emoji + " " + entry.mood.label,
+                date: entry.createdAt.formatted(date: .long, time: .shortened),
+                wordCount: isContentLocked ? 0 : entry.wordCount,
+                readingTime: isContentLocked ? "" : entry.readingTime,
+                stampSummary: isContentLocked ? nil : bodyParts.stamp.flatMap { $0.isEmpty ? nil : $0.summary },
+                canShowContent: !isContentLocked)
             HStack(spacing: 8) {
-                metaChip(entry.mood.emoji + " " + entry.mood.label, color: entry.mood.color)
-                metaChip(entry.createdAt.formatted(date: .long, time: .shortened))
-                metaChip("\(entry.wordCount) words")
-                metaChip(entry.readingTime)
-                if let stamp = bodyParts.stamp, !stamp.isEmpty, !(entry.isHidden && !biometricAuth.isAuthenticated) {
-                    metaChip("📍 " + stamp.summary)
+                ForEach(Array(chips.enumerated()), id: \.offset) { index, text in
+                    metaChip(text, color: index == 0 ? entry.mood.color : nil)
                 }
             }
 
