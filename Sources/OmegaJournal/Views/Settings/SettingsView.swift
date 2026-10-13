@@ -3,11 +3,11 @@ import OmegaJournalCore
 
 // MARK: - Settings sections
 
-/// Settings navigation destinations. To add a new settings area:
-///   1. Add a case here — `title`, `icon`, and `subtitle` come from the enum
-///   2. Build its pane from `SettingsCard` + the row components below
-///   3. Add the case to the switch in `SettingsView.content`
-/// Everything else (sidebar entry, header, styling) is automatic.
+/// Settings navigation destinations. Which cards each pane shows (and in what
+/// order) comes from `SettingsCatalog` in OmegaJournalCore. To add a setting:
+///   1. Add a `SettingsCardID` case there (group, title, icon, storage keys)
+///   2. Render it in `SettingsView.cardView(_:)` from `SettingsCard` + rows
+/// The sidebar entry, header and pane placement follow automatically.
 enum SettingsSection: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case goals = "Writing"
@@ -16,6 +16,16 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case about = "About"
 
     var id: String { rawValue }
+
+    var group: SettingsGroup {
+        switch self {
+        case .appearance: .appearance
+        case .goals: .writing
+        case .privacy: .privacy
+        case .data: .data
+        case .about: .about
+        }
+    }
 
     var icon: String {
         switch self {
@@ -29,9 +39,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .appearance: "Themes, colors, and personalization"
-        case .goals: "Goals, reminders, and quick capture"
-        case .privacy: "Encryption, hidden entries, and Spotlight"
+        case .appearance: "Theme, colors, and how entries read"
+        case .goals: "Daily goals, quick capture, and reviews"
+        case .privacy: "Encryption, app lock, hidden entries, and Spotlight"
         case .data: "Backups, export, import, and storage"
         case .about: "Keyboard shortcuts and app info"
         }
@@ -177,181 +187,201 @@ struct SettingsView: View {
             Divider().opacity(0.2)
 
             ScrollView {
-                Group {
-                    switch section {
-                    case .appearance: appearancePane
-                    case .goals:
-                        VStack(alignment: .leading, spacing: 18) { goalsPane; quickCaptureCard; ReflectionSettingsPanels(vm: vm) }
-                    case .privacy: privacyPane
-                    case .data:
-                        VStack(alignment: .leading, spacing: 18) { dataPane; DataSafetyPanels(vm: vm) }
-                    case .about: aboutPane
+                VStack(alignment: .leading, spacing: 18) {
+                    if section == .about { aboutHeader }
+                    ForEach(SettingsCatalog.cards(in: section.group)) { card in
+                        cardView(card)
                     }
                 }
                 .padding(20)
             }
+            // New identity per pane: switching panes starts at the top instead of
+            // keeping the previous pane's scroll offset.
+            .id(section)
             .scrollContentBackground(.hidden)
+        }
+    }
+
+    // MARK: Cards
+
+    /// One settings card; placement and order come from `SettingsCatalog`.
+    @ViewBuilder
+    private func cardView(_ card: SettingsCardID) -> some View {
+        switch card {
+        case .theme: themeCard(card)
+        case .systemAppearance: systemAppearanceCard(card)
+        case .reading: readingCard(card)
+        case .customColors: customColorsCard(card)
+        case .writingGoals: goalsCard(card)
+        case .quickCapture: quickCaptureCard(card)
+        case .reviewReminders: ReviewRemindersPanel()
+        case .periodicReview: ReviewCard(vm: vm)
+        case .aiAssist: AIAssistPanel()
+        case .whatsProtected: protectionCard(card)
+        case .appLock: AppLockPanel()
+        case .hiddenEntries: hiddenEntriesCard(card)
+        case .backups: BackupPanel(vm: vm)
+        case .export: exportCard(card)
+        case .moreExports: MoreExportsPanel(vm: vm)
+        case .encryptedExport: EncryptedExportPanel(vm: vm)
+        case .importEntries: importCard(card)
+        case .importOtherApps: ImportOtherAppsPanel(vm: vm)
+        case .storage: storageCard(card)
+        case .dangerZone: if !vm.trashedEntries.isEmpty { emptyTrashCard(card) }
+        case .shortcuts: shortcutsCard(card)
         }
     }
 
     // MARK: Appearance
 
-    private var appearancePane: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SettingsCard(
-                title: "Theme",
-                icon: "paintpalette",
-                footnote: "Pick a preset. Each card previews the sidebar, a card and the accent. Use Custom Colors below for your own."
-            ) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                    ForEach(ThemePresets.all) { preset in
-                        themePresetButton(preset)
-                    }
+    private func themeCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Each card previews the sidebar, an entry card and the accent color. Use Custom Colors below to make your own."
+        ) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                ForEach(ThemePresets.all) { preset in
+                    themePresetButton(preset)
                 }
-                if let preset = theme.currentPreset {
-                    SettingsRowDivider()
-                    SettingsRow(
-                        title: "Accent override",
-                        subtitle: theme.accentOverrides[preset.name] == nil ? "Using \(preset.name)'s default accent" : "Custom accent for \(preset.name)"
-                    ) {
-                        HStack(spacing: 8) {
-                            ColorPicker("Accent for \(preset.name)", selection: accentOverrideBinding(for: preset), supportsOpacity: false)
-                                .labelsHidden()
-                            if theme.accentOverrides[preset.name] != nil {
-                                SettingsPillButton(title: "Reset", icon: "arrow.counterclockwise", prominent: false) {
-                                    theme.setAccentOverride(nil, for: preset.name)
-                                }
+            }
+            if let preset = theme.currentPreset {
+                SettingsRowDivider()
+                SettingsRow(
+                    title: "Accent override",
+                    subtitle: theme.accentOverrides[preset.name] == nil ? "Using \(preset.name)'s default accent" : "Custom accent for \(preset.name)"
+                ) {
+                    HStack(spacing: 8) {
+                        ColorPicker("Accent for \(preset.name)", selection: accentOverrideBinding(for: preset), supportsOpacity: false)
+                            .labelsHidden()
+                        if theme.accentOverrides[preset.name] != nil {
+                            SettingsPillButton(title: "Reset", icon: "arrow.counterclockwise", prominent: false) {
+                                theme.setAccentOverride(nil, for: preset.name)
                             }
                         }
                     }
                 }
             }
+        }
+    }
 
-            SettingsCard(
-                title: "System Appearance",
-                icon: "circle.lefthalf.filled",
-                footnote: "When on, Omega Journal switches between your light and dark preset as macOS does."
-            ) {
-                SettingsRow(title: "Follow system appearance") {
-                    Toggle("Follow system appearance", isOn: Binding(
-                        get: { theme.followSystem },
-                        set: { theme.setFollowSystem($0) }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                }
-                if theme.followSystem {
-                    SettingsRowDivider()
-                    SettingsRow(title: "Light preset") {
-                        Picker("Light preset", selection: Binding(
-                            get: { theme.lightPresetName },
-                            set: { theme.setPair(light: $0) }
-                        )) {
-                            ForEach(ThemePresets.lightPresets) { Text($0.name).tag($0.name) }
-                        }
-                        .labelsHidden()
-                        .frame(width: 160)
-                    }
-                    SettingsRowDivider()
-                    SettingsRow(title: "Dark preset") {
-                        Picker("Dark preset", selection: Binding(
-                            get: { theme.darkPresetName },
-                            set: { theme.setPair(dark: $0) }
-                        )) {
-                            ForEach(ThemePresets.darkPresets) { Text($0.name).tag($0.name) }
-                        }
-                        .labelsHidden()
-                        .frame(width: 160)
-                    }
-                }
+    private func systemAppearanceCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "When on, Omega Journal switches between your light and dark theme whenever macOS does."
+        ) {
+            SettingsRow(title: "Match macOS light and dark mode") {
+                Toggle("Match macOS light and dark mode", isOn: Binding(
+                    get: { theme.followSystem },
+                    set: { theme.setFollowSystem($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
             }
-
-            SettingsCard(
-                title: "Reading",
-                icon: "textformat",
-                footnote: "Applies to the entry reader. A narrower column is easier on the eyes for long entries."
-            ) {
-                SettingsRow(title: "Font style") {
-                    Picker("Reading font style", selection: $readingFontDesign) {
-                        ForEach(ReadingPreferences.fontDesignOptions, id: \.raw) { option in
-                            Text(option.label).tag(option.raw)
-                        }
+            if theme.followSystem {
+                SettingsRowDivider()
+                SettingsRow(title: "Theme in light mode") {
+                    Picker("Theme in light mode", selection: Binding(
+                        get: { theme.lightPresetName },
+                        set: { theme.setPair(light: $0) }
+                    )) {
+                        ForEach(ThemePresets.lightPresets) { Text($0.name).tag($0.name) }
                     }
                     .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 240)
+                    .frame(width: 160)
                 }
                 SettingsRowDivider()
-                SettingsRow(title: "Cover image", subtitle: "Show an entry's first image above its title") {
-                    Toggle("Show cover image", isOn: $readingShowCover).labelsHidden().toggleStyle(.switch)
-                }
-                SettingsRowDivider()
-                SettingsRow(title: "Maximum width", subtitle: "\(Int(ReadingPreferences.clampedWidth(readingMaxWidth))) pt") {
-                    Slider(value: $readingMaxWidth, in: ReadingPreferences.widthRange, step: 20)
-                        .frame(width: 200)
-                        .accessibilityLabel("Reading maximum width")
-                }
-            }
-
-            SettingsCard(
-                title: "Quick Capture",
-                icon: "square.and.pencil",
-                footnote: "Jot a thought from the menu bar. It is saved as a normal entry tagged #quick."
-            ) {
-                SettingsRow(title: "Show menu bar quick capture") {
-                    Toggle("Show menu bar quick capture", isOn: $menuBarQuickCapture)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-            }
-
-            SettingsCard(title: "Custom Colors", icon: "eyedropper") {
-                SettingsRow(title: "Accent") {
-                    ColorPicker("Accent color", selection: $customAccent, supportsOpacity: false)
-                        .labelsHidden()
-                }
-                SettingsRowDivider()
-                SettingsRow(title: "Background") {
-                    ColorPicker("Background color", selection: $customBackground, supportsOpacity: false)
-                        .labelsHidden()
-                }
-                SettingsRowDivider()
-                SettingsRow(title: "Sidebar") {
-                    ColorPicker("Sidebar color", selection: $customSidebar, supportsOpacity: false)
-                        .labelsHidden()
-                }
-                SettingsRowDivider()
-                SettingsRow(title: "Cards") {
-                    ColorPicker("Card color", selection: $customCard, supportsOpacity: false)
-                        .labelsHidden()
-                }
-                if customContrast < ContrastChecker.minimumBodyRatio {
-                    SettingsRowDivider()
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(theme.warningColor)
-                            .accessibilityHidden(true)
-                        Text("Low contrast: body text on these colors is \(String(format: "%.1f", customContrast)):1 (WCAG recommends at least 4.5:1). Try a darker or lighter background.")
-                            .font(OmegaTheme.metaFont)
-                            .foregroundColor(theme.warningColor)
-                            .fixedSize(horizontal: false, vertical: true)
+                SettingsRow(title: "Theme in dark mode") {
+                    Picker("Theme in dark mode", selection: Binding(
+                        get: { theme.darkPresetName },
+                        set: { theme.setPair(dark: $0) }
+                    )) {
+                        ForEach(ThemePresets.darkPresets) { Text($0.name).tag($0.name) }
                     }
-                    .accessibilityElement(children: .combine)
+                    .labelsHidden()
+                    .frame(width: 160)
                 }
-                SettingsRowDivider()
-                HStack {
-                    Spacer()
-                    SettingsPillButton(title: "Apply Custom Theme", icon: "checkmark.circle.fill", prominent: true) {
-                        theme.applyCustom(
-                            accent: customAccent,
-                            background: customBackground,
-                            sidebar: customSidebar,
-                            card: customCard
-                        )
+            }
+        }
+    }
+
+    private func readingCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Applies when reading an entry. A narrower column is easier on the eyes for long entries."
+        ) {
+            SettingsRow(title: "Font style") {
+                Picker("Reading font style", selection: $readingFontDesign) {
+                    ForEach(ReadingPreferences.fontDesignOptions, id: \.raw) { option in
+                        Text(option.label).tag(option.raw)
                     }
                 }
-                .padding(.top, 6)
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 240)
             }
+            SettingsRowDivider()
+            SettingsRow(title: "Cover image", subtitle: "Show an entry's first image above its title") {
+                Toggle("Show cover image", isOn: $readingShowCover).labelsHidden().toggleStyle(.switch)
+            }
+            SettingsRowDivider()
+            SettingsRow(title: "Maximum width", subtitle: "\(Int(ReadingPreferences.clampedWidth(readingMaxWidth))) pt") {
+                Slider(value: $readingMaxWidth, in: ReadingPreferences.widthRange, step: 20)
+                    .frame(width: 200)
+                    .accessibilityLabel("Reading maximum width")
+            }
+        }
+    }
+
+    private func customColorsCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(title: card.title, icon: card.icon) {
+            SettingsRow(title: "Accent") {
+                ColorPicker("Accent color", selection: $customAccent, supportsOpacity: false)
+                    .labelsHidden()
+            }
+            SettingsRowDivider()
+            SettingsRow(title: "Background") {
+                ColorPicker("Background color", selection: $customBackground, supportsOpacity: false)
+                    .labelsHidden()
+            }
+            SettingsRowDivider()
+            SettingsRow(title: "Sidebar") {
+                ColorPicker("Sidebar color", selection: $customSidebar, supportsOpacity: false)
+                    .labelsHidden()
+            }
+            SettingsRowDivider()
+            SettingsRow(title: "Cards") {
+                ColorPicker("Card color", selection: $customCard, supportsOpacity: false)
+                    .labelsHidden()
+            }
+            if customContrast < ContrastChecker.minimumBodyRatio {
+                SettingsRowDivider()
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(theme.warningColor)
+                        .accessibilityHidden(true)
+                    Text("Low contrast: body text on these colors is \(String(format: "%.1f", customContrast)):1 (WCAG recommends at least 4.5:1). Try a darker or lighter background.")
+                        .font(OmegaTheme.metaFont)
+                        .foregroundColor(theme.warningColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            SettingsRowDivider()
+            HStack {
+                Spacer()
+                SettingsPillButton(title: "Apply Custom Theme", icon: "checkmark.circle.fill", prominent: true) {
+                    theme.applyCustom(
+                        accent: customAccent,
+                        background: customBackground,
+                        sidebar: customSidebar,
+                        card: customCard
+                    )
+                }
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -443,13 +473,13 @@ struct SettingsView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: Goals
+    // MARK: Writing
 
-    private var goalsPane: some View {
+    private func goalsCard(_ card: SettingsCardID) -> some View {
         SettingsCard(
-            title: "Writing Goals",
-            icon: "target",
-            footnote: "Daily targets show as progress on Today. Click any target to type a new one — press Return or click away to save."
+            title: card.title,
+            icon: card.icon,
+            footnote: "Your progress shows on Today. Click a target to type a new one, then press Return or click away to save."
         ) {
             ForEach(Array(goals.goals.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { SettingsRowDivider() }
@@ -480,132 +510,150 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Privacy
-
-    private var privacyPane: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SettingsCard(title: "What's protected", icon: "lock.doc") {
-                SettingsRow(
-                    title: "Encrypted on disk",
-                    subtitle: "Entry text, attachments, and automatic backups (AES-256-GCM; the key lives in your Keychain)."
-                ) { Image(systemName: "checkmark.shield.fill").foregroundColor(.green).accessibilityHidden(true) }
-                SettingsRowDivider()
-                SettingsRow(
-                    title: "Stored as plain metadata",
-                    subtitle: "Titles, tags, moods, dates, and word counts — so search and filters stay fast. Anyone signed in to your Mac account could read these."
-                ) { Image(systemName: "info.circle").foregroundColor(theme.secondaryTextColor).accessibilityHidden(true) }
-            }
-            SettingsCard(
-                title: "Hidden Entries & Spotlight",
-                icon: "lock.shield",
-                footnote: "Hidden entries are masked everywhere in the app and need Touch ID or your password to reveal."
+    private func quickCaptureCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Quick notes are saved as normal entries tagged #quick."
+        ) {
+            SettingsRow(
+                title: "Menu bar quick capture",
+                subtitle: "Jot a thought from the menu bar without opening the journal."
             ) {
-                SettingsRow(
-                    title: "Lock hidden entries when I switch apps",
-                    subtitle: "Re-masks hidden entries whenever Omega Journal loses focus."
-                ) {
-                    Toggle("Lock hidden entries when I switch apps", isOn: $lockOnResign)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                SettingsRowDivider()
-                SettingsRow(
-                    title: "Show entry titles in Spotlight",
-                    subtitle: "Off by default. Only titles of non-hidden entries are indexed — never bodies or tags."
-                ) {
-                    Toggle("Show entry titles in Spotlight", isOn: $spotlightTitles)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: spotlightTitles) { _, on in
-                            if on { SpotlightIndexer.shared.scheduleReindex(db: vm.db) } else { SpotlightIndexer.shared.removeAll() }
-                        }
-                }
+                Toggle("Menu bar quick capture", isOn: $menuBarQuickCapture)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            SettingsRowDivider()
+            SettingsRow(
+                title: "New-entry shortcut from any app (⌥⌘J)",
+                subtitle: "Opens Omega Journal with a fresh entry."
+            ) {
+                Toggle("New-entry shortcut from any app", isOn: $globalHotkeyEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: globalHotkeyEnabled) { _, _ in GlobalHotkey.shared.syncRegistration() }
             }
         }
     }
 
-    // MARK: Writing — quick capture
+    // MARK: Privacy
 
-    private var quickCaptureCard: some View {
-        SettingsCard(title: "Quick Capture", icon: "bolt") {
-                SettingsRow(
-                    title: "Global new-entry hotkey (⌥⌘J)",
-                    subtitle: "Opens Omega Journal with a fresh entry from any app."
-                ) {
-                    Toggle("Global new-entry hotkey", isOn: $globalHotkeyEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: globalHotkeyEnabled) { _, _ in GlobalHotkey.shared.syncRegistration() }
-                }
+    private func protectionCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(title: card.title, icon: card.icon) {
+            SettingsRow(
+                title: "Encrypted on disk",
+                subtitle: "Entry text, attachments, and automatic backups (AES-256-GCM; the key lives in your Keychain)."
+            ) { Image(systemName: "checkmark.shield.fill").foregroundColor(.green).accessibilityHidden(true) }
+            SettingsRowDivider()
+            SettingsRow(
+                title: "Stored as plain metadata",
+                subtitle: "Titles, tags, moods, dates, and word counts — so search and filters stay fast. Anyone signed in to your Mac account could read these."
+            ) { Image(systemName: "info.circle").foregroundColor(theme.secondaryTextColor).accessibilityHidden(true) }
+        }
+    }
+
+    private func hiddenEntriesCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Hidden entries are masked everywhere in the app and need Touch ID or your password to reveal."
+        ) {
+            SettingsRow(
+                title: "Lock hidden entries when I switch apps",
+                subtitle: "Re-masks hidden entries whenever Omega Journal loses focus."
+            ) {
+                Toggle("Lock hidden entries when I switch apps", isOn: $lockOnResign)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            SettingsRowDivider()
+            SettingsRow(
+                title: "Show entry titles in Spotlight",
+                subtitle: "Off by default. Only titles of non-hidden entries are indexed — never bodies or tags."
+            ) {
+                Toggle("Show entry titles in Spotlight", isOn: $spotlightTitles)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: spotlightTitles) { _, on in
+                        if on { SpotlightIndexer.shared.scheduleReindex(db: vm.db) } else { SpotlightIndexer.shared.removeAll() }
+                    }
+            }
         }
     }
 
     // MARK: Data
 
-    private var dataPane: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SettingsCard(title: "Export", icon: "square.and.arrow.up") {
-                HStack(spacing: 8) {
-                    SettingsPillButton(title: "Markdown", icon: "arrow.down.doc") {
-                        ImportExportPanels.exportMarkdown(vm: vm)
-                    }
-                    SettingsPillButton(title: "JSON", icon: "curlybraces") {
-                        ImportExportPanels.exportJSON(vm: vm)
-                    }
-                    SettingsPillButton(title: "PDF", icon: "doc.richtext") {
-                        ImportExportPanels.exportPDF(vm: vm)
-                    }
-                    Spacer(minLength: 0)
+    private func exportCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "JSON is a complete backup you can import again later. Markdown and PDF are for reading or sharing."
+        ) {
+            HStack(spacing: 8) {
+                SettingsPillButton(title: "Markdown", icon: "arrow.down.doc") {
+                    ImportExportPanels.exportMarkdown(vm: vm)
                 }
-                .padding(.vertical, 3)
+                SettingsPillButton(title: "JSON", icon: "curlybraces") {
+                    ImportExportPanels.exportJSON(vm: vm)
+                }
+                SettingsPillButton(title: "PDF", icon: "doc.richtext") {
+                    ImportExportPanels.exportPDF(vm: vm)
+                }
+                Spacer(minLength: 0)
             }
+            .padding(.vertical, 3)
+        }
+    }
 
-            SettingsCard(
-                title: "Import",
-                icon: "square.and.arrow.down",
-                footnote: "Accepts a JSON backup exported from Omega Journal, or a set of markdown files."
+    private func importCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Accepts a JSON backup exported from Omega Journal, or a set of Markdown files."
+        ) {
+            HStack {
+                SettingsPillButton(title: "Import Entries…", icon: "tray.and.arrow.down") {
+                    ImportExportPanels.showImportPanel(vm: vm)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 3)
+        }
+    }
+
+    private func storageCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(title: card.title, icon: card.icon) {
+            SettingsValueRow(title: "Entries", value: "\(vm.entries.count)")
+            SettingsRowDivider()
+            SettingsValueRow(title: "Archived", value: "\(vm.archivedEntries.count)")
+            SettingsRowDivider()
+            SettingsValueRow(title: "In Trash", value: "\(vm.trashedEntries.count)")
+            SettingsRowDivider()
+            SettingsValueRow(title: "Total words", value: vm.totalWordCount.formatted())
+            SettingsRowDivider()
+            SettingsRow(
+                title: "Database",
+                subtitle: "~/Library/Application Support/OmegaJournal"
             ) {
-                HStack {
-                    SettingsPillButton(title: "Import Entries…", icon: "tray.and.arrow.down") {
-                        ImportExportPanels.showImportPanel(vm: vm)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 3)
-            }
-
-            SettingsCard(title: "Storage", icon: "internaldrive") {
-                SettingsValueRow(title: "Entries", value: "\(vm.entries.count)")
-                SettingsRowDivider()
-                SettingsValueRow(title: "Archived", value: "\(vm.archivedEntries.count)")
-                SettingsRowDivider()
-                SettingsValueRow(title: "In Trash", value: "\(vm.trashedEntries.count)")
-                SettingsRowDivider()
-                SettingsValueRow(title: "Total words", value: vm.totalWordCount.formatted())
-                SettingsRowDivider()
-                SettingsRow(
-                    title: "Database",
-                    subtitle: "~/Library/Application Support/OmegaJournal"
-                ) {
-                    SettingsPillButton(title: "Reveal in Finder", icon: "folder") {
-                        NSWorkspace.shared.open(
-                            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                                .appendingPathComponent("OmegaJournal")
-                        )
-                    }
+                SettingsPillButton(title: "Reveal in Finder", icon: "folder") {
+                    NSWorkspace.shared.open(
+                        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                            .appendingPathComponent("OmegaJournal")
+                    )
                 }
             }
+        }
+    }
 
-            if !vm.trashedEntries.isEmpty {
-                SettingsCard(title: "Danger Zone", icon: "exclamationmark.triangle") {
-                    SettingsRow(
-                        title: "Empty Trash",
-                        subtitle: "Permanently delete \(vm.trashedEntries.count) \(vm.trashedEntries.count == 1 ? "entry" : "entries") and their attachments."
-                    ) {
-                        SettingsPillButton(title: "Empty Trash", icon: "trash", destructive: true) {
-                            showEmptyTrashConfirmation = true
-                        }
-                    }
+    private func emptyTrashCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(title: card.title, icon: card.icon) {
+            SettingsRow(
+                title: "Empty Trash",
+                subtitle: "Permanently delete \(vm.trashedEntries.count) \(vm.trashedEntries.count == 1 ? "entry" : "entries") and their attachments."
+            ) {
+                SettingsPillButton(title: "Empty Trash", icon: "trash", destructive: true) {
+                    showEmptyTrashConfirmation = true
                 }
             }
         }
@@ -613,58 +661,58 @@ struct SettingsView: View {
 
     // MARK: About
 
-    private var aboutPane: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [theme.accentColor, theme.accentColor.opacity(0.5)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+    private var aboutHeader: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [theme.accentColor, theme.accentColor.opacity(0.5)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .frame(width: 72, height: 72)
-                    Text("Ω")
-                        .font(OmegaTheme.font(.heading, .bold, design: .serif))
-                        .foregroundColor(theme.onAccentColor)
-                }
-                Text("Omega Journal")
-                    .font(OmegaTheme.font(.heading, .semibold))
-                    .foregroundColor(theme.titleTextColor)
-                Text("A fast, private, local-first journal for macOS.")
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-                Text("Version \(appVersion)")
-                    .font(OmegaTheme.font(.meta, design: .rounded))
-                    .foregroundColor(theme.secondaryTextColor.opacity(0.8))
+                    )
+                    .frame(width: 72, height: 72)
+                Text("Ω")
+                    .font(OmegaTheme.font(.heading, .bold, design: .serif))
+                    .foregroundColor(theme.onAccentColor)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            Text("Omega Journal")
+                .font(OmegaTheme.font(.heading, .semibold))
+                .foregroundColor(theme.titleTextColor)
+            Text("A fast, private, local-first journal for macOS.")
+                .font(OmegaTheme.font(.meta))
+                .foregroundColor(theme.secondaryTextColor)
+            Text("Version \(appVersion)")
+                .font(OmegaTheme.font(.meta, design: .rounded))
+                .foregroundColor(theme.secondaryTextColor.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+    }
 
-            SettingsCard(title: "Keyboard Shortcuts", icon: "keyboard") {
-                LazyVGrid(
-                    columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-                    spacing: 6
-                ) {
-                    shortcut("⌘N", "New entry")
-                    shortcut("⇧⌘N", "New from template")
-                    shortcut("⌥⌘N", "New from today's prompt")
-                    shortcut("⌘K", "Command palette")
-                    shortcut("⌘F", "Find (in entry or list)")
-                    shortcut("⌥⌘F", "Search all entries")
-                    shortcut("⌘,", "Settings")
-                    shortcut("⌘[ / ⌘]", "Previous / next entry")
-                    shortcut("⌘E", "Edit selected entry")
-                    shortcut("⌃⌘F", "Zen mode")
-                    shortcut("⌘B / ⌘I", "Bold / Italic")
-                    shortcut("⌘1…⌘4", "Today / Journal / Calendar / Insights")
-                    shortcut("⌘⏎", "Finish editing")
-                    shortcut("⎋", "Close editor or palette")
-                }
-                .padding(.vertical, 3)
+    private func shortcutsCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(title: card.title, icon: card.icon) {
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                spacing: 6
+            ) {
+                shortcut("⌘N", "New entry")
+                shortcut("⇧⌘N", "New from template")
+                shortcut("⌥⌘N", "New from today's prompt")
+                shortcut("⌘K", "Command palette")
+                shortcut("⌘F", "Find (in entry or list)")
+                shortcut("⌥⌘F", "Search all entries")
+                shortcut("⌘,", "Settings")
+                shortcut("⌘[ / ⌘]", "Previous / next entry")
+                shortcut("⌘E", "Edit selected entry")
+                shortcut("⌃⌘F", "Zen mode")
+                shortcut("⌘B / ⌘I", "Bold / Italic")
+                shortcut("⌘1…⌘4", "Today / Journal / Calendar / Insights")
+                shortcut("⌘⏎", "Finish editing")
+                shortcut("⎋", "Close editor or palette")
             }
+            .padding(.vertical, 3)
         }
     }
 

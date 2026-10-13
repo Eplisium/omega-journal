@@ -2,34 +2,19 @@ import SwiftUI
 import AppKit
 import OmegaJournalCore
 
-// MARK: - Data safety settings (backup folder, restore, integrity, encrypted export, import, app lock)
-
-struct DataSafetyPanels: View {
-    @ObservedObject var vm: JournalViewModel
-    var body: some View {
-        VStack(alignment: .leading, spacing: OmegaTheme.Spacing.l) {
-            AppLockPanel()
-            BackupPanel(vm: vm)
-            ExportImportPanel(vm: vm)
-        }
-    }
-}
+// MARK: - Data safety settings (backup folder, restore, integrity, exports, imports, app lock)
+//
+// Each panel is one `SettingsCard` placed by `SettingsCatalog` (Privacy holds App
+// Lock; Data holds the rest), so these share the look of every other settings card.
 
 private struct PanelCard<Content: View>: View {
-    let title: String, icon: String
+    let card: SettingsCardID
     var footnote: String?
     @ViewBuilder var content: Content
-    @ObservedObject private var theme = ThemeManager.shared
     var body: some View {
-        OmegaCard {
-            VStack(alignment: .leading, spacing: OmegaTheme.Spacing.m) {
-                OmegaSectionHeader(title: title, systemImage: icon)
-                content
-                if let footnote {
-                    Text(footnote).font(OmegaTheme.metaFont).foregroundColor(theme.secondaryTextColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+        SettingsCard(title: card.title, icon: card.icon, footnote: footnote) {
+            VStack(alignment: .leading, spacing: OmegaTheme.Spacing.m) { content }
+                .padding(.vertical, 3)
         }
     }
 }
@@ -41,12 +26,20 @@ struct AppLockPanel: View {
     @ObservedObject private var theme = ThemeManager.shared
 
     var body: some View {
-        PanelCard(title: "App Lock", icon: "lock.app.dashed",
-                  footnote: "Requires Touch ID or your Mac password when Omega Journal opens and after the chosen time away. Separate from the Hidden-entries lock.") {
-            Toggle("Lock Omega Journal", isOn: $lock.isEnabled).toggleStyle(.switch)
+        PanelCard(card: .appLock,
+                  footnote: "Separate from the hidden-entries lock: this locks the whole app.") {
+            SettingsRow(title: "Lock Omega Journal",
+                        subtitle: "Ask for Touch ID or your Mac password when the app opens and after time away.") {
+                Toggle("Lock Omega Journal", isOn: $lock.isEnabled).labelsHidden().toggleStyle(.switch)
+            }
             if lock.isEnabled {
-                Picker("Lock", selection: $lock.timeout) {
-                    ForEach(AppLockTimeout.allCases) { Text($0.label).tag($0) }
+                SettingsRowDivider()
+                SettingsRow(title: "Lock after") {
+                    Picker("Lock after", selection: $lock.timeout) {
+                        ForEach(AppLockTimeout.allCases) { Text($0.label).tag($0) }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
             }
         }
@@ -65,7 +58,7 @@ struct BackupPanel: View {
     @State private var pendingRestore: BackupInfo?
 
     var body: some View {
-        PanelCard(title: "Backups", icon: "externaldrive.badge.timemachine",
+        PanelCard(card: .backups,
                   footnote: "Backups are encrypted with your Keychain key and contain entries, tags and check-ins (not attachment files). A copy of each daily backup also goes to the folder you choose — iCloud Drive or an external disk both work. Restoring first snapshots your current journal.") {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -186,73 +179,98 @@ extension JournalViewModel {
 
 // MARK: Export / import
 
-struct ExportImportPanel: View {
+struct MoreExportsPanel: View {
+    @ObservedObject var vm: JournalViewModel
+    var body: some View {
+        PanelCard(card: .moreExports,
+                  footnote: "Markdown folder: one .md file per entry plus an attachments folder. Static website: self-contained HTML you can open or host anywhere. Hidden entries are only included after you unlock them.") {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { buttons; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 8) { buttons }
+            }
+        }
+    }
+
+    @ViewBuilder private var buttons: some View {
+        Button { ImportExportPanels.exportMarkdownFolder(vm: vm) } label: { Label("Markdown folder", systemImage: "folder") }
+        Button { ImportExportPanels.exportHTMLSite(vm: vm) } label: { Label("Static website", systemImage: "globe") }
+        Button { ImportExportPanels.exportEntryPDF(vm: vm) } label: { Label("Selected entry as PDF", systemImage: "doc.richtext") }
+    }
+}
+
+struct EncryptedExportPanel: View {
     @ObservedObject var vm: JournalViewModel
     @ObservedObject private var theme = ThemeManager.shared
     @State private var passphrase = ""
     @State private var confirm = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OmegaTheme.Spacing.l) {
-            PanelCard(title: "More exports", icon: "square.and.arrow.up.on.square",
-                      footnote: "Markdown folder: one .md per entry with front matter + attachments folder. Website: self-contained HTML you can open or host anywhere. Hidden entries need authentication to be included.") {
-                HStack(spacing: 8) {
-                    Button { ImportExportPanels.exportMarkdownFolder(vm: vm) } label: { Label("Markdown folder", systemImage: "folder") }
-                    Button { ImportExportPanels.exportHTMLSite(vm: vm) } label: { Label("Static website", systemImage: "globe") }
-                    Button { ImportExportPanels.exportEntryPDF(vm: vm) } label: { Label("Selected entry PDF", systemImage: "doc.richtext") }
-                    Spacer(minLength: 0)
-                }
-            }
-            PanelCard(title: "Encrypted export", icon: "lock.doc",
-                      footnote: "Sealed with AES-256-GCM using a key derived from your passphrase (PBKDF2). Anyone with the file and passphrase can read it — there is no recovery if you forget it.") {
-                SecureField("Passphrase", text: $passphrase).textFieldStyle(.roundedBorder)
-                SecureField("Repeat passphrase", text: $confirm).textFieldStyle(.roundedBorder)
-                HStack {
-                    Button("Export…") { ImportExportPanels.exportEncrypted(vm: vm, passphrase: passphrase) }
-                        .disabled(passphrase.count < 8 || passphrase != confirm)
-                    Button("Import encrypted…") { ImportExportPanels.importEncrypted(vm: vm, passphrase: passphrase) }
-                        .disabled(passphrase.isEmpty)
-                    Spacer()
-                    if !passphrase.isEmpty && passphrase.count < 8 {
-                        Text("Use at least 8 characters").font(OmegaTheme.metaFont).foregroundColor(theme.warningColor)
-                    }
-                }
-            }
-            PanelCard(title: "Import from other apps", icon: "tray.and.arrow.down",
-                      footnote: "Day One: Export → JSON. Obsidian / notes: pick the vault or folder; front-matter title, date and tags are honored and images are attached. Duplicates are skipped and imports are never hidden.") {
-                HStack(spacing: 8) {
-                    Button { ImportExportPanels.importDayOne(vm: vm) } label: { Label("Day One JSON…", systemImage: "book") }
-                    Button { ImportExportPanels.importNotesFolder(vm: vm) } label: { Label("Obsidian / notes folder…", systemImage: "folder.badge.plus") }
-                    Spacer(minLength: 0)
+        PanelCard(card: .encryptedExport,
+                  footnote: "Locked with a password you choose (AES-256-GCM). Anyone with the file and the password can read it, and there is no way to recover a forgotten password.") {
+            SecureField("Password", text: $passphrase).textFieldStyle(.roundedBorder)
+            SecureField("Repeat password", text: $confirm).textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Export…") { ImportExportPanels.exportEncrypted(vm: vm, passphrase: passphrase) }
+                    .disabled(passphrase.count < 8 || passphrase != confirm)
+                Button("Import encrypted…") { ImportExportPanels.importEncrypted(vm: vm, passphrase: passphrase) }
+                    .disabled(passphrase.isEmpty)
+                Spacer()
+                if !passphrase.isEmpty && passphrase.count < 8 {
+                    Text("Use at least 8 characters").font(OmegaTheme.metaFont).foregroundColor(theme.warningColor)
+                } else if passphrase.count >= 8 && !confirm.isEmpty && passphrase != confirm {
+                    Text("Passwords don't match").font(OmegaTheme.metaFont).foregroundColor(theme.warningColor)
                 }
             }
         }
     }
 }
 
-// MARK: Reflection settings (check-ins, review reminders, AI assist)
-
-struct ReflectionSettingsPanels: View {
+struct ImportOtherAppsPanel: View {
     @ObservedObject var vm: JournalViewModel
+    var body: some View {
+        PanelCard(card: .importOtherApps,
+                  footnote: "Day One: choose Export → JSON in Day One. Obsidian or notes: pick the vault or folder; titles, dates and tags in front matter are kept and images are attached. Duplicates are skipped and imported entries are never hidden.") {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { buttons; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 8) { buttons }
+            }
+        }
+    }
+
+    @ViewBuilder private var buttons: some View {
+        Button { ImportExportPanels.importDayOne(vm: vm) } label: { Label("Day One JSON…", systemImage: "book") }
+        Button { ImportExportPanels.importNotesFolder(vm: vm) } label: { Label("Obsidian / notes folder…", systemImage: "folder.badge.plus") }
+    }
+}
+
+// MARK: Reflection settings (review reminders, AI assist)
+
+struct ReviewRemindersPanel: View {
+    var body: some View {
+        PanelCard(card: .reviewReminders,
+                  footnote: "Notifications are generic — they never include entry text. Click one to save the review as an entry.") {
+            ReviewScheduleControls()
+        }
+    }
+}
+
+struct AIAssistPanel: View {
     @ObservedObject private var theme = ThemeManager.shared
     @State private var aiEnabled = SmartAssist.isEnabled()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: OmegaTheme.Spacing.l) {
-            PanelCard(title: "Review reminders", icon: "bell.badge",
-                      footnote: "Notifications are generic — they never include entry text. Tapping one lets you save the review as an entry in one click.") {
-                ReviewScheduleControls()
-            }
-            ReviewCard(vm: vm)
-            PanelCard(title: "On-device AI assist", icon: "sparkles",
-                      footnote: "Off by default. Uses Apple's on-device model only (macOS 26+ with Apple Intelligence) — nothing is sent over the network. Hidden entries are never used.") {
-                if SmartAssist.availability.isAvailable {
+        PanelCard(card: .aiAssist,
+                  footnote: "Off by default. Uses Apple's on-device model only (macOS 26+ with Apple Intelligence) — nothing leaves your Mac. Hidden entries are never used.") {
+            if SmartAssist.availability.isAvailable {
+                SettingsRow(title: "Suggest titles, tags and summaries") {
                     Toggle("Suggest titles, tags and summaries", isOn: $aiEnabled)
+                        .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: aiEnabled) { _, on in SmartAssist.setEnabled(on) }
-                } else if case .unavailable(let why) = SmartAssist.availability {
-                    Text(why).font(OmegaTheme.captionFont).foregroundColor(theme.secondaryTextColor)
                 }
+            } else if case .unavailable(let why) = SmartAssist.availability {
+                Text(why).font(OmegaTheme.captionFont).foregroundColor(theme.secondaryTextColor)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
