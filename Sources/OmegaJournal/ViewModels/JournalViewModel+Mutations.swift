@@ -35,6 +35,8 @@ extension JournalViewModel {
     func setMood(_ mood: Mood, for entry: JournalEntry) {
         flushBeforeImmediateMutation()
         var u = entry; u.mood = mood; u.updatedAt = Date()
+        // A later retry of an unsaved snapshot must not revert this mood.
+        unsavedSnapshots[u.id]?.mood = mood
         db.saveEntry(u)
         updateEntry(u)
     }

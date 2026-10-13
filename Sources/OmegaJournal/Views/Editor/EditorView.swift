@@ -730,7 +730,8 @@ struct EditorView: View {
                 sprint = WritingSprint(minutes: minutes, startedAt: Date(), startWords: wordCount)
                 sprintNotified = false
             },
-            onStopSprint: { sprint = nil })
+            onStopSprint: { sprint = nil },
+            onRetrySave: { vm.retryFailedSaves() })
     }
 
     // MARK: Slash / wiki suggestions

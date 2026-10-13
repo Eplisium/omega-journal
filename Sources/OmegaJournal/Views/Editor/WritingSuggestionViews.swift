@@ -192,6 +192,7 @@ struct WritingFooterView: View {
     let saveState: JournalViewModel.SaveState
     var onStartSprint: (Int) -> Void
     var onStopSprint: () -> Void
+    var onRetrySave: () -> Void = {}
     /// Test seam: the save indicator's frame in window coordinates whenever it lays out.
     var onSaveIndicatorFrame: ((CGRect) -> Void)? = nil
 
@@ -251,16 +252,34 @@ struct WritingFooterView: View {
 
     private var saveIndicator: some View {
         let pending = saveState == .pending
-        return HStack(spacing: 4) {
-            Image(systemName: pending ? "arrow.triangle.2.circlepath" : "checkmark.circle")
-            Text(EditorSaveIndicator.label(isPending: pending))
+        let failed = saveState.isFailed
+        let tint: Color = failed ? theme.dangerColor : theme.secondaryTextColor.opacity(pending ? 0.9 : 0.7)
+        return HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: SaveStatusPresentation.systemImage(saveState))
+                Text(SaveStatusPresentation.label(saveState))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(SaveStatusPresentation.accessibilityLabel(saveState))
+            .accessibilityIdentifier("editor-save-state")
+            if failed {
+                // Retrying is also automatic on the next edit; this is the
+                // explicit path for someone who stopped typing.
+                Button(SaveStatusPresentation.retryLabel) { onRetrySave() }
+                    .buttonStyle(.plain)
+                    .font(OmegaTheme.font(.meta, .semibold))
+                    .foregroundColor(theme.accentColor)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Capsule().fill(theme.accentColor.opacity(0.14)))
+                    .accessibilityLabel(SaveStatusPresentation.retryAccessibilityLabel)
+                    .accessibilityIdentifier("editor-save-retry")
+                    .fixedSize()
+            }
         }
-        .foregroundColor(theme.secondaryTextColor.opacity(pending ? 0.9 : 0.7))
+        .foregroundColor(tint)
         .fixedSize()
         .layoutPriority(3)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(EditorSaveIndicator.accessibilityLabel(isPending: pending))
-        .accessibilityIdentifier("editor-save-state")
+        .help(SaveStatusPresentation.help(saveState) ?? "")
         .background {
             if let report = onSaveIndicatorFrame {
                 GeometryReader { geo in

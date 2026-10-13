@@ -58,16 +58,29 @@ final class JournalViewModel: ObservableObject {
     @Published var bulkSelection: Set<String> = []
     @Published var isBulkSelecting = false
 
-    let db = DatabaseManager.shared
+    let db: DatabaseManager
     var searchDebounce: Task<Void, Never>?
     var saveDebounce: Task<Void, Never>?
     /// The exact snapshot `saveDebounce` will persist. Flushing writes THIS —
     /// not whatever `editingEntry` happens to be by then — so switching,
     /// creating, trashing or reloading can never drop or misdirect an edit.
     var pendingSave: JournalEntry?
-    /// Editor save indicator: `.pending` while a debounced autosave is queued.
-    enum SaveState: Equatable { case idle, pending, saved }
+    /// Editor save indicator: `.pending` while a debounced autosave is queued,
+    /// `.failed(reason)` while any snapshot in `unsavedSnapshots` is unsaved.
+    typealias SaveState = SaveStatus
     @Published var saveState: SaveState = .idle
+    /// Snapshots whose write failed, by entry id. They are never dropped on
+    /// failure: each flush, the next edit, and the explicit Retry action try
+    /// them again, and `reload()` re-applies them so stale storage cannot
+    /// replace text the user typed.
+    var unsavedSnapshots: [String: JournalEntry] = [:]
+    /// Reason for the most recent failed snapshot write.
+    var lastSaveFailure: SaveFailureReason?
+    /// The failure toast is shown once per failure episode, not per retry.
+    var saveFailureAnnounced = false
+    /// Test seam: replaces the database write used for autosave snapshots and
+    /// retries. Throwing simulates a failed write without corrupting a DB.
+    var saveWriterOverride: ((JournalEntry) throws -> Void)?
     var undoStack: [UndoAction] = []
     /// Undo history is bounded: an unbounded stack of id arrays only grows.
     static let maxUndoDepth = 50
@@ -106,7 +119,10 @@ final class JournalViewModel: ObservableObject {
         case unarchive(ids: [String])
     }
 
-    init() {
+    /// `database` is a test seam: suites that must not share rows with the
+    /// singleton (parallel suites assert an empty library) pass a private one.
+    init(database: DatabaseManager = .shared) {
+        db = database
         // Surface database write failures that used to be swallowed. The
         // reporter is installed before reload() so launch-time failures
         // (migration, reconciliation) still reach the user.
@@ -185,6 +201,7 @@ final class JournalViewModel: ObservableObject {
         trashedEntries = scopes[.trashed] ?? []
         archivedEntries = scopes[.archived] ?? []
         hiddenEntries = scopes[.hidden] ?? []
+        reapplyUnsavedSnapshots()
         // While the biometric session is locked, hidden entries must not
         // advertise their tags in the sidebar/filter chips.
         allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
@@ -485,7 +502,7 @@ final class JournalViewModel: ObservableObject {
         // debounce Task surviving a fast "type → Done → quit".
         flushPendingSave()
         if let e = editingEntry {
-            if e.title.isEmpty && e.body.isEmpty {
+            if e.title.isEmpty && e.body.isEmpty && unsavedSnapshots[e.id] == nil {
                 // Discard entries that were never given any content.
                 db.hardDeleteEntry(id: e.id)
                 entries.removeAll { $0.id == e.id }
@@ -497,7 +514,8 @@ final class JournalViewModel: ObservableObject {
             }
         }
         editingEntryId = nil
-        saveState = .idle
+        // A failed save stays visible (and retryable) after the editor closes.
+        saveState = currentFailureState ?? .idle
         isZenMode = false
         refreshTagCounts()
         GoalManager.shared.loadGoals()
@@ -511,7 +529,9 @@ final class JournalViewModel: ObservableObject {
         // silently replaced.
         if let queued = pendingSave, queued.id != updated.id { persistPendingSnapshot() }
         updateEntry(updated, refreshSearch: false)
-        saveState = .pending
+        // Keep a failure on screen while typing; the debounced write retries
+        // and only a successful write turns it into "Saved".
+        if !saveState.isFailed { saveState = .pending }
         saveDebounce?.cancel()
         pendingSave = updated
         saveDebounce = Task { [weak self] in
@@ -519,8 +539,7 @@ final class JournalViewModel: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 guard self.pendingSave != nil else { return }
-                self.persistPendingSnapshot()
-                self.saveState = .saved
+                self.flushPendingSave()
                 if self.searchResults != nil { self.refreshQuery() }
                 self.refreshTagCounts()
                 GoalManager.shared.loadGoals()
@@ -528,22 +547,136 @@ final class JournalViewModel: ObservableObject {
         }
     }
 
-    /// Forces any pending debounced save to disk right away.
+    /// Forces any pending debounced save to disk right away, then retries any
+    /// snapshot whose earlier write failed. `pending` only becomes `saved` when
+    /// nothing is left unsaved; otherwise the state is `.failed(reason)`.
     func flushPendingSave() {
         persistPendingSnapshot()
-        if saveState == .pending { saveState = .saved }
+        retryUnsavedSnapshots()
+        updateSaveStateAfterWrite()
     }
 
     /// Cancels the debounce and writes its queued snapshot, if any. Never
-    /// writes other in-memory state, so it cannot clobber newer storage.
+    /// writes other in-memory state, so it cannot clobber newer storage. A
+    /// failed write moves the snapshot into `unsavedSnapshots` (never dropped).
     @discardableResult
     func persistPendingSnapshot() -> Bool {
         saveDebounce?.cancel()
         saveDebounce = nil
         guard let snapshot = pendingSave else { return false }
         pendingSave = nil
-        db.saveEntry(snapshot)
+        attemptSnapshotWrite(snapshot)
         return true
+    }
+
+    /// Explicit Retry (editor footer): writes the queued snapshot and every
+    /// failed one again. Returns whether everything is now saved.
+    @discardableResult
+    func retryFailedSaves() -> Bool {
+        let hadFailures = !unsavedSnapshots.isEmpty
+        flushPendingSave()
+        let ok = unsavedSnapshots.isEmpty
+        if ok && hadFailures { showToast("Saved") }
+        return ok
+    }
+
+    // MARK: Save failure handling
+
+    /// `.failed(reason)` while anything is unsaved, else nil.
+    var currentFailureState: SaveState? {
+        unsavedSnapshots.isEmpty ? nil : .failed(lastSaveFailure ?? .writeFailed)
+    }
+
+    /// The single write path for autosave snapshots and retries.
+    func writeEntrySnapshot(_ entry: JournalEntry) throws {
+        if let override = saveWriterOverride {
+            try override(entry)
+            return
+        }
+        try db.saveEntryChecked(entry)
+        // saveEntry keeps an undecryptable stored body (it refuses to replace
+        // ciphertext it cannot read) yet commits the metadata — so the write
+        // "succeeds" while the new text was not stored. Treat that as failed.
+        if !entry.body.isEmpty, db.isEntryUnreadable(entry.id), db.existingBodyState(id: entry.id).unreadable {
+            throw SQLiteError.message("stored text can't be decrypted")
+        }
+    }
+
+    /// Writes one snapshot. Success clears any older failed snapshot of the
+    /// same entry (this one supersedes it); failure keeps it.
+    @discardableResult
+    func attemptSnapshotWrite(_ snapshot: JournalEntry) -> Bool {
+        do {
+            try writeEntrySnapshot(snapshot)
+            unsavedSnapshots[snapshot.id] = nil
+            return true
+        } catch {
+            unsavedSnapshots[snapshot.id] = snapshot
+            lastSaveFailure = Self.saveFailureReason(for: error, db: db)
+            return false
+        }
+    }
+
+    static func saveFailureReason(for error: Error, db: DatabaseManager) -> SaveFailureReason {
+        if db.isReadOnly { return .readOnly }
+        if error is JournalCrypto.KeyError { return .encryptionUnavailable }
+        return SaveFailureReason.classify(error.localizedDescription)
+    }
+
+    /// Retries every failed snapshot. Only the editor-owned fields (title,
+    /// body, mood, tags) are layered onto the CURRENT stored row, so pin /
+    /// favorite / archive / hide / trash changes that landed after the failure
+    /// are never reverted by an old snapshot. A snapshot whose entry no longer
+    /// exists anywhere (purged) is dropped.
+    func retryUnsavedSnapshots() {
+        guard !unsavedSnapshots.isEmpty else { return }
+        for id in unsavedSnapshots.keys.sorted() {
+            guard let snapshot = unsavedSnapshots[id] else { continue }
+            let merged: JournalEntry
+            if let stored = db.fetchEntry(id: id) {
+                merged = Self.overlayEditorFields(of: snapshot, onto: stored)
+            } else if entry(id: id) != nil {
+                merged = snapshot
+            } else {
+                unsavedSnapshots[id] = nil
+                continue
+            }
+            attemptSnapshotWrite(merged)
+        }
+    }
+
+    static func overlayEditorFields(of snapshot: JournalEntry, onto base: JournalEntry) -> JournalEntry {
+        var merged = base
+        merged.title = snapshot.title
+        merged.body = snapshot.body
+        merged.mood = snapshot.mood
+        merged.tags = snapshot.tags
+        merged.updatedAt = max(base.updatedAt, snapshot.updatedAt)
+        return merged
+    }
+
+    /// After a reload from storage, put unsaved text back into the in-memory
+    /// collections so the list, reader and a reopened editor still show it.
+    func reapplyUnsavedSnapshots() {
+        for (id, snapshot) in unsavedSnapshots {
+            guard let current = entry(id: id) else { continue }
+            updateEntry(Self.overlayEditorFields(of: snapshot, onto: current), refreshSearch: false)
+        }
+    }
+
+    /// Settles the indicator after a write attempt: failed while anything is
+    /// unsaved (toast once on entering failure), otherwise pending → saved.
+    func updateSaveStateAfterWrite() {
+        if let failed = currentFailureState {
+            if !saveFailureAnnounced, let reason = failed.failureReason {
+                saveFailureAnnounced = true
+                showToast(SaveStatusPresentation.failureToast(reason), isError: true)
+            }
+            saveState = failed
+        } else {
+            saveFailureAnnounced = false
+            if saveState == .pending || saveState.isFailed { saveState = .saved }
+        }
     }
 
     /// Saves every capture queued by the menu-bar popover. The user's current
@@ -568,7 +701,7 @@ final class JournalViewModel: ObservableObject {
             editingEntryId = nil
             created.append(entry)
         }
-        saveState = .idle
+        saveState = currentFailureState ?? .idle
         refreshTagCounts()
         GoalManager.shared.loadGoals()
         if let resumeId, let previous = entry(id: resumeId), !previous.isTrashed {
@@ -589,7 +722,10 @@ final class JournalViewModel: ObservableObject {
         var u = entry
         u.body = body
         u.updatedAt = Date()
-        db.saveEntry(u)
+        // The new body supersedes an older unsaved snapshot's body.
+        unsavedSnapshots[u.id]?.body = body
+        if db.saveEntry(u), unsavedSnapshots[u.id]?.title == u.title { unsavedSnapshots[u.id] = nil }
+        updateSaveStateAfterWrite()
         updateEntry(u)
         refreshTagCounts()
     }
