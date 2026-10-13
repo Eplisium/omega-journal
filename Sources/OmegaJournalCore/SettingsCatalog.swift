@@ -116,3 +116,18 @@ public enum SettingsCatalog {
         SettingsCardID.allCases.first { $0.storageKeys.contains(key) }
     }
 }
+
+// MARK: - Storage location (pure)
+
+public enum SettingsStorageLocation {
+    /// Folder holding the journal database, with the home directory shown as `~`.
+    public static func displayFolder(forDatabasePath path: String,
+                                     home: String = NSHomeDirectory()) -> String {
+        let folder = (path as NSString).deletingLastPathComponent
+        guard !home.isEmpty else { return folder }
+        let base = home.hasSuffix("/") ? String(home.dropLast()) : home
+        if folder == base { return "~" }
+        if folder.hasPrefix(base + "/") { return "~" + folder.dropFirst(base.count) }
+        return folder
+    }
+}

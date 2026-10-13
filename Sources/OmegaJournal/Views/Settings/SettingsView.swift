@@ -632,15 +632,14 @@ struct SettingsView: View {
             SettingsRowDivider()
             SettingsValueRow(title: "Total words", value: vm.totalWordCount.formatted())
             SettingsRowDivider()
+            // The journal this window actually uses (a relocated or test
+            // database lives elsewhere — never point at a hard-coded folder).
             SettingsRow(
-                title: "Database",
-                subtitle: "~/Library/Application Support/OmegaJournal"
+                title: "Journal location",
+                subtitle: SettingsStorageLocation.displayFolder(forDatabasePath: vm.db.dbPath)
             ) {
-                SettingsPillButton(title: "Reveal in Finder", icon: "folder") {
-                    NSWorkspace.shared.open(
-                        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                            .appendingPathComponent("OmegaJournal")
-                    )
+                SettingsPillButton(title: "Show in Finder", icon: "folder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: vm.db.dbPath)])
                 }
             }
         }

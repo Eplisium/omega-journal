@@ -75,3 +75,34 @@ struct ImproveSettingsCatalogTests {
         }
     }
 }
+
+@Suite("Improve Settings: journal location", .serialized)
+@MainActor
+struct ImproveSettingsStorageLocationTests {
+    @Test("folder under home is shown with ~")
+    func tildeAbbreviation() {
+        #expect(SettingsStorageLocation.displayFolder(
+            forDatabasePath: "/Users/kim/Library/Application Support/OmegaJournal/omega_journal.sqlite3",
+            home: "/Users/kim") == "~/Library/Application Support/OmegaJournal")
+        #expect(SettingsStorageLocation.displayFolder(forDatabasePath: "/Users/kim/j.sqlite3", home: "/Users/kim/") == "~")
+        // A sibling home with a shared prefix must not be abbreviated.
+        #expect(SettingsStorageLocation.displayFolder(forDatabasePath: "/Users/kimberly/x/j.sqlite3", home: "/Users/kim")
+                == "/Users/kimberly/x")
+        #expect(SettingsStorageLocation.displayFolder(forDatabasePath: "/Volumes/Ext/OJ/j.sqlite3", home: "/Users/kim")
+                == "/Volumes/Ext/OJ")
+    }
+
+    /// The Storage card used to print and reveal the hard-coded default folder
+    /// even when the window's journal lives elsewhere (test/QA databases).
+    @Test("Storage card describes the database this view model actually uses")
+    func followsLiveDatabase() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImproveSettings-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let dbPath = root.appendingPathComponent("journal.sqlite3").path
+        let db = DatabaseManager(databasePath: dbPath, attachmentsPath: root.appendingPathComponent("att").path)
+        let shown = SettingsStorageLocation.displayFolder(forDatabasePath: db.dbPath)
+        #expect(!shown.contains("Application Support/OmegaJournal"))
+        #expect(shown.hasSuffix(root.lastPathComponent))
+    }
+}
