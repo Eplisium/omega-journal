@@ -94,10 +94,24 @@ struct EntryRow: View {
                 .font(OmegaTheme.font(.caption)).padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor))
         }
-        .accessibilityElement(children: .combine)
+        .overlay(
+            // Visible selection edge (not just a faint fill) so keyboard
+            // navigation with ↑/↓ shows where the cursor is.
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(rowBorder, lineWidth: isSelected ? 1.5 : 1)
+                .accessibilityHidden(true)
+        )
+        .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected || isBulkSelected ? .isSelected : [])
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(isBulkSelecting ? "Double tap to change its bulk selection" : "Double tap to open this entry")
+        .accessibilityValue(A11yDescriptions.entryRowValue(isSelected: isSelected, isBulkSelecting: isBulkSelecting, isBulkSelected: isBulkSelected))
+        .accessibilityHint(A11yDescriptions.entryRowHint(isBulkSelecting: isBulkSelecting, isTrash: isTrash))
+        .accessibilityAction {
+            if isBulkSelecting { vm.toggleBulkSelection(entry.id) } else { vm.select(entry) }
+        }
+        .modifier(EntryRowAccessibilityActions(actions: isBulkSelecting ? [] : A11yEntryRowAction.available(isTrash: isTrash),
+                                               entry: entry, perform: perform))
         .onHover { hover = $0 }
         .onTapGesture(count: 2) {
             if !isTrash && !isBulkSelecting { vm.startEditing(entry) }
@@ -152,7 +166,8 @@ struct EntryRow: View {
             if entry.isFavorite {
                 Image(systemName: "star.fill").font(OmegaTheme.font(.meta)).foregroundColor(.yellow)
             }
-            if !entry.attachments.isEmpty {
+            // Attachment presence is body-derived: hidden while locked.
+            if !entry.attachments.isEmpty && canShowContent {
                 Image(systemName: "paperclip").font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor)
             }
         }
@@ -269,10 +284,38 @@ struct EntryRow: View {
         entry.isHidden && !biometricAuth.isAuthenticated
     }
 
+    /// VoiceOver label built by the Core helper, which drops tags, word count
+    /// and attachments for a locked hidden entry (title/mood/date only).
     var accessibilityLabel: String {
-        let privacy = isContentLocked ? "Hidden entry" : entry.displayTitle
-        let metadata = "\(entry.mood.label), \(entry.createdAt.formatted(date: .abbreviated, time: .omitted))"
-        return "\(privacy), \(metadata)"
+        A11yDescriptions.entryRowLabel(accessibilitySummary)
+    }
+
+    var accessibilitySummary: A11yEntrySummary {
+        let show = canShowContent
+        return A11yEntrySummary(
+            title: entry.displayTitle,
+            moodLabel: entry.mood.label,
+            dateText: isTrash ? trashLabel : entry.createdAt.formatted(date: .abbreviated, time: .omitted),
+            isPinned: entry.isPinned,
+            isFavorite: entry.isFavorite,
+            isHidden: entry.isHidden,
+            canShowContent: show,
+            wordCount: show ? entry.wordCount : 0,
+            tags: show ? entry.tags.map { TagPath.leaf(of: $0) } : [],
+            attachmentCount: show ? entry.attachments.count : 0
+        )
+    }
+
+    func perform(_ action: A11yEntryRowAction) {
+        switch action {
+        case .edit: vm.startEditing(entry)
+        case .togglePin: vm.togglePin(entry)
+        case .toggleFavorite: vm.toggleFavorite(entry)
+        case .toggleArchive: vm.toggleArchive(entry)
+        case .moveToTrash: vm.deleteEntry(entry)
+        case .restore: vm.restoreFromTrash(entry)
+        case .deleteForever: showPermanentDeleteConfirmation = true
+        }
     }
 
     var rowBackground: Color {
@@ -284,7 +327,7 @@ struct EntryRow: View {
     }
 
     var rowBorder: Color {
-        if isSelected { return theme.accentColor.opacity(0.45) }
+        if isSelected { return theme.accentColor.opacity(0.6) }
         if isContentLocked { return theme.accentColor.opacity(0.22) }
         return theme.titleTextColor.opacity(0.06)
     }
@@ -336,5 +379,23 @@ struct EntryRow: View {
     /// Context-menu mood icon: a checkmark for the row entry's current mood, else none.
     nonisolated static func moodMenuIcon(for mood: Mood, current: Mood) -> String? {
         mood == current ? "checkmark" : nil
+    }
+}
+
+/// Adds one VoiceOver custom action per row command (Pin, Favorite, Archive…),
+/// so the hover-only quick actions are reachable from the VO actions menu.
+struct EntryRowAccessibilityActions: ViewModifier {
+    let actions: [A11yEntryRowAction]
+    let entry: JournalEntry
+    let perform: (A11yEntryRowAction) -> Void
+
+    func body(content: Content) -> some View {
+        content.accessibilityActions {
+            ForEach(actions, id: \.self) { action in
+                Button(action.title(isPinned: entry.isPinned, isFavorite: entry.isFavorite, isArchived: entry.isArchived)) {
+                    perform(action)
+                }
+            }
+        }
     }
 }
