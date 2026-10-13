@@ -38,10 +38,20 @@ final class LaunchGate: ObservableObject {
 struct LaunchGateView: View {
     @StateObject private var gate = LaunchGate()
 
+    /// The real UI once the key is adopted, covered by the whole-app lock.
+    /// Only call after the key is ready: `AppLockManager.shared` reads its
+    /// settings from the database. Creating it here also installs its
+    /// resign/become-active observers, and a fresh manager starts locked
+    /// whenever the feature is enabled.
+    @MainActor
+    static func readyRoot(lock: AppLockManager? = nil) -> some View {
+        ContentView().appLockGate(lock)
+    }
+
     var body: some View {
         Group {
             if gate.isReady {
-                ContentView()
+                Self.readyRoot()
             } else {
                 unlocking
             }

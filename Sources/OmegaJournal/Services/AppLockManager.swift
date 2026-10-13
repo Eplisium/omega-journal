@@ -23,6 +23,7 @@ final class AppLockManager: ObservableObject {
     private var lastActive: Date?
     private var observers: [NSObjectProtocol] = []
     private var authInFlight = false
+    var isObservingApp: Bool { !observers.isEmpty }
 
     init(db: DatabaseManager? = nil, auth: BiometricAuth? = nil, observeApp: Bool = true) {
         let db = db ?? DatabaseManager.shared
@@ -89,6 +90,23 @@ final class AppLockManager: ObservableObject {
     }
 }
 
+/// Hides and disables the wrapped content while the app is locked, covers it
+/// with `AppLockOverlay`, and asks for authentication as soon as a locked
+/// window appears (the launch-time didBecomeActive fired before the gate).
+struct AppLockGate: ViewModifier {
+    @ObservedObject var lock: AppLockManager
+
+    func body(content: Content) -> some View {
+        content
+            .disabled(lock.isLocked)
+            .accessibilityHidden(lock.isLocked)
+            .overlay(AppLockOverlay(lock: lock))
+            .onAppear {
+                if lock.isLocked { Task { await lock.unlock() } }
+            }
+    }
+}
+
 /// Full-window cover shown while the app is locked.
 struct AppLockOverlay: View {
     @ObservedObject var lock: AppLockManager
@@ -133,6 +151,6 @@ extension View {
     /// Covers the content with the lock screen while `AppLockManager` is locked.
     /// Embed once at the root: `ContentView().appLockGate()`.
     @MainActor func appLockGate(_ lock: AppLockManager? = nil) -> some View {
-        overlay(AppLockOverlay(lock: lock ?? AppLockManager.shared))
+        modifier(AppLockGate(lock: lock ?? AppLockManager.shared))
     }
 }
