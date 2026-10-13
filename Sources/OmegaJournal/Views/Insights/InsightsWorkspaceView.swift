@@ -15,8 +15,7 @@ struct InsightsWorkspaceView: View {
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
 
-    @State private var presentedEntry: EntryDrillThroughRoute?
-    @State private var presentedDay: DayEntriesRoute?
+    @State private var drill = DrillThroughPresentation()
     @State private var workspaceSize: CGSize = .zero
 
     private var entries: [JournalEntry] { vm.scopedAnalyticsEntries }
@@ -79,14 +78,14 @@ struct InsightsWorkspaceView: View {
                     .onChange(of: geo.size) { _, newSize in workspaceSize = newSize }
             }
         )
-        .sheet(item: $presentedEntry, onDismiss: finishPresentedEntry) { route in
+        .sheet(item: $drill.presentedEntry, onDismiss: finishPresentedEntry) { route in
             EntryDrillThroughSheet(vm: vm, entryID: route.entryID, contextTitle: "Insights entry")
                 // Cap to the workspace so the reader/editor sheet always fits;
                 // floors match the sheet's own minWidth/minHeight.
                 .frame(maxWidth: max(760, workspaceSize.width * 0.94),
                        maxHeight: max(560, workspaceSize.height * 0.92))
         }
-        .sheet(item: $presentedDay, onDismiss: finishPresentedEntry) { route in
+        .sheet(item: $drill.presentedDay, onDismiss: finishPresentedDay) { route in
             DayEntriesSheet(
                 day: route.day,
                 entries: entriesByDay[route.day] ?? [],
@@ -103,7 +102,9 @@ struct InsightsWorkspaceView: View {
         Task { @MainActor in
             guard await vm.revealIfNeeded(entry) else { return }
             vm.select(entry)
-            presentedEntry = EntryDrillThroughRoute(entryID: entry.id)
+            // From the day sheet this dismisses it first; the entry sheet is
+            // presented after that dismissal (see finishPresentedDay).
+            drill.presentEntry(id: entry.id)
         }
     }
 
@@ -113,14 +114,21 @@ struct InsightsWorkspaceView: View {
         if dayEntries.count == 1 {
             openEntry(dayEntries[0])
         } else {
-            presentedDay = DayEntriesRoute(day: day)
+            drill.presentedDay = DayEntriesRoute(day: day)
         }
     }
 
     private func finishPresentedEntry() {
-        if let entryID = presentedEntry?.entryID, vm.editingEntryId == entryID {
+        // `presentedEntry` is already nil here; the coordinator remembers the id.
+        if drill.entryDismissed(editingEntryId: vm.editingEntryId) {
             vm.stopEditing()
         }
+    }
+
+    private func finishPresentedDay() {
+        guard let pending = drill.dayDismissed() else { return }
+        // Next runloop: never present a sheet while another is still tearing down.
+        DispatchQueue.main.async { drill.presentEntry(id: pending) }
     }
 
     // MARK: - Header
@@ -263,6 +271,46 @@ struct InsightsWorkspaceView: View {
 struct DayEntriesRoute: Identifiable {
     let day: Date
     var id: TimeInterval { day.timeIntervalSince1970 }
+}
+
+// MARK: - Drill-through sheet coordination
+
+/// Sheet state for Insights drill-through, kept pure so it is testable.
+///
+/// - `sheet(item:)` clears `presentedEntry` BEFORE `onDismiss` runs, so the
+///   presented id is remembered separately (as CalendarView does) and editing
+///   can still be stopped on dismissal.
+/// - Opening an entry while the day sheet is up must not stack a second sheet:
+///   the day sheet is dismissed first and the entry presented after.
+struct DrillThroughPresentation {
+    var presentedEntry: EntryDrillThroughRoute?
+    var presentedDay: DayEntriesRoute?
+    private(set) var presentedEntryID: String?
+    private(set) var pendingEntryID: String?
+
+    mutating func presentEntry(id: String) {
+        if presentedDay != nil {
+            pendingEntryID = id
+            presentedDay = nil
+            return
+        }
+        presentedEntryID = id
+        presentedEntry = EntryDrillThroughRoute(entryID: id)
+    }
+
+    /// Call from the entry sheet's onDismiss. True when the dismissed entry is
+    /// the one being edited, i.e. the caller must stop editing.
+    mutating func entryDismissed(editingEntryId: String?) -> Bool {
+        defer { presentedEntryID = nil }
+        guard let id = presentedEntryID else { return false }
+        return id == editingEntryId
+    }
+
+    /// Call from the day sheet's onDismiss. Returns an entry to present next.
+    mutating func dayDismissed() -> String? {
+        defer { pendingEntryID = nil }
+        return pendingEntryID
+    }
 }
 
 // MARK: - InsightsWorkspaceView content
@@ -468,45 +516,23 @@ extension InsightsWorkspaceView {
         }
     }
 
+    /// DST-safe strict streak (see `StreakHistory.currentLength`).
     private var scopedWritingStreak: Int {
-        let calendar = Calendar.current
-        let days = Set(entries.map { calendar.startOfDay(for: $0.createdAt) })
-        guard !days.isEmpty else { return 0 }
-        var day = calendar.startOfDay(for: Date())
-        if !days.contains(day) {
-            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: day), days.contains(yesterday) else {
-                return 0
-            }
-            day = yesterday
-        }
-        var streak = 0
-        while days.contains(day) {
-            streak += 1
-            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-            day = previous
-        }
-        return streak
+        StreakHistory.currentLength(days: Set(entries.map(\.createdAt)))
     }
 
+    private var activitySamples: [ActivitySample] {
+        entries.map { ActivitySample(date: $0.createdAt, words: $0.wordCount) }
+    }
+
+    /// Deterministic on ties (lowest weekday wins).
     private var mostProductiveDay: String {
-        let calendar = Calendar.current
-        var counts: [Int: Int] = [:]
-        for entry in entries {
-            counts[calendar.component(.weekday, from: entry.createdAt), default: 0] += 1
-        }
-        guard let day = counts.max(by: { $0.value < $1.value })?.key else { return "Not enough data" }
-        return calendar.weekdaySymbols[day - 1]
+        ActivityStats.mostProductiveWeekday(activitySamples) ?? "Not enough data"
     }
 
+    /// Deterministic on ties (earliest hour wins).
     private var mostProductiveHour: String {
-        let calendar = Calendar.current
-        var counts: [Int: Int] = [:]
-        for entry in entries {
-            counts[calendar.component(.hour, from: entry.createdAt), default: 0] += 1
-        }
-        guard let hour = counts.max(by: { $0.value < $1.value })?.key else { return "Not enough data" }
-        let display = hour % 12 == 0 ? 12 : hour % 12
-        return "\(display) \(hour < 12 ? "AM" : "PM")"
+        ActivityStats.mostProductiveHour(activitySamples).map(ActivityStats.hourLabel) ?? "Not enough data"
     }
 
     private func requestPrivateInclusion() {

@@ -67,14 +67,24 @@ struct CalendarView: View {
         return result
     }
 
-    private var orderedWeekdaySymbols: [String] {
-        let symbols = calendar.veryShortWeekdaySymbols
-        let start = max(0, calendar.firstWeekday - 1)
-        return Array(symbols[start...] + symbols[..<start])
+    struct WeekdayHeader: Identifiable, Equatable {
+        /// Calendar weekday number (1 = Sunday) — unique, unlike the symbols
+        /// ("T"/"S" repeat in veryShortWeekdaySymbols).
+        let id: Int
+        let symbol: String
     }
 
-    private var agendaDays: [Date] {
-        let visibleDays = entriesByDay.keys.filter(isInAnchorMonth)
+    nonisolated static func weekdayHeaders(calendar: Calendar) -> [WeekdayHeader] {
+        let symbols = calendar.veryShortWeekdaySymbols
+        let start = max(0, calendar.firstWeekday - 1)
+        return (0..<7).map { offset in
+            let index = (start + offset) % 7
+            return WeekdayHeader(id: index + 1, symbol: symbols[index])
+        }
+    }
+
+    private func agendaDays(from byDay: [Date: [JournalEntry]]) -> [Date] {
+        let visibleDays = byDay.keys.filter(isInAnchorMonth)
         var days = Set(visibleDays)
         let normalizedSelection = calendar.startOfDay(for: selectedDay)
         if isInAnchorMonth(normalizedSelection) {
@@ -361,7 +371,9 @@ struct CalendarView: View {
     }
 
     private var monthGridCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        // Bucket once per render, not once per day cell.
+        let byDay = entriesByDay
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Month at a glance")
@@ -379,8 +391,8 @@ struct CalendarView: View {
 
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    ForEach(orderedWeekdaySymbols, id: \.self) { symbol in
-                        Text(symbol.uppercased())
+                    ForEach(Self.weekdayHeaders(calendar: calendar)) { header in
+                        Text(header.symbol.uppercased())
                             .font(OmegaTheme.font(.meta, .semibold))
                             .foregroundColor(theme.secondaryTextColor)
                             .frame(maxWidth: .infinity)
@@ -393,7 +405,7 @@ struct CalendarView: View {
                         if let day {
                             CalendarDayCell(
                                 day: day,
-                                entries: dayEntries(for: day),
+                                entries: dayEntries(for: day, in: byDay),
                                 isSelected: calendar.isDate(day, inSameDayAs: selectedDay),
                                 calendar: calendar,
                                 onSelect: { selectDay(day) }
@@ -431,7 +443,9 @@ struct CalendarView: View {
     }
 
     private var agendaCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let byDay = entriesByDay
+        let days = agendaDays(from: byDay)
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Agenda")
@@ -442,17 +456,17 @@ struct CalendarView: View {
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
-                Text("\(agendaDays.count) \(agendaDays.count == 1 ? "day" : "days")")
+                Text("\(days.count) \(days.count == 1 ? "day" : "days")")
                     .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
 
-            if agendaDays.isEmpty {
+            if days.isEmpty {
                 agendaEmptyState
             } else {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(agendaDays, id: \.self) { day in
-                        agendaDaySection(day)
+                    ForEach(days, id: \.self) { day in
+                        agendaDaySection(day, byDay: byDay)
                     }
                 }
             }
@@ -478,8 +492,8 @@ struct CalendarView: View {
         .padding(.vertical, 34)
     }
 
-    private func agendaDaySection(_ day: Date) -> some View {
-        let entries = dayEntries(for: day)
+    private func agendaDaySection(_ day: Date, byDay: [Date: [JournalEntry]]) -> some View {
+        let entries = dayEntries(for: day, in: byDay)
         let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -706,8 +720,8 @@ struct CalendarView: View {
         }
     }
 
-    private func dayEntries(for day: Date) -> [JournalEntry] {
-        entriesByDay[calendar.startOfDay(for: day), default: []]
+    private func dayEntries(for day: Date, in byDay: [Date: [JournalEntry]]) -> [JournalEntry] {
+        byDay[calendar.startOfDay(for: day), default: []]
             .sorted { $0.createdAt < $1.createdAt }
     }
 

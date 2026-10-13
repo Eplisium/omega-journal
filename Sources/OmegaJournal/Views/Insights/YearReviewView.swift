@@ -106,7 +106,7 @@ struct YearReviewPage: View {
             if !review.favoriteTitles.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Favorites").font(OmegaTheme.headingFont).foregroundColor(text)
-                    ForEach(review.favoriteTitles, id: \.self) { Text("★ \($0)").font(OmegaTheme.bodyFont).foregroundColor(secondary) }
+                    ForEach(Array(review.favoriteTitles.enumerated()), id: \.offset) { Text("★ \($0.element)").font(OmegaTheme.bodyFont).foregroundColor(secondary) }
                 }
             }
         }

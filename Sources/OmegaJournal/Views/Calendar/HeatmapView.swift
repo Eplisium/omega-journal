@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Writing Heatmap (Contribution Graph)
 
@@ -43,12 +44,38 @@ struct HeatmapView: View {
         let days: [Date?]
     }
 
+    /// First day shown in the grid: the start of the week 25 weeks before this one.
+    nonisolated static func gridStart(today: Date, calendar cal: Calendar) -> Date? {
+        guard let thisWeekStart = cal.dateInterval(of: .weekOfYear, for: today)?.start else { return nil }
+        return cal.date(byAdding: .weekOfYear, value: -25, to: thisWeekStart)
+    }
+
+    struct WindowStats: Equatable {
+        let total: Int
+        let activeDays: Int
+        let maxDay: Int
+        /// Percent of days in the window (through today) with writing; 0…100.
+        let coverage: Int
+    }
+
+    /// Stats over ONLY the days the grid shows (`windowStart`…`today`), so the
+    /// header never counts entries outside the grid and coverage stays ≤ 100%.
+    nonisolated static func windowStats(counts: [Date: Int], windowStart: Date, today: Date,
+                                        calendar: Calendar) -> WindowStats {
+        let start = calendar.startOfDay(for: windowStart)
+        let end = calendar.startOfDay(for: today)
+        let inWindow = counts.filter { $0.key >= start && $0.key <= end }.map(\.value)
+        let active = inWindow.filter { $0 > 0 }.count
+        let span = max(DayKey.dayDistance(from: start, to: end, calendar: calendar) + 1, 1)
+        let coverage = min(100, Int((Double(active) / Double(span) * 100).rounded()))
+        return WindowStats(total: inWindow.reduce(0, +), activeDays: active,
+                           maxDay: inWindow.max() ?? 0, coverage: coverage)
+    }
+
     private var weeks: [WeekColumn] {
         let cal = Self.cal
         let today = cal.startOfDay(for: Date())
-        guard let thisWeekStart = cal.dateInterval(of: .weekOfYear, for: today)?.start,
-              let rangeStart = cal.date(byAdding: .weekOfYear, value: -25, to: thisWeekStart)
-        else { return [] }
+        guard let rangeStart = Self.gridStart(today: today, calendar: cal) else { return [] }
 
         var result: [WeekColumn] = []
         var weekStart = rangeStart
@@ -97,13 +124,15 @@ struct HeatmapView: View {
         return labels
     }
 
-    private var totalEntries: Int { info.values.reduce(0) { $0 + $1.count } }
-    private var activeDays: Int { info.values.filter { $0.count > 0 }.count }
-    private var maxDay: Int { info.values.map(\.count).max() ?? 0 }
-    private var coverage: Int {
-        let span = max(weeks.count * 7, 1)
-        return Int((Double(activeDays) / Double(span) * 100).rounded())
+    private var windowStats: WindowStats {
+        let today = Self.cal.startOfDay(for: Date())
+        let start = Self.gridStart(today: today, calendar: Self.cal) ?? today
+        return Self.windowStats(counts: info.mapValues(\.count), windowStart: start, today: today, calendar: Self.cal)
     }
+    private var totalEntries: Int { windowStats.total }
+    private var activeDays: Int { windowStats.activeDays }
+    private var maxDay: Int { windowStats.maxDay }
+    private var coverage: Int { windowStats.coverage }
 
     /// Theme-aware intensity ramp (empty → soft surface, busy → full accent).
     private func fill(for count: Int) -> Color {
