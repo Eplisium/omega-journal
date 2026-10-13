@@ -27,7 +27,10 @@ struct SidebarView: View {
     @State private var showTagManager = false
     @State private var journalDraft: JournalDraft?
     @State private var dropTarget: String?
-    @State private var showAllTags = false
+    /// Persisted like every other sidebar disclosure, so the long tag list
+    /// stays open across launches and workspace switches (the reflective and
+    /// journal layouts each build their own SidebarView).
+    @AppStorage(ShellSidebarPrefs.showAllTagsKey) private var showAllTags = false
     /// Tags shown before "Show all" — keeps the sidebar scannable.
     static let collapsedTagLimit = 6
     @FocusState private var sidebarFocused: Bool
@@ -131,21 +134,30 @@ struct SidebarView: View {
         }
     }
 
-    /// Keyboard navigation through the primary destinations.
+    /// Keyboard navigation through the destinations that are on screen, in
+    /// on-screen order. Rows in collapsed sections are skipped (they used to
+    /// be selected invisibly), and expanded mood rows are reachable too.
     private var keyboardOrder: [SidebarItem] {
-        var items: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .insights, .onThisDay]
-        items += (vm.smartFolders.filter(\.isPinned) + vm.smartFolders.filter { !$0.isPinned }).map { .smartFolder($0.id) }
-        items += [.archive, .hidden, .trash]
-        items += visibleTagNodes.map { .tag($0.path) }
-        return items
+        typealias G = ShellSidebarKeyboard.Group<SidebarItem>
+        var groups: [G] = [
+            G([.today]),
+            G([.all, .favorites, .thisWeek], isExpanded: libraryExpanded),
+            G([.calendar, .insights, .onThisDay], isExpanded: reflectExpanded),
+            G(vm.smartFolders.filter(\.isPinned).map { .smartFolder($0.id) }),
+            G(vm.smartFolders.filter { !$0.isPinned }.map { .smartFolder($0.id) }, isExpanded: smartExpanded),
+            G([.archive, .hidden, .trash], isExpanded: storageExpanded),
+            G(Mood.allCases.filter { (vm.moodCounts[$0] ?? 0) > 0 }.map { .mood($0) }, isExpanded: moodsExpanded),
+        ]
+        if !vm.tagTree.isEmpty {
+            groups.append(G(visibleTagNodes.map { .tag($0.path) }, isExpanded: tagsExpanded))
+        }
+        return ShellSidebarKeyboard.order(groups, current: selection)
     }
 
     private func moveSelection(_ delta: Int) {
-        let order = keyboardOrder
-        guard let current = selection, let idx = order.firstIndex(of: current) else {
-            selection = order.first; return
-        }
-        selection = order[min(max(idx + delta, 0), order.count - 1)]
+        guard let next = ShellSidebarKeyboard.step(delta, from: selection, in: keyboardOrder),
+              next != selection else { return }
+        selection = next
         vm.selectedEntryId = nil
     }
 
