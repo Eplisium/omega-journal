@@ -123,7 +123,7 @@ struct AuditFixesATests {
     func preMigrationPruneOrder() throws {
         let (root, db) = Self.makeDB()
         defer { try? FileManager.default.removeItem(at: root) }
-        let dir = db.backupsDirectory
+        let dir = root.appendingPathComponent("prune", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let names = ["pre-migration_v9_2026-01-01_10-00-00-000.sqlite3",
                      "pre-migration_v9_2026-01-02_10-00-00-000.sqlite3",
@@ -359,7 +359,7 @@ struct AuditFixesATests {
         #expect(p.title == "Title")
         #expect(p.body == "Line one\nLine two")
         let d = try? ImportParsers.parseDayOneJSON(Data(#"{"entries":[{"creationDate":"2026-01-01T00:00:00Z","text":"T\r\n\r\nA\r\nB"}]}"#.utf8))
-        #expect(d?.entries.first?.body.contains("\r") == false)
+        #expect(d?.entries.first?.body.unicodeScalars.contains("\r") == false)
     }
 
     @Test("single .md import honors front matter and normalizes CRLF")

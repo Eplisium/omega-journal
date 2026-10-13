@@ -87,13 +87,28 @@ extension DatabaseManager {
         return true
     }
 
+    /// The `yyyy-MM-dd_HH-mm-ss-SSS` stamp embedded in a backup file name, if any.
+    static func backupStamp(in name: String) -> String? {
+        guard let r = name.range(of: #"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d{3})?"#,
+                                 options: .regularExpression) else { return nil }
+        return String(name[r])
+    }
+
+    /// Keeps the newest `count` backups with `prefix`. Ordered by the embedded
+    /// timestamp (then modification date) — never by raw file name, which put
+    /// `pre-migration_v10_…` before `v9_…` and deleted the snapshot just taken.
     func cleanupOldBackups(in directory: URL, prefix: String, keep count: Int) {
         guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles
         ) else { return }
 
+        func mtime(_ u: URL) -> Date {
+            (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
         let sorted = files.filter { $0.pathExtension == "sqlite3" && $0.lastPathComponent.hasPrefix(prefix) }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            .map { (url: $0, stamp: Self.backupStamp(in: $0.lastPathComponent) ?? "", mtime: mtime($0)) }
+            .sorted { ($0.stamp, $0.mtime, $0.url.lastPathComponent) > ($1.stamp, $1.mtime, $1.url.lastPathComponent) }
+            .map(\.url)
 
         for file in sorted.dropFirst(count) {
             try? FileManager.default.removeItem(at: file)
