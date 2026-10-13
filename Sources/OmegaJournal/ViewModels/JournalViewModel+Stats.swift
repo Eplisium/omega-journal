@@ -18,7 +18,16 @@ extension JournalViewModel {
     }
     var totalWordCount: Int { bodyStatsEntries.reduce(0) { $0 + $1.wordCount } }
     var averageMood: Double { entries.isEmpty ? 0 : Double(entries.reduce(0) { $0 + $1.mood.rawValue }) / Double(entries.count) }
-    var entriesThisWeek: Int { entries.filter { $0.createdAt >= Date().addingTimeInterval(-7 * 24 * 3600) }.count }
+    var entriesThisWeek: Int { entries.filter { Self.isInThisWeekWindow($0.createdAt) }.count }
+
+    /// "This Week" = the last 7 days up to the end of today. Future-dated
+    /// entries are excluded so they never count as recent writing; the list
+    /// (`EntryListView.displayed`) and the sidebar badge share this predicate.
+    nonisolated static func isInThisWeekWindow(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        let startOfToday = calendar.startOfDay(for: now)
+        let endOfToday = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? startOfToday.addingTimeInterval(24 * 3600)
+        return date >= now.addingTimeInterval(-7 * 24 * 3600) && date < endOfToday
+    }
     var favoriteCount: Int { entries.filter(\.isFavorite).count }
     var hiddenCount: Int { hiddenEntries.count }
 
@@ -61,8 +70,10 @@ extension JournalViewModel {
 
     var entriesThisMonth: Int {
         let cal = Calendar.current
-        guard let start = cal.dateInterval(of: .month, for: Date())?.start else { return 0 }
-        return entries.filter { $0.createdAt >= start }.count
+        let now = Date()
+        guard let start = cal.dateInterval(of: .month, for: now)?.start,
+              let endOfToday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) else { return 0 }
+        return entries.filter { $0.createdAt >= start && $0.createdAt < endOfToday }.count
     }
 
     var averageWordsPerEntry: Int {

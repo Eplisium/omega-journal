@@ -80,8 +80,7 @@ struct EntryListView: View {
         switch selection {
         case .favorites: base = vm.libraryEntries.filter(\.isFavorite)
         case .thisWeek:
-            let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
-            base = vm.libraryEntries.filter { $0.createdAt >= cutoff }
+            base = vm.libraryEntries.filter { JournalViewModel.isInThisWeekWindow($0.createdAt) }
         case .mood(let m): base = vm.libraryEntries.filter { $0.mood == m }
         case .tag(let t): base = EntryFilter.entries(vm.libraryEntries, taggedWith: t, hiddenLocked: vm.hiddenLocked)
         case .smartFolder(let id):
