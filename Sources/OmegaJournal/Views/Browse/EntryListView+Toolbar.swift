@@ -18,8 +18,7 @@ extension EntryListView {
                     .onChange(of: vm.searchText) { _, _ in vm.searchTextChanged() }
                 if !vm.searchText.isEmpty {
                     Button {
-                        vm.searchText = ""
-                        vm.refreshQuery()
+                        clearSearch()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(OmegaTheme.font(.meta))
@@ -179,11 +178,14 @@ extension EntryListView {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove filter \(chip.label)")
                     }
-                    Button("Clear all") { vm.filter = .empty }
+                    // One control clears everything narrowing the list —
+                    // search text included — so nothing stays silently applied.
+                    Button("Clear all") { perform(isSearchingCurrentCollection ? .clearAll : .clearFilters) }
                         .buttonStyle(.plain)
                         .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.secondaryTextColor)
-                        .accessibilityLabel("Clear all filters")
+                        .accessibilityLabel(ShellListConstraints.clearAllLabel(
+                            hasSearch: isSearchingCurrentCollection, filterCount: vm.filter.activeCount))
                 }
                 .padding(.horizontal, 12)
             }

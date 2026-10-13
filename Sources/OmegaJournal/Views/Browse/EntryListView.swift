@@ -21,10 +21,55 @@ struct EntryListView: View {
     @State var showBulkPermanentDeleteConfirmation = false
     @State var showEmptyTrashConfirmation = false
 
+    /// Always the sidebar destination. The notebook scope is shown separately
+    /// (scope pill + subtitle) — it used to replace "All Entries" only, so a
+    /// notebook looked like a destination there and was invisible elsewhere.
     var collectionTitle: String {
         if case .smartFolder(let id) = selection { return vm.smartFolder(id: id)?.name ?? "Smart Folder" }
-        if let j = vm.activeJournal, selection == .all || selection == nil { return j.name }
         return selection?.title ?? "All Entries"
+    }
+
+    var collectionSubtitle: String {
+        ShellCollectionHeader.subtitle(isSearching: isSearchingCurrentCollection,
+                                       filterCount: vm.filter.activeCount,
+                                       notebookName: vm.activeJournal?.name)
+    }
+
+    /// How a no-results state may widen the search for this destination.
+    static func recoveryContext(for selection: SidebarItem?) -> (isLibraryRoot: Bool, canWidenToLibrary: Bool) {
+        switch selection {
+        case .all, nil: (true, true)
+        case .favorites, .thisWeek, .mood, .tag, .smartFolder: (false, true)
+        case .archive, .hidden, .trash, .today, .calendar, .insights, .onThisDay: (false, false)
+        }
+    }
+
+    var recoveryState: ShellListRecovery.EmptyState? {
+        let context = Self.recoveryContext(for: selection)
+        return ShellListRecovery.emptyState(query: vm.searchText, filterCount: vm.filter.activeCount,
+                                            isLibraryRoot: context.isLibraryRoot,
+                                            canWidenToLibrary: context.canWidenToLibrary,
+                                            notebookName: vm.activeJournal?.name)
+    }
+
+    func clearSearch() {
+        vm.searchText = ""
+        vm.refreshQuery()
+    }
+
+    func perform(_ action: ShellListRecovery.Action) {
+        switch action {
+        case .clearAll:
+            clearSearch()
+            vm.filter = .empty
+        case .clearSearch: clearSearch()
+        case .clearFilters: vm.filter = .empty
+        case .searchAllEntries:
+            // Keeps the query; All Entries reads the same library results.
+            selection = .all
+            vm.selectedEntryId = nil
+        case .showAllNotebooks: vm.setActiveJournal(nil)
+        }
     }
 
     var isHiddenSection: Bool { selection == .hidden }
@@ -166,13 +211,16 @@ struct EntryListView: View {
                 Text(collectionTitle)
                     .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
-                Text(isSearchingCurrentCollection
-                     ? "Search results in \(selection?.title ?? "your Journal")"
-                     : "Your private writing library")
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                Text(collectionSubtitle)
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer(minLength: 8)
+            if let journal = vm.activeJournal { notebookScopePill(journal) }
             Text("\(displayed.count)")
                 .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
                 .foregroundColor(theme.accentColor)
@@ -184,6 +232,32 @@ struct EntryListView: View {
         .padding(.horizontal, 14)
         .padding(.top, 14)
         .padding(.bottom, 6)
+    }
+
+    /// The notebook scope, drawn as a removable pill in the notebook's color so
+    /// it reads as "what this list is limited to", not as another destination.
+    func notebookScopePill(_ journal: Journal) -> some View {
+        let color = TagColors.rgb(hex: journal.colorHex).map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? theme.secondaryTextColor
+        return Button {
+            vm.setActiveJournal(nil)
+        } label: {
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(journal.name).lineLimit(1).truncationMode(.tail)
+                Image(systemName: "xmark").font(OmegaTheme.font(.meta, .bold))
+            }
+            .font(OmegaTheme.font(.meta, .medium))
+            .foregroundColor(theme.bodyTextColor)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .frame(maxWidth: 120)
+            .background(Capsule().strokeBorder(color.opacity(0.7), lineWidth: 1))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.plain)
+        .omegaTooltip("Showing only \(journal.name) — click to show all notebooks")
+        .accessibilityLabel("Notebook scope: \(journal.name)")
+        .accessibilityHint("Shows entries from all notebooks")
     }
 
     // MARK: Hidden Banner
@@ -334,11 +408,13 @@ struct EntryListView: View {
                     .foregroundColor(theme.secondaryTextColor)
                     .multilineTextAlignment(.center)
             }
-            if vm.filter.isActive {
-                Button("Clear filters") { vm.filter = .empty }
-                    .buttonStyle(.plain)
-                    .font(OmegaTheme.font(.meta, .medium))
-                    .foregroundColor(theme.accentColor)
+            if let recovery = recoveryState {
+                // Every way out of a no-results list, primary action first.
+                VStack(spacing: 6) {
+                    ForEach(Array(recovery.actions.enumerated()), id: \.element) { index, action in
+                        recoveryButton(action, primary: index == 0)
+                    }
+                }
             } else if !isTrash && selection != .archive {
                 Button {
                     vm.createEntry()
@@ -358,9 +434,21 @@ struct EntryListView: View {
         .padding(.horizontal, 24)
     }
 
+    @ViewBuilder
+    func recoveryButton(_ action: ShellListRecovery.Action, primary: Bool) -> some View {
+        Button { perform(action) } label: {
+            Text(action.title)
+                .font(OmegaTheme.font(.meta, .medium))
+                .foregroundColor(primary ? theme.onAccentColor : theme.accentColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, primary ? 6 : 2)
+                .background(Capsule().fill(primary ? theme.accentColor : .clear))
+        }
+        .buttonStyle(.plain)
+    }
+
     var emptyTitle: String {
-        if !vm.searchText.isEmpty { return "No matches" }
-        if vm.filter.isActive { return "No entries match your filters" }
+        if let recovery = recoveryState { return recovery.title }
         switch selection {
         case .trash: return "Trash is empty"
         case .archive: return "Nothing archived"
@@ -372,8 +460,7 @@ struct EntryListView: View {
     }
 
     var emptySubtitle: String {
-        if !vm.searchText.isEmpty { return "Try a different search term." }
-        if vm.filter.isActive { return "Loosen the filters to see more." }
+        if let recovery = recoveryState { return recovery.subtitle }
         switch selection {
         case .trash: return "Deleted entries appear here for \(DatabaseManager.trashRetentionDays) days."
         case .archive: return "Archived entries are hidden from your main list."
