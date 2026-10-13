@@ -25,12 +25,10 @@ extension JournalViewModel {
         return LinkGraph.build(entries: linkable, includeHidden: unlocked, includeIsolated: includeIsolated)
     }
 
-    /// Turns a plain mention in `source` into `[[Title]]` (first unlinked occurrence). Immediate mutation.
+    /// Turns the first unlinked plain mention in `source` into `[[Title]]` (or `[[Title|as written]]`
+    /// when case/accents differ), skipping code and existing links. Immediate mutation.
     func linkMention(in source: JournalEntry, to target: JournalEntry) {
-        guard !target.title.isEmpty,
-              let range = source.body.range(of: target.title, options: [.caseInsensitive, .diacriticInsensitive]) else { return }
-        var body = source.body
-        body.replaceSubrange(range, with: "[[\(body[range])]]")
+        guard let body = UnlinkedMentions.linkingFirstMention(of: target.title, in: source.body) else { return }
         updateBody(body, for: source)
         showToast("Linked “\(target.displayTitle)” in “\(source.displayTitle)”")
     }

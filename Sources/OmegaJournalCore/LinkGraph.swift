@@ -77,11 +77,58 @@ public enum UnlinkedMentions {
         return entries.filter { e in
             if e.id == excludingId || linked.contains(e.id) { return false }
             if e.isHidden && !includeHidden { return false }
-            let stripped = WikiLinks.stripCodePublic(e.body)
-            // Remove existing [[...]] tokens so a link to a *longer* title doesn't count as a mention.
-            let noLinks = stripped.replacingOccurrences(of: "\\[\\[[^\\]\\n]*\\]\\]", with: " ", options: .regularExpression)
-            return noLinks.range(of: target, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            return mentionRange(of: target, in: e.body) != nil
         }
+    }
+
+    private static let inlineCodeRegex = try! NSRegularExpression(pattern: #"`[^`\n]*`"#)
+    private static let wikiTokenRegex = try! NSRegularExpression(pattern: #"\[\[[^\]\n]*\]\]"#)
+
+    /// UTF-16 range of the first plain-text mention of `title` in `body`: whole words only,
+    /// case/diacritic-insensitive, never inside fenced code, inline code or an existing `[[link]]`.
+    public static func mentionRange(of title: String, in body: String) -> NSRange? {
+        let target = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty, !body.isEmpty else { return nil }
+        // Blank out excluded spans with same-length padding so offsets map 1:1 back to `body`.
+        let masked = NSMutableString(string: body)
+        let full = NSRange(location: 0, length: masked.length)
+        func blank(_ r: NSRange) {
+            guard r.length > 0 else { return }
+            masked.replaceCharacters(in: r, with: String(repeating: " ", count: r.length))
+        }
+        MarkdownLogic.codeBlockRanges(in: body).forEach(blank)
+        inlineCodeRegex.matches(in: masked as String, range: full).forEach { blank($0.range) }
+        wikiTokenRegex.matches(in: masked as String, range: full).forEach { blank($0.range) }
+
+        func isWordChar(at i: Int) -> Bool {
+            guard i >= 0, i < masked.length else { return false }
+            let r = masked.rangeOfComposedCharacterSequence(at: i)
+            return masked.substring(with: r).unicodeScalars.contains {
+                CharacterSet.alphanumerics.contains($0) || $0 == "_"
+            }
+        }
+        var search = full
+        while search.length > 0 {
+            let r = masked.range(of: target, options: [.caseInsensitive, .diacriticInsensitive], range: search)
+            guard r.location != NSNotFound, r.length > 0 else { return nil }
+            if !isWordChar(at: r.location - 1) && !isWordChar(at: NSMaxRange(r)) { return r }
+            let next = r.location + 1
+            search = NSRange(location: next, length: full.length - next)
+        }
+        return nil
+    }
+
+    /// `body` with the first plain mention of `title` turned into a wiki link, or nil when none.
+    /// A mention spelled differently from the title (case/accents) becomes `[[Title|as written]]`
+    /// so the link resolves while the prose reads the same.
+    public static func linkingFirstMention(of title: String, in body: String) -> String? {
+        let target = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty, !target.contains(where: { "[]|\n".contains($0) }),
+              let r = mentionRange(of: target, in: body) else { return nil }
+        let ns = body as NSString
+        let matched = ns.substring(with: r)
+        let link = matched == target ? "[[\(target)]]" : "[[\(target)|\(matched)]]"
+        return ns.replacingCharacters(in: r, with: link)
     }
 }
 
