@@ -162,6 +162,8 @@ struct EntryRow: View {
             if density == .compact {
                 Text(entry.createdAt.formatted(.dateTime.month(.abbreviated).day()))
                     .font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor.opacity(0.8))
+                    // The title truncates instead; the date never wraps.
+                    .lineLimit(1).fixedSize()
             }
             if entry.isFavorite {
                 Image(systemName: "star.fill").font(OmegaTheme.font(.meta)).foregroundColor(.yellow)
@@ -194,37 +196,84 @@ struct EntryRow: View {
         }
     }
 
+    /// Mood · date · words · tag chips on ONE line at any column width.
+    /// `ViewThatFits` tries `RowsMetaLayout` candidates richest-first, each at
+    /// its unwrapped width, so a narrow (280pt) column drops extra chips, then
+    /// the time, then the word count — chips never break inside a word and the
+    /// date never wraps. Locked hidden entries get no tags/words in any
+    /// candidate (the Core helper enforces it).
     var metaLine: some View {
+        let candidates = RowsMetaLayout.candidates(tags: entry.tags, canShowContent: canShowContent,
+                                                   hasWordCount: entry.wordCount > 0)
+        return ViewThatFits(in: .horizontal) {
+            ForEach(Array(candidates.enumerated()), id: \.offset) { _, candidate in
+                metaLine(candidate)
+            }
+        }
+    }
+
+    func metaLine(_ candidate: RowsMetaLayout.Candidate) -> some View {
         HStack(spacing: 6) {
-            Text(entry.mood.emoji).font(OmegaTheme.font(.meta))
-            Text(isTrash ? trashLabel : entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+            Text(entry.mood.emoji).font(OmegaTheme.font(.meta)).fixedSize()
+            Text(metaDateText(candidate.dateStyle))
                 .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor.opacity(0.8))
-            if entry.wordCount > 0 && canShowContent {
+                .lineLimit(1)
+                .fixedSize()
+            if candidate.showsWordCount {
                 Text("· \(entry.wordCount)w")
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.6))
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Spacer(minLength: 2)
-            if canShowContent {
-                ForEach(entry.tags.prefix(2), id: \.self) { tag in
-                    let c = vm.color(forTag: tag) ?? theme.accentColor
-                    HStack(spacing: 3) {
-                        Circle().fill(c).frame(width: 5, height: 5)
-                        Text(TagPath.leaf(of: tag))
-                            .font(OmegaTheme.font(.meta, .medium))
-                            .foregroundColor(theme.bodyTextColor.opacity(0.9))
-                    }
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Capsule().fill(c.opacity(0.14)))
-                }
-                if entry.tags.count > 2 {
-                    Text("+\(entry.tags.count - 2)")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor.opacity(0.7))
-                }
+            ForEach(Array(candidate.visibleTags.enumerated()), id: \.offset) { _, tag in
+                tagChip(tag)
             }
+            if !candidate.hiddenTags.isEmpty { overflowChip(candidate.hiddenTags) }
         }
+    }
+
+    func metaDateText(_ style: RowsMetaLayout.DateStyle) -> String {
+        if isTrash { return trashLabel }
+        switch style {
+        case .dateAndTime: return entry.createdAt.formatted(date: .abbreviated, time: .shortened)
+        case .dateOnly: return entry.createdAt.formatted(date: .abbreviated, time: .omitted)
+        }
+    }
+
+    /// One tag chip; never wraps or truncates mid-word (the layout drops the
+    /// whole chip into "+N" instead).
+    func tagChip(_ tag: String) -> some View {
+        let c = vm.color(forTag: tag) ?? theme.accentColor
+        return HStack(spacing: 3) {
+            Circle().fill(c).frame(width: 5, height: 5)
+            Text(TagPath.leaf(of: tag))
+                .font(OmegaTheme.font(.meta, .medium))
+                .foregroundColor(theme.bodyTextColor.opacity(0.9))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 5).padding(.vertical, 1)
+        .background(Capsule().fill(c.opacity(0.14)))
+        .fixedSize()
+    }
+
+    /// "+N" for the tags that did not fit. Its label/tooltip names those
+    /// tags — only reachable while content may be shown (the candidates
+    /// carry no tags for a locked hidden entry).
+    func overflowChip(_ hidden: [String]) -> some View {
+        let label = RowsMetaLayout.overflowAccessibilityLabel(hiddenTags: hidden.map { TagPath.leaf(of: $0) },
+                                                              canShowContent: canShowContent)
+        return Text(RowsMetaLayout.overflowText(hidden.count))
+            .font(OmegaTheme.font(.meta, .medium))
+            .foregroundColor(theme.secondaryTextColor.opacity(0.85))
+            .lineLimit(1)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(Capsule().fill(theme.secondaryTextColor.opacity(0.12)))
+            .fixedSize()
+            .accessibilityLabel(label ?? "")
+            .help(label ?? "")
     }
 
     /// Hover quick actions: pin, favorite, archive. Each is a real labelled button.
