@@ -16,6 +16,8 @@ struct ReadView: View {
     @State private var showGraph = false
     @AppStorage(ReadingPreferences.showCoverKey) private var showCover = true
     @State private var showOutline = false
+    /// Attachment awaiting removal confirmation (removal is permanent).
+    @State private var attachmentPendingRemoval: Attachment?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
 
@@ -89,6 +91,40 @@ struct ReadView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This cannot be undone. The entry and its attachments will be permanently removed.")
+        }
+        .confirmationDialog(
+            EditorReaderAttachmentPolicy.confirmationTitle(filename: attachmentPendingRemoval?.filename ?? ""),
+            isPresented: Binding(get: { attachmentPendingRemoval != nil },
+                                 set: { if !$0 { attachmentPendingRemoval = nil } }),
+            titleVisibility: .visible,
+            presenting: attachmentPendingRemoval
+        ) { attachment in
+            Button(EditorReaderAttachmentPolicy.confirmButton, role: .destructive) {
+                vm.deleteAttachment(attachment)
+                attachmentPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { attachmentPendingRemoval = nil }
+        } message: { _ in
+            Text(EditorReaderAttachmentPolicy.confirmationMessage)
+        }
+    }
+
+    private var canRemoveAttachments: Bool {
+        EditorReaderAttachmentPolicy.canRemove(isTrash: isTrash, isContentLocked: isContentLocked)
+    }
+
+    /// Small "remove" control; asks before deleting. Not shown in Trash.
+    @ViewBuilder
+    private func removeAttachmentButton(_ attachment: Attachment) -> some View {
+        if canRemoveAttachments {
+            Button { attachmentPendingRemoval = attachment } label: {
+                Image(systemName: "xmark.circle")
+                    .font(OmegaTheme.font(.caption))
+                    .foregroundColor(theme.secondaryTextColor)
+            }
+            .buttonStyle(.plain)
+            .omegaTooltip("Remove…")
+            .accessibilityLabel("Remove attachment \(attachment.filename)")
         }
     }
 
@@ -474,14 +510,7 @@ struct ReadView: View {
                 if attachment.isAudio {
                     HStack(spacing: 9) {
                         AudioMemoRow(attachment: attachment, db: vm.db)
-                        Button { vm.deleteAttachment(attachment) } label: {
-                            Image(systemName: "xmark.circle")
-                                .font(OmegaTheme.font(.caption))
-                                .foregroundColor(theme.secondaryTextColor)
-                        }
-                        .buttonStyle(.plain)
-                        .omegaTooltip("Remove")
-                        .accessibilityLabel("Remove attachment \(attachment.filename)")
+                        removeAttachmentButton(attachment)
                     }
                     .padding(8)
                     .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor.opacity(0.4)))
@@ -528,16 +557,7 @@ struct ReadView: View {
                     .omegaTooltip("Open")
                     .accessibilityLabel("Open attachment \(attachment.filename)")
 
-                    Button {
-                        vm.deleteAttachment(attachment)
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                            .font(OmegaTheme.font(.caption))
-                            .foregroundColor(theme.secondaryTextColor)
-                    }
-                    .buttonStyle(.plain)
-                    .omegaTooltip("Remove")
-                    .accessibilityLabel("Remove attachment \(attachment.filename)")
+                    removeAttachmentButton(attachment)
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardColor.opacity(0.4)))
