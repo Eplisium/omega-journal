@@ -40,9 +40,18 @@ extension EntryListView {
             )
 
             HStack(spacing: 6) {
-                Text(displayed.isEmpty ? "No entries" : "\(displayed.count) \(displayed.count == 1 ? "entry" : "entries")")
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
+                // The header badge already shows the count, so in a narrow
+                // list this label is dropped instead of wrapping to "No /
+                // entries" (taller row), truncating to "No…", or pushing the
+                // controls out of the column (seen at the 940pt window).
+                ViewThatFits(in: .horizontal) {
+                    Text(displayed.isEmpty ? "No entries" : "\(displayed.count) \(displayed.count == 1 ? "entry" : "entries")")
+                        .font(OmegaTheme.font(.meta))
+                        .foregroundColor(theme.secondaryTextColor)
+                        .lineLimit(1)
+                        .fixedSize()
+                    Color.clear.frame(width: 0, height: 0)
+                }
 
                 Spacer()
 

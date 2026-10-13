@@ -2,8 +2,12 @@ import SwiftUI
 import OmegaJournalCore
 
 /// Operator chips (tag:/mood:/before:/after:/has:image) and recent searches under the search field.
+///
+/// `floating`: drawn as an overlay strip on top of the list (with its own
+/// background and a hairline) so showing it never moves the rows beneath.
 struct SearchOperatorBar: View {
     @ObservedObject var vm: JournalViewModel
+    var floating = false
     @ObservedObject private var theme = ThemeManager.shared
 
     private let inserts = ["tag:", "mood:", "before:", "after:", "has:image"]
@@ -31,7 +35,17 @@ struct SearchOperatorBar: View {
                 .padding(.horizontal, OmegaTheme.Spacing.m)
             }
         }
-        .padding(.bottom, 4)
+        .padding(.top, floating ? 6 : 0)
+        .padding(.bottom, floating ? 6 : 4)
+        .background {
+            if floating {
+                theme.backgroundColor
+                    .overlay(alignment: .bottom) { Divider().opacity(0.5) }
+                    .shadow(color: .black.opacity(theme.isDark ? 0.35 : 0.12), radius: 6, y: 3)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Search operators")
     }
 
     private func append(_ op: String) {

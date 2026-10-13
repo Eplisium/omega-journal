@@ -30,9 +30,10 @@ struct EntryListView: View {
     }
 
     var collectionSubtitle: String {
-        ShellCollectionHeader.subtitle(isSearching: isSearchingCurrentCollection,
-                                       filterCount: vm.filter.activeCount,
-                                       notebookName: vm.activeJournal?.name)
+        ShellHeaderText.subtitle(isSearching: isSearchingCurrentCollection,
+                                 filterCount: vm.filter.activeCount,
+                                 notebookName: vm.activeJournal?.name,
+                                 scopePillVisible: vm.activeJournal != nil)
     }
 
     /// How a no-results state may widen the search for this destination.
@@ -134,9 +135,6 @@ struct EntryListView: View {
                 hiddenBanner
             }
             searchBar
-            // Search syntax helpers only appear while searching, not as
-            // permanent programmer-style chrome above every list.
-            if searchFocused || !vm.searchText.isEmpty { SearchOperatorBar(vm: vm) }
             if showFilters {
                 FilterBar(vm: vm).transition(.move(edge: .top).combined(with: .opacity))
             } else {
@@ -146,6 +144,16 @@ struct EntryListView: View {
             if isTrash && !vm.trashedEntries.isEmpty { trashBanner }
             Divider().opacity(0.25)
             listBody
+                // Search syntax helpers float over the top of the list while
+                // the field has focus. Inserting them into the column pushed
+                // every row down the moment the field was clicked.
+                .overlay(alignment: .top) {
+                    if searchFocused {
+                        SearchOperatorBar(vm: vm, floating: true)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: searchFocused)
         }
         .background(theme.backgroundColor)
         .alert("Save Search", isPresented: $showSaveSearch) {
@@ -205,28 +213,31 @@ struct EntryListView: View {
     // MARK: Collection header
 
     var collectionHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+        // Subtitle spans the full column under the title row, so the notebook
+        // pill and count only compete with the (short) title — beside the
+        // pill the subtitle was truncated to "Search results · 1 fi…".
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(collectionTitle)
                     .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                     .foregroundColor(theme.titleTextColor)
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                Text(collectionSubtitle)
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                if let journal = vm.activeJournal { notebookScopePill(journal) }
+                Text("\(displayed.count)")
+                    .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
+                    .foregroundColor(theme.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+                    .accessibilityLabel("\(displayed.count) entries")
             }
-            Spacer(minLength: 8)
-            if let journal = vm.activeJournal { notebookScopePill(journal) }
-            Text("\(displayed.count)")
-                .font(OmegaTheme.font(.meta, .semibold, design: .rounded))
-                .foregroundColor(theme.accentColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(theme.accentColor.opacity(0.12)))
-                .accessibilityLabel("\(displayed.count) entries")
+            Text(collectionSubtitle)
+                .font(OmegaTheme.font(.meta))
+                .foregroundColor(theme.secondaryTextColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
