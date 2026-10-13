@@ -247,6 +247,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// (caret, scroll position and undo survive a Preview round trip) but is
     /// hidden from clicks, the key-view loop and VoiceOver, and gives up focus.
     var isActive: Bool = true
+    /// Entry id: the caret/selection (and whether the text had focus) is kept
+    /// when this text view goes away and restored by the next one for the same
+    /// entry — Zen mode swaps in a separate editor, and reopening an entry
+    /// builds a new one. nil = no memory.
+    var selectionMemoryKey: String? = nil
+
+    /// In-memory only; offsets and a focus flag, never text.
+    @MainActor static var selectionMemory = EditorSelectionMemory()
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     /// Builds the scroll view + text view pair. Same construction as
@@ -294,6 +303,13 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.columnWidth = columnWidth
         textView.padsForTypewriter = isTypewriterMode
         textView.string = text
+        textView.selectionMemoryKey = selectionMemoryKey
+        if let key = selectionMemoryKey,
+           let saved = Self.selectionMemory.restore(for: key, textLength: (text as NSString).length) {
+            textView.setSelectedRange(NSRange(location: saved.location, length: saved.length))
+            textView.restoreFocusOnAttach = saved.wasFocused
+            textView.revealSelectionOnAttach = true
+        }
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -905,6 +921,57 @@ final class WrappingScrollView: NSScrollView {
 /// NSTextView that hands pasted images to the host (as attachments) instead of dropping them.
 final class OmegaTextView: NSTextView {
     var onPasteImage: ((Data, String) -> Bool)?
+    /// See `MarkdownTextEditor.selectionMemoryKey`.
+    var selectionMemoryKey: String?
+    var restoreFocusOnAttach = false
+    var revealSelectionOnAttach = false
+
+    /// Records the caret for the next text view of this entry. Zen mode swaps
+    /// editors with an animation, so the new view is built while this one is
+    /// still on screen: the memory must already be current at that moment
+    /// (written on every selection/focus change), not only on removal.
+    /// A view that merely lost focus never records "unfocused" — the other
+    /// editor of the same entry is the one that has it.
+    func rememberSelection(focused: Bool) {
+        guard let key = selectionMemoryKey, window != nil else { return }
+        let r = selectedRange()
+        let keepFocus = MarkdownTextEditor.selectionMemory.restore(for: key, textLength: Int.max)?.wasFocused ?? false
+        MarkdownTextEditor.selectionMemory.remember(
+            .init(location: r.location, length: r.length, wasFocused: focused || keepFocus), for: key)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { rememberSelection(focused: true) }
+        return ok
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if !stillSelecting, let window, window.firstResponder === self { rememberSelection(focused: true) }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let window, window.firstResponder === self { rememberSelection(focused: true) }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, restoreFocusOnAttach || revealSelectionOnAttach else { return }
+        let focus = restoreFocusOnAttach
+        restoreFocusOnAttach = false
+        revealSelectionOnAttach = false
+        // Next run-loop turn: SwiftUI finishes inserting the hierarchy first.
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.window else { return }
+                if focus, self.enclosingScrollView?.isHidden != true { window.makeFirstResponder(self) }
+                self.scrollRangeToVisible(self.selectedRange())
+            }
+        }
+    }
+
     /// Centred column width (0 = fill). The inset grows with the view so the text column stays centred.
     var columnWidth: Double = 0 { didSet { if oldValue != columnWidth { refreshInsets() } } }
     /// Typewriter mode pads the document so the first/last lines can reach the vertical centre.

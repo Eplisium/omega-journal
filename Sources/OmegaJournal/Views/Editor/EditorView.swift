@@ -646,7 +646,8 @@ struct EditorView: View {
                 onEscape: { handleEscape() },
                 onSelectionWords: { selectionWords = $0 },
                 onPasteImage: { data, ext in pasteImage(data, ext: ext) },
-                isActive: paneLayout.showsSource
+                isActive: paneLayout.showsSource,
+                selectionMemoryKey: entry.id
             )
             .overlay(alignment: .topLeading) {
                 if let popover = suggestionPopover { popover }
