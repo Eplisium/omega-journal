@@ -358,22 +358,33 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// of the whole document on every keystroke).
         private var pendingEdits: [(loc: Int, oldLen: Int, newLen: Int)] = []
 
+        /// Text length at the previous pass (to recognise a fence that runs to the end).
+        private var lastTextLength = 0
+
         /// Maps the previous pass's code ranges through `pendingEdits`. Returns
         /// nil when an edit touches a range boundary (structure may have changed).
-        private func predictedCodeRanges() -> [NSRange]? {
+        /// `growTrailing`: a range ending at the end of the text is treated as an
+        /// unterminated fence, so an edit at its end grows it (typing at the bottom
+        /// of an open ``` block stays incremental instead of a full restyle).
+        private func predictedCodeRanges(growTrailing: Bool = false) -> [NSRange]? {
             var ranges = lastCodeRanges
+            var textLen = lastTextLength
             for e in pendingEdits {
                 let delta = e.newLen - e.oldLen
                 let editEnd = e.loc + e.oldLen
                 var next: [NSRange] = []
                 for r in ranges {
-                    if NSMaxRange(r) <= e.loc { next.append(r) }
+                    let runsToEnd = growTrailing && NSMaxRange(r) == textLen
+                    if runsToEnd && e.loc > r.location && editEnd <= NSMaxRange(r) {
+                        next.append(NSRange(location: r.location, length: r.length + delta))
+                    } else if NSMaxRange(r) <= e.loc { next.append(r) }
                     else if r.location >= editEnd { next.append(NSRange(location: r.location + delta, length: r.length)) }
                     else if e.loc > r.location && editEnd < NSMaxRange(r) {
                         next.append(NSRange(location: r.location, length: r.length + delta))
                     } else { return nil }
                 }
                 ranges = next
+                textLen += delta
             }
             return ranges
         }
@@ -626,8 +637,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
             let ns = storage.string as NSString
             let fullRange = NSRange(location: 0, length: ns.length)
             let codeRanges = MarkdownLogic.codeBlockRanges(in: storage.string)
-            if codeRanges != lastCodeRanges, codeRanges != predictedCodeRanges() { needsFullPass = true }
+            if codeRanges != lastCodeRanges, codeRanges != predictedCodeRanges(),
+               codeRanges != predictedCodeRanges(growTrailing: true) { needsFullPass = true }
             lastCodeRanges = codeRanges
+            lastTextLength = ns.length
             pendingEdits.removeAll()
 
             var target = fullRange
@@ -684,10 +697,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
             }
 
             // Headings — scale the font by level (most specific last so it wins).
-            style(#"^#\s.*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 10, weight: .bold)])
-            style(#"^##\s.*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 6, weight: .bold)])
-            style(#"^###\s.*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 3, weight: .semibold)])
-            style(#"^#{1,6}\s"#, [.foregroundColor: pal.accent.withAlphaComponent(0.6)])
+            // `[ \t]` not `\s`: with anchorsMatchLines `\s` crosses the newline after a lone `#`.
+            style(#"^#[ \t].*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 10, weight: .bold)])
+            style(#"^##[ \t].*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 6, weight: .bold)])
+            style(#"^###[ \t].*$"#, [.font: NSFont.systemFont(ofSize: baseFont.pointSize + 3, weight: .semibold)])
+            style(#"^#{1,6}[ \t]"#, [.foregroundColor: pal.accent.withAlphaComponent(0.6)])
 
             // Emphasis
             style(#"\*\*[^*\n]+\*\*"#, [.font: boldVariant(of: baseFont)])
@@ -707,7 +721,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
             style(#"^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$"#, [.foregroundColor: pal.muted.withAlphaComponent(0.6)])
 
             // Links & tags
-            style(#"\[[^\]\n]*\]\([^)\n]*\)"#, [.foregroundColor: pal.link])
+            // URL may contain one level of balanced parens, e.g. wiki/Foo_(bar).
+            style(#"\[[^\]\n]*\]\((?:[^()\n]|\([^()\n]*\))*\)"#, [.foregroundColor: pal.link])
             style(#"(?<![\w/])#[A-Za-z0-9_-]+"#, [.foregroundColor: pal.tag])
 
             storage.endEditing()
