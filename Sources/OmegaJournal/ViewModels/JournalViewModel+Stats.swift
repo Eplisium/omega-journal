@@ -11,7 +11,12 @@ extension JournalViewModel {
         for e in entries where e.createdAt >= w { c[e.mood, default: 0] += 1 }
         return c
     }
-    var totalWordCount: Int { entries.reduce(0) { $0 + $1.wordCount } }
+    /// Entries whose body-derived stats (words, reading time) may be shown:
+    /// while hidden entries are locked they contribute title/mood/date only.
+    var bodyStatsEntries: [JournalEntry] {
+        BiometricAuth.shared.isAuthenticated ? entries : entries.filter { !$0.isHidden }
+    }
+    var totalWordCount: Int { bodyStatsEntries.reduce(0) { $0 + $1.wordCount } }
     var averageMood: Double { entries.isEmpty ? 0 : Double(entries.reduce(0) { $0 + $1.mood.rawValue }) / Double(entries.count) }
     var entriesThisWeek: Int { entries.filter { $0.createdAt >= Date().addingTimeInterval(-7 * 24 * 3600) }.count }
     var favoriteCount: Int { entries.filter(\.isFavorite).count }
@@ -45,17 +50,21 @@ extension JournalViewModel {
     }
 
     var averageWordsPerEntry: Int {
-        entries.isEmpty ? 0 : totalWordCount / entries.count
+        let source = bodyStatsEntries
+        return source.isEmpty ? 0 : source.reduce(0) { $0 + $1.wordCount } / source.count
     }
 
     var totalReadingTime: String {
-        let total = entries.reduce(0) { $0 + $1.readingMinutes }
+        let total = bodyStatsEntries.reduce(0) { $0 + $1.readingMinutes }
         if total < 60 { return "\(total) min" }
         return "\(total / 60)h \(total % 60)m"
     }
 
+    /// Locked hidden entries keep their date (they still count as a writing
+    /// day / weekday) but never reveal their word count.
     private var activitySamples: [ActivitySample] {
-        entries.map { ActivitySample(date: $0.createdAt, words: $0.wordCount) }
+        let unlocked = BiometricAuth.shared.isAuthenticated
+        return entries.map { ActivitySample(date: $0.createdAt, words: unlocked || !$0.isHidden ? $0.wordCount : 0) }
     }
 
     /// The weekday the user journals on most, e.g. "Sunday".
