@@ -8,6 +8,27 @@ extension Attachment {
 
 // MARK: - Recorder
 
+/// What the recorder needs from the audio engine. `AVAudioRecorder` in the app; a fake in tests.
+@MainActor
+protocol MemoRecordingBackend: AnyObject {
+    var isRecording: Bool { get }
+    var currentTime: TimeInterval { get }
+    func updateMeters()
+    func averagePower() -> Float
+    func stop()
+}
+
+@MainActor
+private final class AVMemoBackend: MemoRecordingBackend {
+    let recorder: AVAudioRecorder
+    init(_ r: AVAudioRecorder) { recorder = r }
+    var isRecording: Bool { recorder.isRecording }
+    var currentTime: TimeInterval { recorder.currentTime }
+    func updateMeters() { recorder.updateMeters() }
+    func averagePower() -> Float { recorder.averagePower(forChannel: 0) }
+    func stop() { recorder.stop() }
+}
+
 /// Records a voice memo to a temp file, exposes live levels, and hands back the bytes
 /// (the caller stores them as an encrypted attachment and the temp file is deleted).
 @MainActor
@@ -18,7 +39,12 @@ final class AudioMemoRecorder: NSObject, ObservableObject, AVAudioRecorderDelega
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var levels: [Float] = []
 
-    private var recorder: AVAudioRecorder?
+    /// Called with the recorded bytes when the time cap stops a recording on its own.
+    var onAutoStop: ((Data) -> Void)?
+    /// Bytes from an auto-stop that nobody has collected yet (no `onAutoStop` listener).
+    private var pendingMemo: Data?
+
+    private var backend: MemoRecordingBackend?
     private var timer: Timer?
     private var fileURL: URL?
     static let maxSeconds: TimeInterval = 600     // keeps memos well under the 25 MB attachment cap
@@ -47,8 +73,7 @@ final class AudioMemoRecorder: NSObject, ObservableObject, AVAudioRecorderDelega
             r.delegate = self
             r.isMeteringEnabled = true
             guard r.record() else { state = .failed("Couldn't start recording"); return }
-            recorder = r; fileURL = url
-            levels = []; elapsed = 0; state = .recording
+            adopt(backend: AVMemoBackend(r), fileURL: url)
             timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.tick() }
             }
@@ -57,24 +82,48 @@ final class AudioMemoRecorder: NSObject, ObservableObject, AVAudioRecorderDelega
         }
     }
 
-    private func tick() {
-        guard let r = recorder, r.isRecording else { return }
-        r.updateMeters()
-        elapsed = r.currentTime
-        levels.append(WaveformMath.level(fromDecibels: r.averagePower(forChannel: 0)))
+    private func adopt(backend b: MemoRecordingBackend, fileURL url: URL) {
+        backend = b; fileURL = url
+        levels = []; elapsed = 0; state = .recording
+    }
+
+    /// Test seam: start "recording" with a fake engine writing to `fileURL` (no microphone, no timer).
+    func attachForTesting(backend b: MemoRecordingBackend, fileURL url: URL) { adopt(backend: b, fileURL: url) }
+
+    func tick() {
+        guard let b = backend, b.isRecording else { return }
+        b.updateMeters()
+        elapsed = b.currentTime
+        levels.append(WaveformMath.level(fromDecibels: b.averagePower()))
         if levels.count > 400 { levels.removeFirst(levels.count - 400) }
-        if elapsed >= Self.maxSeconds { _ = stop() }
+        if elapsed >= Self.maxSeconds {
+            // Never drop a capped recording: hand it to the popover (or park it until collected).
+            guard let data = stop() else { return }
+            if let onAutoStop { onAutoStop(data) } else { pendingMemo = data }
+        }
     }
 
     /// Stops and returns the recorded bytes (nil if nothing usable). Always removes the temp file.
     func stop() -> Data? {
         timer?.invalidate(); timer = nil
-        recorder?.stop()
-        recorder = nil
+        backend?.stop()
+        backend = nil
         defer { if let u = fileURL { try? FileManager.default.removeItem(at: u) }; fileURL = nil }
         if state == .recording { state = .idle }
         guard let u = fileURL, let data = try? Data(contentsOf: u), data.count > 1024 else { return nil }
         return data
+    }
+
+    /// The popover is going away: a live recording is stopped and returned so it can be attached.
+    func finishForDismissal() -> Data? {
+        guard state == .recording else { return takePendingMemo() }
+        return stop()
+    }
+
+    /// Collects (once) a memo the time cap stopped while nobody was listening.
+    func takePendingMemo() -> Data? {
+        defer { pendingMemo = nil }
+        return pendingMemo
     }
 
     func cancel() { _ = stop(); levels = []; elapsed = 0 }
@@ -124,15 +173,29 @@ struct AudioRecorderPopover: View {
         }
         .padding(14)
         .frame(width: 280)
-        .onDisappear { recorder.cancel() }
+        .onAppear {
+            recorder.onAutoStop = { [vm, entry] data in
+                Self.attach(data, to: entry, vm: vm)
+                vm.showToast("Voice memo reached 10 minutes and was attached")
+            }
+        }
+        // A transient popover closes on any outside click: keep what was recorded rather than discard it.
+        .onDisappear {
+            recorder.onAutoStop = nil
+            if let data = recorder.finishForDismissal() { Self.attach(data, to: entry, vm: vm) }
+        }
     }
 
     private func save() {
         guard let data = recorder.stop() else { vm.showToast("Nothing was recorded", isError: true); return }
+        Self.attach(data, to: entry, vm: vm)
+        dismiss()
+    }
+
+    private static func attach(_ data: Data, to entry: JournalEntry, vm: JournalViewModel) {
         let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false))
             .replacingOccurrences(of: ":", with: "-")
         vm.addAttachment(to: entry, data: data, filename: "Voice memo \(stamp).m4a", mimeType: "audio/mp4")
-        dismiss()
     }
 }
 
