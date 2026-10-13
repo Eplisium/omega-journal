@@ -73,7 +73,10 @@ struct Wave2EditorGeometryTests {
         settle(window, hosting)
         let squeezed = try columns(hosting)
         #expect(squeezed.column + squeezed.inset * 2 <= squeezed.visible + 1)
-        #expect(squeezed.column > 380)
+        // Fills the viewport (relative check: CI runners use legacy always-visible
+        // scrollers, so absolute widths differ by ~15pt from a trackpad Mac).
+        #expect(squeezed.column + squeezed.inset * 2 >= squeezed.visible - 24,
+                "column \(squeezed) does not fill the squeezed viewport")
 
         hosting.rootView = Host(columnWidth: 0)
         window.setContentSize(NSSize(width: 1100, height: 500))
