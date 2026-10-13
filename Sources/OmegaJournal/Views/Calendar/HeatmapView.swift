@@ -8,6 +8,10 @@ struct HeatmapView: View {
     let onOpenDate: ((Date) -> Void)?
     /// Share (0…1) of tracked habits completed per start-of-day; drawn as a dot on the cell.
     var habitCompletion: [Date: Double] = [:]
+    /// First day of the selected Insights period (nil = all time). Grid days
+    /// before it are dimmed and excluded from the header stats, so a 7-day
+    /// view no longer reports coverage across 26 weeks it never included.
+    var periodStart: Date? = nil
 
     @ObservedObject private var theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -17,10 +21,12 @@ struct HeatmapView: View {
     init(
         info: [Date: JournalViewModel.DayInfo],
         habitCompletion: [Date: Double] = [:],
+        periodStart: Date? = nil,
         onOpenDate: ((Date) -> Void)? = nil
     ) {
         self.info = info
         self.habitCompletion = habitCompletion
+        self.periodStart = periodStart
         self.onOpenDate = onOpenDate
     }
 
@@ -38,7 +44,7 @@ struct HeatmapView: View {
     private var accent: Color { theme.accentColor }
 
     // Build the grid: 7 rows (weekday) x N columns (week)
-    private struct WeekColumn: Identifiable {
+    struct WeekColumn: Identifiable {
         let id: Int
         let startDate: Date
         let days: [Date?]
@@ -72,9 +78,12 @@ struct HeatmapView: View {
                            maxDay: inWindow.max() ?? 0, coverage: coverage)
     }
 
-    private var weeks: [WeekColumn] {
-        let cal = Self.cal
-        let today = cal.startOfDay(for: Date())
+    /// Week columns from `gridStart` through `today` (future days are nil).
+    /// Built ONCE per render: it used to be a computed property read by the
+    /// grid, the stats row, the month-label row and once per month label,
+    /// so every hover re-ran it ~10 times.
+    nonisolated static func gridWeeks(today rawToday: Date, calendar cal: Calendar) -> [WeekColumn] {
+        let today = cal.startOfDay(for: rawToday)
         guard let rangeStart = Self.gridStart(today: today, calendar: cal) else { return [] }
 
         var result: [WeekColumn] = []
@@ -98,9 +107,10 @@ struct HeatmapView: View {
         let name: String
         let weekIndex: Int
         let showYear: Bool
+        let year: Int
     }
 
-    private var monthLabels: [MonthLabel] {
+    private func monthLabels(for weeks: [WeekColumn]) -> [MonthLabel] {
         let cal = Self.cal
         var labels: [MonthLabel] = []
         var lastMonth = -1
@@ -115,7 +125,8 @@ struct HeatmapView: View {
                     id: m + y * 100,
                     name: Self.monthFormatter.string(from: anchor),
                     weekIndex: i,
-                    showYear: y != lastYear && lastYear != -1
+                    showYear: y != lastYear && lastYear != -1,
+                    year: y
                 ))
                 lastMonth = m
                 lastYear = y
@@ -124,15 +135,12 @@ struct HeatmapView: View {
         return labels
     }
 
-    private var windowStats: WindowStats {
-        let today = Self.cal.startOfDay(for: Date())
-        let start = Self.gridStart(today: today, calendar: Self.cal) ?? today
+    /// Header stats over the visible grid, clipped to the selected period.
+    private func currentStats(today: Date) -> WindowStats {
+        let gridStart = Self.gridStart(today: today, calendar: Self.cal) ?? today
+        let start = ReflectionHeatmapWindow.statsStart(gridStart: gridStart, periodStart: periodStart, calendar: Self.cal)
         return Self.windowStats(counts: info.mapValues(\.count), windowStart: start, today: today, calendar: Self.cal)
     }
-    private var totalEntries: Int { windowStats.total }
-    private var activeDays: Int { windowStats.activeDays }
-    private var maxDay: Int { windowStats.maxDay }
-    private var coverage: Int { windowStats.coverage }
 
     /// Theme-aware intensity ramp (empty → soft surface, busy → full accent).
     private func fill(for count: Int) -> Color {
@@ -165,13 +173,17 @@ struct HeatmapView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            statsRow
+        // Derive the grid and stats once per render (hover re-renders often).
+        let today = Self.cal.startOfDay(for: Date())
+        let weeks = Self.gridWeeks(today: today, calendar: Self.cal)
+        let stats = currentStats(today: today)
+        return VStack(alignment: .leading, spacing: 14) {
+            statsRow(stats, weekCount: weeks.count)
             dayDetailStrip
 
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 6) {
-                    monthLabelsRow
+                    monthLabelsRow(weeks)
 
                     HStack(alignment: .top, spacing: 0) {
                         dayLabelsColumn
@@ -324,15 +336,18 @@ struct HeatmapView: View {
 
     // MARK: Stats
 
-    private var statsRow: some View {
+    private func statsRow(_ stats: WindowStats, weekCount: Int) -> some View {
         HStack(spacing: 10) {
-            heatStat(icon: "square.stack.3d.up.fill", value: "\(totalEntries)", label: "entries", tint: .green)
-            heatStat(icon: "sun.max.fill", value: "\(activeDays)", label: "active days", tint: accent)
-            heatStat(icon: "calendar", value: "\(weeks.count)", label: "weeks", tint: .secondary)
-            if maxDay > 0 {
-                heatStat(icon: "flame.fill", value: "\(maxDay)", label: "best day", tint: .orange)
+            heatStat(icon: "square.stack.3d.up.fill", value: "\(stats.total)", label: "entries", tint: .green)
+            heatStat(icon: "sun.max.fill", value: "\(stats.activeDays)", label: "active days", tint: accent)
+            if periodStart == nil {
+                heatStat(icon: "calendar", value: "\(weekCount)", label: "weeks", tint: .secondary)
             }
-            heatStat(icon: "chart.pie.fill", value: "\(coverage)%", label: "coverage", tint: .teal)
+            if stats.maxDay > 0 {
+                heatStat(icon: "flame.fill", value: "\(stats.maxDay)", label: "best day", tint: .orange)
+            }
+            heatStat(icon: "chart.pie.fill", value: "\(stats.coverage)%",
+                     label: periodStart == nil ? "coverage" : "of period", tint: .teal)
             Spacer(minLength: 0)
         }
     }
@@ -376,7 +391,7 @@ struct HeatmapView: View {
     // MARK: Labels
 
     @ViewBuilder
-    private var monthLabelsRow: some View {
+    private func monthLabelsRow(_ weeks: [WeekColumn]) -> some View {
         HStack(alignment: .bottom, spacing: 0) {
             Spacer().frame(width: dayLabelWidth + 8)
 
@@ -387,14 +402,14 @@ struct HeatmapView: View {
                         height: 22
                     )
 
-                ForEach(monthLabels) { label in
+                ForEach(monthLabels(for: weeks)) { label in
                     let xOffset = CGFloat(label.weekIndex) * (cellSize + cellSpacing) + 8
                     HStack(spacing: 4) {
                         Text(label.name)
                             .font(OmegaTheme.font(.meta, .semibold))
                             .foregroundColor(.secondary)
                         if label.showYear {
-                            Text(Self.cal.component(.year, from: weeks[label.weekIndex].startDate).description)
+                            Text(label.year.description)
                                 .font(OmegaTheme.font(.meta, .medium, design: .rounded))
                                 .foregroundColor(.secondary.opacity(0.55))
                                 .padding(.horizontal, 5)
@@ -430,9 +445,11 @@ struct HeatmapView: View {
         let hovered = hoveredDate == date
         let selected = selectedDate == date
         let isToday = Self.cal.isDateInToday(date)
+        let outside = ReflectionHeatmapWindow.isOutsidePeriod(date, periodStart: periodStart, calendar: Self.cal)
 
         RoundedRectangle(cornerRadius: cellCorner, style: .continuous)
             .fill(fill(for: count))
+            .opacity(outside ? 0.35 : 1)
             .frame(width: cellSize, height: cellSize)
             .overlay(
                 RoundedRectangle(cornerRadius: cellCorner, style: .continuous)
@@ -466,7 +483,7 @@ struct HeatmapView: View {
             .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.82), value: selected)
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(accessibilityLabel(date: date, count: count))
+            .accessibilityLabel(accessibilityLabel(date: date, count: count) + (outside ? ", outside the selected period" : ""))
             .accessibilityHint(onOpenDate == nil ? "Select this day for details" : "Open this day")
             .accessibilityAction {
                 selectedDate = date
