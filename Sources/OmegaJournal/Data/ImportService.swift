@@ -22,15 +22,23 @@ extension JournalViewModel {
         }
         flushBeforeImmediateMutation()
         var keys = Set(stored.map { Self.dupKey(title: $0.title, createdAt: $0.createdAt) })
-        var pending: [(id: String, files: [URL])] = []
+        // A source id equal to an existing entry id (e.g. the `id:` front matter of our own
+        // markdown export) means the entry is already here — even if it is trashed.
+        var knownIds = Set(stored.map(\.id))
+        var pending: [(id: String, files: [(url: URL, name: String)])] = []
         let committed = db.inTransaction {
             for r in records {
-                guard keys.insert(Self.dupKey(title: r.title, createdAt: r.createdAt)).inserted else {
+                let title = ImportParsers.normalizeNewlines(r.title)
+                if let sid = r.sourceId, !sid.isEmpty, knownIds.contains(sid) {
                     report.duplicates += 1; continue
                 }
+                guard keys.insert(Self.dupKey(title: title, createdAt: r.createdAt)).inserted else {
+                    report.duplicates += 1; continue
+                }
+                if let sid = r.sourceId, !sid.isEmpty { knownIds.insert(sid) }
                 var entry = JournalEntry.new()
-                entry.title = r.title
-                entry.body = r.body
+                entry.title = title
+                entry.body = ImportParsers.normalizeNewlines(r.body)
                 entry.tags = OmegaCore.normalizeTags(r.tags + [extraTag])
                 entry.createdAt = r.createdAt
                 entry.updatedAt = r.updatedAt
@@ -39,8 +47,7 @@ extension JournalViewModel {
                 db.saveEntry(entry)
                 report.added += 1
                 if let root = attachmentRoot {
-                    let files = r.attachmentPaths.map { root.appendingPathComponent($0) }
-                        .filter { FileManager.default.fileExists(atPath: $0.path) }
+                    let files = Self.containedAttachmentFiles(r.attachmentPaths, root: root)
                     if !files.isEmpty { pending.append((entry.id, files)) }
                 }
             }
@@ -52,15 +59,36 @@ extension JournalViewModel {
         }
         for (id, files) in pending {
             for f in files {
-                guard let data = try? Data(contentsOf: f) else { continue }
-                if db.saveAttachment(entryId: id, data: data, filename: f.lastPathComponent,
-                                     mimeType: Self.mimeType(forExtension: f.pathExtension)) != nil {
+                guard let data = try? Data(contentsOf: f.url) else { continue }
+                if db.saveAttachment(entryId: id, data: data, filename: f.name,
+                                     mimeType: Self.mimeType(forExtension: (f.name as NSString).pathExtension)) != nil {
                     report.attachments += 1
                 }
             }
         }
         reload()
         return report
+    }
+
+    /// Resolves import-file attachment paths (relative to `root`) to regular files that really
+    /// live under `root` after standardizing and resolving symlinks. Anything that escapes
+    /// (`../x`, absolute paths, symlinks pointing outside) is dropped. Returns the resolved file
+    /// to read plus the name to store it under.
+    static func containedAttachmentFiles(_ paths: [String], root: URL) -> [(url: URL, name: String)] {
+        let fm = FileManager.default
+        let rootReal = root.standardizedFileURL.resolvingSymlinksInPath().path
+        var seen = Set<String>()
+        var out: [(url: URL, name: String)] = []
+        for p in paths where !p.isEmpty && !p.hasPrefix("/") {
+            let candidate = root.appendingPathComponent(p).standardizedFileURL
+            let real = candidate.resolvingSymlinksInPath()
+            var isDir: ObjCBool = false
+            guard real.path.hasPrefix(rootReal + "/"),
+                  fm.fileExists(atPath: real.path, isDirectory: &isDir), !isDir.boolValue,
+                  seen.insert(real.path).inserted else { continue }
+            out.append((real, DatabaseManager.sanitizedAttachmentFilename(candidate.lastPathComponent)))
+        }
+        return out
     }
 
     static func mimeType(forExtension ext: String) -> String {
@@ -145,14 +173,30 @@ extension JournalViewModel {
                 ? ImportParsers.parsePlainText(text: text, fallbackTitle: stem, fallbackDate: date)
                 : ImportParsers.parseMarkdownNote(text: text, fallbackTitle: stem, fallbackDate: date)
             if record.updatedAt < record.createdAt { record.updatedAt = record.createdAt }
+            let relRoot = root.standardizedFileURL.path
+            // Front-matter `attachments:` (Omega's markdown-folder export) are relative to the
+            // note. Re-root them, and point the body's relative links back at the stored files.
+            var paths: [String] = []
+            var linkNames: [String: String] = [:]
+            let notePath = url.standardizedFileURL.path
+            if notePath.hasPrefix(relRoot + "/") {
+                let noteDir = (String(notePath.dropFirst(relRoot.count + 1)) as NSString).deletingLastPathComponent
+                for p in record.attachmentPaths {
+                    let rel = noteDir.isEmpty ? p : (noteDir as NSString).appendingPathComponent(p)
+                    guard let file = Self.containedAttachmentFiles([rel], root: root).first else { continue }
+                    paths.append(rel)
+                    linkNames[p] = file.name
+                }
+            }
+            record.body = ExportFormats.restoreAttachmentLinks(record.body, names: linkNames)
             // Obsidian embeds: ![[image.png]] — attach the referenced file when found in the vault.
             let embeds = Self.obsidianEmbeds(in: record.body)
-            let relRoot = root.standardizedFileURL.path
-            record.attachmentPaths = embeds.compactMap { name in
+            paths += embeds.compactMap { name in
                 guard let f = siblingFiles[name] else { return nil }
                 let p = f.standardizedFileURL.path
                 return p.hasPrefix(relRoot + "/") ? String(p.dropFirst(relRoot.count + 1)) : nil
             }
+            record.attachmentPaths = paths
             record.body = record.body.replacingOccurrences(of: "!\\[\\[[^\\]]+\\]\\]", with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             records.append(record)

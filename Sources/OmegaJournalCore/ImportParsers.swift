@@ -24,11 +24,19 @@ public struct ImportedEntry: Equatable, Sendable {
 }
 
 public enum ImportParsers {
+    /// CRLF / lone CR → LF. Every imported body goes through this so Windows files
+    /// never leave stray `\r` in titles or text.
+    public static func normalizeNewlines(_ s: String) -> String {
+        // `"\r\n"` is ONE Character in Swift, so check scalars, not Characters.
+        guard s.unicodeScalars.contains("\r") else { return s }
+        return s.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    }
+
     // MARK: Front matter
 
     /// Splits a leading `---` YAML block. Returns the raw key/value pairs and the remaining body.
     public static func splitFrontMatter(_ text: String) -> (fields: [String: String], lists: [String: [String]], body: String) {
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let normalized = normalizeNewlines(text)
         guard normalized.hasPrefix("---\n") else { return ([:], [:], normalized) }
         let rest = normalized.dropFirst(4)
         var lines = rest.components(separatedBy: "\n")
@@ -62,12 +70,29 @@ public enum ImportParsers {
         return (fields, lists, body)
     }
 
+    /// Strips surrounding quotes. Double-quoted values are unescaped in ONE pass
+    /// (`\\` → `\`, `\"` → `"`), mirroring `ExportFormats.yamlQuote`, so
+    /// backslashes no longer double on every round trip.
     static func unquote(_ s: String) -> String {
-        var v = s
-        if v.count >= 2, (v.hasPrefix("\"") && v.hasSuffix("\"")) || (v.hasPrefix("'") && v.hasSuffix("'")) {
-            v = String(v.dropFirst().dropLast())
+        if s.count >= 2, s.hasPrefix("'"), s.hasSuffix("'") {
+            return String(s.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
         }
-        return v.replacingOccurrences(of: "\\\"", with: "\"")
+        guard s.count >= 2, s.hasPrefix("\""), s.hasSuffix("\"") else { return s }
+        var out = ""
+        var escaping = false
+        for ch in s.dropFirst().dropLast() {
+            if escaping {
+                if ch != "\\" && ch != "\"" { out.append("\\") }
+                out.append(ch)
+                escaping = false
+            } else if ch == "\\" {
+                escaping = true
+            } else {
+                out.append(ch)
+            }
+        }
+        if escaping { out.append("\\") }
+        return out
     }
 
     public static func parseDate(_ s: String) -> Date? {
@@ -92,8 +117,12 @@ public enum ImportParsers {
     public static func parseMarkdownNote(text: String, fallbackTitle: String, fallbackDate: Date) -> ImportedEntry {
         let (fields, lists, rawBody) = splitFrontMatter(text)
         var body = rawBody
-        var title = fields["title"] ?? ""
-        if title.isEmpty {
+        var title: String
+        if let explicit = fields["title"] {
+            // An explicit (even empty) front-matter title wins: an untitled entry
+            // whose body starts with `# Heading` must keep that line in its body.
+            title = explicit
+        } else {
             let parsed = OmegaCore.parseMarkdownImport(text: body, fallbackTitle: fallbackTitle)
             title = parsed.title; body = parsed.body
         }
@@ -106,15 +135,17 @@ public enum ImportParsers {
         let updated = (fields["updated"] ?? fields["modified"] ?? fields["updatedat"]).flatMap(parseDate) ?? created
         let mood = fields["mood"].flatMap { Int($0) }.map { min(5, max(1, $0)) }
         let fav = ["true", "yes", "1"].contains((fields["favorite"] ?? fields["starred"] ?? "").lowercased())
+        // Omega's markdown-folder export lists the entry's files (relative to the note).
+        let attachments = (lists["attachments"] ?? []).filter { !$0.isEmpty }
         return ImportedEntry(title: title, body: body, createdAt: created, updatedAt: updated, tags: tags,
-                             isFavorite: fav, mood: mood, sourceId: fields["id"])
+                             isFavorite: fav, mood: mood, sourceId: fields["id"], attachmentPaths: attachments)
     }
 
     // MARK: Plain text
 
     /// Plain-text note: first non-empty line (≤ 80 chars, no terminal period) becomes the title.
     public static func parsePlainText(text: String, fallbackTitle: String, fallbackDate: Date) -> ImportedEntry {
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        let normalized = normalizeNewlines(text)
         let lines = normalized.components(separatedBy: "\n")
         if let first = lines.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
            first.count <= 80, !first.hasSuffix("."), lines.count > 1 {
@@ -146,14 +177,17 @@ public enum ImportParsers {
         var skipped = 0
         for e in raw {
             guard let dateStr = e["creationDate"] as? String, let created = parseDate(dateStr) else { skipped += 1; continue }
-            var text = (e["text"] as? String) ?? ""
+            var text = normalizeNewlines((e["text"] as? String) ?? "")
             text = unescapeDayOne(text)
             // Photo moment references.
             var photoPaths: [String] = []
             var identifierToPath: [String: String] = [:]
             for p in (e["photos"] as? [[String: Any]]) ?? [] {
-                guard let md5 = p["md5"] as? String else { continue }
+                // Both parts come from the JSON file: only plain hex / alphanumerics may
+                // reach a file path (`../../…` would read arbitrary files).
+                guard let md5 = p["md5"] as? String, isMatch(md5, #"^[0-9A-Fa-f]+$"#) else { continue }
                 let ext = (p["type"] as? String) ?? "jpeg"
+                guard isMatch(ext, #"^[A-Za-z0-9]+$"#) else { continue }
                 let path = "photos/\(md5).\(ext)"
                 photoPaths.append(path)
                 if let ident = p["identifier"] as? String { identifierToPath[ident] = path }
@@ -169,6 +203,10 @@ public enum ImportParsers {
                 sourceId: e["uuid"] as? String, attachmentPaths: photoPaths))
         }
         return DayOneResult(entries: out, skipped: skipped)
+    }
+
+    static func isMatch(_ s: String, _ pattern: String) -> Bool {
+        s.range(of: pattern, options: .regularExpression) != nil
     }
 
     /// Day One escapes markdown punctuation with backslashes (`\.`, `\!`, `\-`…).

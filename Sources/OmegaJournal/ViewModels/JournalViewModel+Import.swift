@@ -22,8 +22,10 @@ extension JournalViewModel {
         return stored.count == expected ? stored : nil
     }
 
+    /// Title + creation time at WHOLE-second precision: text formats (markdown front
+    /// matter, older exports) may round-trip timestamps without sub-second digits.
     static func dupKey(title: String, createdAt: Date) -> String {
-        "\(title)\u{1}\(Int((createdAt.timeIntervalSince1970 * 1000).rounded()))"
+        "\(title)\u{1}\(Int(createdAt.timeIntervalSince1970.rounded(.down)))"
     }
 
     /// Imports entries from a previously exported JSON file. Returns the number added.
@@ -51,7 +53,7 @@ extension JournalViewModel {
               for je in export.entries {
                 guard knownIDs.insert(je.id).inserted else { skipped += 1; continue }
                 var entry = JournalEntry(
-                    id: je.id, title: je.title, body: je.body,
+                    id: je.id, title: ImportParsers.normalizeNewlines(je.title), body: ImportParsers.normalizeNewlines(je.body),
                     mood: Mood(rawValue: je.mood) ?? .neutral,
                     tags: OmegaCore.normalizeTags(je.tags),
                     createdAt: je.createdAt, updatedAt: je.updatedAt,
@@ -67,7 +69,12 @@ extension JournalViewModel {
                 let atts = ExportManager.decodeAttachments(je)
                 if !atts.isEmpty { pendingAttachments.append((je.id, atts)) }
                 for r in je.revisions ?? [] {
-                    db.importRevision(entryId: je.id, title: r.title, body: r.body, createdAt: r.createdAt, isAuto: r.isAuto ?? true)
+                    // A revision that can't be stored fails the whole import (rolled back)
+                    // rather than silently dropping history the file carried.
+                    if !db.importRevision(entryId: je.id, title: r.title, body: ImportParsers.normalizeNewlines(r.body),
+                                          createdAt: r.createdAt, isAuto: r.isAuto ?? true) {
+                        db.flagTransactionFailure()
+                    }
                 }
               }
             }
@@ -116,26 +123,40 @@ extension JournalViewModel {
         }
         flushBeforeImmediateMutation()
         var keys = Set(stored.map { Self.dupKey(title: $0.title, createdAt: $0.createdAt) })
+        let knownIds = Set(stored.map(\.id))
         for url in urls {
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
                 report.skipped.append(url.lastPathComponent)
                 continue
             }
-            let parsed = Self.parseMarkdownImport(
-                text: text,
-                fallbackTitle: url.deletingPathExtension().lastPathComponent
-            )
-            let created = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
-            guard keys.insert(Self.dupKey(title: parsed.title, createdAt: created)).inserted else {
+            let text = ImportParsers.normalizeNewlines(raw)
+            let fallbackTitle = url.deletingPathExtension().lastPathComponent
+            let fileDate = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+            var entry = JournalEntry.new()
+            let fm = ImportParsers.splitFrontMatter(text)
+            if !fm.fields.isEmpty || !fm.lists.isEmpty {
+                // Front matter (our own markdown export, Obsidian…): honor title/date/mood/tags.
+                let note = ImportParsers.parseMarkdownNote(text: text, fallbackTitle: fallbackTitle, fallbackDate: fileDate)
+                if let sid = note.sourceId, knownIds.contains(sid) { report.duplicates += 1; continue }
+                entry.title = note.title
+                entry.body = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                entry.tags = OmegaCore.normalizeTags(note.tags + ["imported"])
+                entry.createdAt = note.createdAt
+                entry.updatedAt = max(note.updatedAt, note.createdAt)
+                entry.isFavorite = note.isFavorite
+                entry.mood = note.mood.flatMap(Mood.init(rawValue:)) ?? .neutral
+            } else {
+                let parsed = Self.parseMarkdownImport(text: text, fallbackTitle: fallbackTitle)
+                entry.title = parsed.title
+                entry.body = parsed.body
+                entry.tags = OmegaCore.normalizeTags(["imported"])
+                entry.createdAt = fileDate
+                entry.updatedAt = fileDate
+            }
+            guard keys.insert(Self.dupKey(title: entry.title, createdAt: entry.createdAt)).inserted else {
                 report.duplicates += 1
                 continue
             }
-            var entry = JournalEntry.new()
-            entry.title = parsed.title
-            entry.body = parsed.body
-            entry.tags = OmegaCore.normalizeTags(["imported"])
-            entry.createdAt = created
-            entry.updatedAt = created
             db.saveEntry(entry)
             report.added += 1
         }

@@ -29,10 +29,11 @@ public enum OmegaCore {
         text: String,
         fallbackTitle: String
     ) -> (title: String, body: String) {
-        var lines = text.components(separatedBy: "\n")
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        var lines = normalized.components(separatedBy: "\n")
         var title = fallbackTitle
         if let first = lines.first, first.hasPrefix("# ") {
-            title = String(first.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            title = String(first.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
             lines.removeFirst()
         }
         let body = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
