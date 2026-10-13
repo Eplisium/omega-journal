@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import OmegaJournalCore
 
 // MARK: - Entry List
@@ -54,6 +55,22 @@ struct EntryListView: View {
     }
 
     func clearSearch() {
+        // Only touch the field editor when it belongs to the search field.
+        let editor = searchFocused ? NSApp.keyWindow?.firstResponder as? NSTextView : nil
+        Self.clearSearchText(in: vm, fieldEditor: editor)
+    }
+
+    /// Clears the search box and its results.
+    ///
+    /// The field editor is settled FIRST: while it holds marked (still
+    /// composing) text — a dead key such as ⌥E, an input-method candidate,
+    /// press-and-hold accents — AppKit keeps showing it and ignores the
+    /// programmatic "" from SwiftUI. "Clear search and filters" then cleared
+    /// the filters and the model but left "query´" in the box (reproduced
+    /// live), and the next keystroke committed the old query again.
+    static func clearSearchText(in vm: JournalViewModel, fieldEditor: NSTextView?) {
+        SearchFieldComposition.clear(fieldEditor)
+        vm.searchDebounce?.cancel()
         vm.searchText = ""
         vm.refreshQuery()
     }
@@ -478,5 +495,28 @@ struct EntryListView: View {
         case .favorites: return "Star an entry to keep it close."
         default: return "Start writing — your thoughts belong somewhere."
         }
+    }
+}
+
+/// Settles an in-progress text composition in a field editor.
+@MainActor
+enum SearchFieldComposition {
+    /// Drops marked (uncommitted) text and empties the field editor, so the
+    /// box shows the cleared value immediately. SwiftUI's own "" does not
+    /// reach a field editor that was composing (seen live: after dropping
+    /// only the marked run, the box still read "zzqq" while the model was
+    /// empty). Returns whether there was marked text.
+    @discardableResult
+    static func clear(_ editor: NSTextView?) -> Bool {
+        guard let editor else { return false }
+        let hadMarkedText = editor.hasMarkedText()
+        if hadMarkedText {
+            // Resets the input method / dead-key state, so the next keystroke
+            // doesn't complete the old composition.
+            editor.inputContext?.discardMarkedText()
+            if editor.hasMarkedText() { editor.unmarkText() }
+        }
+        if !editor.string.isEmpty { editor.string = "" }
+        return hadMarkedText
     }
 }
