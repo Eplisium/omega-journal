@@ -201,7 +201,7 @@ public enum MarkdownLogic {
     public static func renumberEdit(in text: String, fromLine lineIndex: Int) -> (range: NSRange, replacement: String)? {
         let lines = text.components(separatedBy: "\n")
         guard lineIndex >= 0, lineIndex < lines.count,
-              let g = groups(orderedRegex, lines[lineIndex]),
+              let g = groups(orderedRegex, splitCR(lines[lineIndex]).0),
               let indent = g[1], let digits = g[2], let delim = g[3],
               var expected = Int(digits) else { return nil }
         expected += 1
@@ -212,15 +212,15 @@ public enum MarkdownLogic {
         var last = lineIndex
         var j = lineIndex + 1
         while j < lines.count {
-            let l = lines[j]
+            let (l, eol) = splitCR(lines[j])
             if l.trimmingCharacters(in: .whitespaces).isEmpty { break }
             let w = indentWidth(l)
             if w > baseWidth { j += 1; continue }           // nested content
             guard w == baseWidth, let og = groups(orderedRegex, l),
                   let ind = og[1], let d = og[3], d == delim else { break }
             let body = og[4]
-            let rebuilt = "\(ind)\(expected)\(d)" + (body.map { " " + $0 } ?? "")
-            if rebuilt != l {
+            let rebuilt = "\(ind)\(expected)\(d)" + (body.map { " " + $0 } ?? "") + eol
+            if rebuilt != lines[j] {
                 newLines[j] = rebuilt
                 if first == nil { first = j }
                 last = j
@@ -253,18 +253,25 @@ public enum MarkdownLogic {
 
     /// Toggles `- [ ]` ↔ `- [x]` on a line. Returns nil when the line is not a task.
     public static func toggledTask(_ line: String) -> String? {
-        guard let g = groups(taskRegex, line), let indent = g[1], let bullet = g[2], let mark = g[3] else { return nil }
+        let (core, eol) = splitCR(line)
+        guard let g = groups(taskRegex, core), let indent = g[1], let bullet = g[2], let mark = g[3] else { return nil }
         let done = mark == "x" || mark == "X"
         let text = g[4].map { " " + $0 } ?? ""
-        return "\(indent)\(bullet) [\(done ? " " : "x")]\(text)"
+        return "\(indent)\(bullet) [\(done ? " " : "x")]\(text)" + eol
+    }
+
+    /// Splits a trailing `\r` (CRLF line from a `\n` split) off so rewrites can preserve it.
+    private static func splitCR(_ line: String) -> (String, String) {
+        line.hasSuffix("\r") ? (String(line.dropLast()), "\r") : (line, "")
     }
 
     /// Cycles a line for the editor's checkbox command:
     /// task → toggled, bullet → task, plain text → task.
     public static func cycledTaskLine(_ line: String) -> String {
         if let t = toggledTask(line) { return t }
-        if let g = groups(bulletRegex, line), let indent = g[1], let bullet = g[2] {
-            return "\(indent)\(bullet) [ ] \(g[3] ?? "")"
+        let (core, eol) = splitCR(line)
+        if let g = groups(bulletRegex, core), let indent = g[1], let bullet = g[2] {
+            return "\(indent)\(bullet) [ ] \(g[3] ?? "")" + eol
         }
         let indent = String(line.prefix { $0 == " " || $0 == "\t" })
         return "\(indent)- [ ] " + String(line.dropFirst(indent.count))
@@ -308,7 +315,8 @@ public enum MarkdownLogic {
 
     // MARK: Code fences
 
-    private static func fenceMarker(_ line: String) -> (char: Character, count: Int, info: String)? {
+    private static func fenceMarker(_ rawLine: String) -> (char: Character, count: Int, info: String)? {
+        let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine   // CRLF text
         let t = line.drop { $0 == " " }
         guard line.count - t.count <= 3, let c = t.first, c == "`" || c == "~" else { return nil }
         let run = t.prefix { $0 == c }
@@ -433,12 +441,15 @@ public enum MarkdownLogic {
         if t.hasSuffix("|") && !t.hasSuffix("\\|") { t.removeLast() }
         var cells: [String] = []
         var cur = ""
-        var escaped = false
-        for ch in t {
-            if escaped { cur.append(ch); escaped = false; continue }
-            if ch == "\\" { escaped = true; continue }
-            if ch == "|" { cells.append(cur.trimmingCharacters(in: .whitespaces)); cur = ""; continue }
+        var i = t.startIndex
+        while i < t.endIndex {
+            let ch = t[i]
+            let next = t.index(after: i)
+            // Only `\|` is an escape (a literal pipe); other backslashes are kept (paths, etc.).
+            if ch == "\\", next < t.endIndex, t[next] == "|" { cur.append("|"); i = t.index(after: next); continue }
+            if ch == "|" { cells.append(cur.trimmingCharacters(in: .whitespaces)); cur = ""; i = next; continue }
             cur.append(ch)
+            i = next
         }
         cells.append(cur.trimmingCharacters(in: .whitespaces))
         return cells

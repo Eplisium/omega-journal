@@ -70,10 +70,11 @@ public struct ResolvedWikiLink: Equatable, Sendable {
 public enum WikiLinks {
     /// Text with fenced code blocks and inline code spans blanked out.
     static func stripCode(_ text: String) -> String {
-        var out: [Substring] = []
+        var out: [String] = []
         var inFence = false
         var fenceMarker = ""
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        // NSString split on U+000A: a Character-based split never breaks "\r\n" (one grapheme).
+        for line in text.components(separatedBy: "\n") {
             let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
             let marker = trimmed.hasPrefix("```") ? "```" : (trimmed.hasPrefix("~~~") ? "~~~" : "")
             if inFence {
