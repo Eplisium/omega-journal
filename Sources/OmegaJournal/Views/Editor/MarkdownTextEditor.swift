@@ -915,6 +915,10 @@ final class WrappingScrollView: NSScrollView {
         if abs(doc.frame.width - width) > 0.5 {
             doc.setFrameSize(NSSize(width: width, height: doc.frame.height))
         }
+        // Typewriter padding is half the viewport *height*; a vertical-only
+        // resize never changes the document width, so refresh it here too
+        // (it used to stay at the height the editor opened with).
+        (doc as? OmegaTextView)?.refreshInsets()
     }
 }
 
@@ -989,7 +993,7 @@ final class OmegaTextView: NSTextView {
         refreshInsets()
     }
 
-    private func refreshInsets() {
+    func refreshInsets() {
         let col = WritingFocusLogic.clampedColumnWidth(columnWidth)
         let width: CGFloat = col > 0 ? max(8, (bounds.width - CGFloat(col)) / 2) : 8
         let viewport = enclosingScrollView?.contentView.bounds.height ?? 0
