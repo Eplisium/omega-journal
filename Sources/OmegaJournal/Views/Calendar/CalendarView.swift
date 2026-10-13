@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import OmegaJournalCore
 
 // MARK: - Calendar Workspace
 //
@@ -26,7 +27,6 @@ struct CalendarView: View {
 
     private let calendar = Calendar.current
     private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
-    private let inspectorColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
 
     /// The ViewModel owns the actual privacy rule. This defensive filter makes
     /// the Calendar safe even during an auth-state transition.
@@ -36,20 +36,19 @@ struct CalendarView: View {
         }
     }
 
-    private var entriesByDay: [Date: [JournalEntry]] {
-        vm.entriesByDay(for: scopedCalendarEntries)
+    /// Everything the month view shows, derived once per render.
+    private var snapshot: CalendarMonthSnapshot {
+        CalendarMonthSnapshot(
+            scopedEntries: scopedCalendarEntries,
+            journal: vm.entries,
+            anchorMonth: anchorMonth,
+            visibility: vm.effectiveAnalyticsVisibility,
+            calendar: calendar
+        )
     }
 
-    private var monthEntries: [JournalEntry] {
-        guard let interval = calendar.dateInterval(of: .month, for: anchorMonth) else { return [] }
-        return scopedCalendarEntries.filter { entry in
-            entry.createdAt >= interval.start && entry.createdAt < interval.end
-        }
-    }
-
-    private var selectedDayEntries: [JournalEntry] {
-        entriesByDay[calendar.startOfDay(for: selectedDay), default: []]
-            .sorted { $0.createdAt < $1.createdAt }
+    private var monthTitle: String {
+        anchorMonth.formatted(.dateTime.month(.wide).year())
     }
 
     /// Days shown in the month grid, padded at both ends to retain weekday alignment.
@@ -83,16 +82,6 @@ struct CalendarView: View {
         }
     }
 
-    private func agendaDays(from byDay: [Date: [JournalEntry]]) -> [Date] {
-        let visibleDays = byDay.keys.filter(isInAnchorMonth)
-        var days = Set(visibleDays)
-        let normalizedSelection = calendar.startOfDay(for: selectedDay)
-        if isInAnchorMonth(normalizedSelection) {
-            days.insert(normalizedSelection)
-        }
-        return days.sorted()
-    }
-
     private var dayJumpBinding: Binding<Date> {
         Binding(
             get: { selectedDay },
@@ -117,21 +106,22 @@ struct CalendarView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let snap = snapshot
+        return VStack(spacing: 0) {
             workspaceHeader
             Divider().opacity(0.25)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     // Only relevant when hidden entries exist; otherwise it's noise.
-                    if vm.hiddenCount > 0 { reflectiveScopeControl }
-                    monthSummary
+                    if vm.hiddenCount > 0 { reflectiveScopeControl(snap) }
+                    monthSummary(snap)
 
                     switch displayMode {
                     case .month:
-                        monthWorkspace
+                        monthWorkspace(snap)
                     case .agenda:
-                        agendaWorkspace
+                        agendaWorkspace(snap)
                     }
                 }
                 .padding(.horizontal, 28)
@@ -256,77 +246,59 @@ struct CalendarView: View {
         )
     }
 
-    private var reflectiveScopeControl: some View {
-        HStack(spacing: 12) {
-            Image(systemName: biometricAuth.isAuthenticated ? "eye" : "lock.fill")
-                .font(OmegaTheme.font(.bodyLarge, .semibold))
-                .foregroundColor(theme.accentColor)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(theme.accentColor.opacity(0.14)))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Reflective scope")
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.titleTextColor)
-                Text(vm.analyticsVisibilityLabel)
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-
-            Spacer(minLength: 16)
-
-            if biometricAuth.isAuthenticated {
-                Toggle("Include private", isOn: privacyInclusionBinding)
-                    .toggleStyle(.switch)
-                    .font(OmegaTheme.font(.meta, .medium))
-                    .foregroundColor(theme.bodyTextColor)
-                    .accessibilityLabel("Include private entries in Calendar")
-            } else {
-                Button(action: requestPrivateInclusion) {
-                    Label("Unlock to include", systemImage: "lock.open")
-                        .font(OmegaTheme.font(.meta, .semibold))
-                        .foregroundColor(theme.accentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-                }
-                .buttonStyle(.plain)
-                .omegaTooltip("Authenticate before including private entries")
-                .accessibilityHint("Authenticates before private entries can be included")
-            }
-        }
-        .padding(14)
-        .background(cardSurface(opacity: 0.5))
-        .overlay(cardBorder)
-        .accessibilityElement(children: .contain)
+    private func reflectiveScopeControl(_ snap: CalendarMonthSnapshot) -> some View {
+        ReflectionScopeBar(
+            visibility: vm.effectiveAnalyticsVisibility,
+            excludedCount: snap.excludedPrivateCount,
+            scopeNoun: monthTitle,
+            isAuthenticated: biometricAuth.isAuthenticated,
+            includePrivate: privacyInclusionBinding,
+            onUnlock: requestPrivateInclusion,
+            surfaceName: "Calendar"
+        )
     }
 
     // MARK: - Summary
 
-    private var monthSummary: some View {
-        let writingDays = Set(monthEntries.map { calendar.startOfDay(for: $0.createdAt) }).count
-        let wordCount = monthEntries.reduce(0) { $0 + $1.wordCount }
-        let average = averageMood(for: monthEntries)
-
-        return LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
-            spacing: 10
-        ) {
-            summaryMetric(value: "\(monthEntries.count)", label: "Entries", icon: "book.closed")
-            summaryMetric(value: wordCount.formatted(), label: "Words", icon: "text.word.spacing")
-            summaryMetric(value: "\(writingDays)", label: "Writing days", icon: "calendar")
-            summaryMetric(
-                value: average.map { "\($0.emoji) \($0.label)" } ?? "—",
-                label: "Average mood",
-                icon: "face.smiling"
-            )
+    @ViewBuilder
+    private func monthSummary(_ snap: CalendarMonthSnapshot) -> some View {
+        if snap.monthEntries.isEmpty {
+            // One quiet line instead of a grid of zeros and dashes.
+            HStack(spacing: 10) {
+                Image(systemName: "calendar")
+                    .foregroundColor(theme.accentColor)
+                    .accessibilityHidden(true)
+                Text("No writing in \(monthTitle).")
+                    .font(OmegaTheme.font(.caption, .medium))
+                    .foregroundColor(theme.secondaryTextColor)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(cardSurface(opacity: 0.35))
+            .overlay(cardBorder)
+            .accessibilityElement(children: .combine)
+        } else {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+                spacing: 10
+            ) {
+                summaryMetric(value: "\(snap.monthEntries.count)", label: "Entries", icon: "book.closed")
+                summaryMetric(value: snap.monthWordCount.formatted(), label: "Words", icon: "text.word.spacing")
+                summaryMetric(value: "\(snap.writingDays.count)", label: "Writing days", icon: "calendar")
+                summaryMetric(
+                    value: snap.averageMood.map { "\($0.emoji) \($0.label)" } ?? "—",
+                    label: "Average mood",
+                    icon: "face.smiling"
+                )
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity)
+            .background(cardSurface(opacity: 0.45))
+            .overlay(cardBorder)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(monthTitle) reflective summary")
         }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(cardSurface(opacity: 0.45))
-        .overlay(cardBorder)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(anchorMonth.formatted(.dateTime.month(.wide).year())) reflective summary")
     }
 
     private func summaryMetric(value: String, label: String, icon: String) -> some View {
@@ -354,26 +326,24 @@ struct CalendarView: View {
 
     // MARK: - Month mode
 
-    private var monthWorkspace: some View {
+    private func monthWorkspace(_ snap: CalendarMonthSnapshot) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 20) {
-                monthGridCard
+                monthGridCard(snap)
                     .frame(minWidth: 520, maxWidth: .infinity)
-                selectedDayInspector
+                selectedDayInspector(snap)
                     .frame(width: 360)
             }
 
             VStack(alignment: .leading, spacing: 20) {
-                monthGridCard
-                selectedDayInspector
+                monthGridCard(snap)
+                selectedDayInspector(snap)
             }
         }
     }
 
-    private var monthGridCard: some View {
-        // Bucket once per render, not once per day cell.
-        let byDay = entriesByDay
-        return VStack(alignment: .leading, spacing: 16) {
+    private func monthGridCard(_ snap: CalendarMonthSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Month at a glance")
@@ -384,7 +354,7 @@ struct CalendarView: View {
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
-                Text("\(monthEntries.count) \(entryWord(for: monthEntries.count))")
+                Text("\(snap.monthEntries.count) \(entryWord(for: snap.monthEntries.count))")
                     .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
             }
@@ -405,7 +375,7 @@ struct CalendarView: View {
                         if let day {
                             CalendarDayCell(
                                 day: day,
-                                entries: dayEntries(for: day, in: byDay),
+                                entries: snap.entries(on: day, calendar: calendar),
                                 isSelected: calendar.isDate(day, inSameDayAs: selectedDay),
                                 calendar: calendar,
                                 onSelect: { selectDay(day) }
@@ -426,32 +396,33 @@ struct CalendarView: View {
 
     // MARK: - Agenda mode
 
-    private var agendaWorkspace: some View {
+    private func agendaWorkspace(_ snap: CalendarMonthSnapshot) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 20) {
-                agendaCard
+                agendaCard(snap)
                     .frame(minWidth: 520, maxWidth: .infinity)
-                selectedDayInspector
+                selectedDayInspector(snap)
                     .frame(width: 360)
             }
 
             VStack(alignment: .leading, spacing: 20) {
-                selectedDayInspector
-                agendaCard
+                selectedDayInspector(snap)
+                agendaCard(snap)
             }
         }
     }
 
-    private var agendaCard: some View {
-        let byDay = entriesByDay
-        let days = agendaDays(from: byDay)
+    /// Agenda lists writing days only; an empty selected day is described
+    /// once, by the inspector, instead of again inside the agenda.
+    private func agendaCard(_ snap: CalendarMonthSnapshot) -> some View {
+        let days = snap.writingDays
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Agenda")
                         .font(OmegaTheme.font(.bodyLarge, .semibold))
                         .foregroundColor(theme.titleTextColor)
-                    Text("Writing days in \(anchorMonth.formatted(.dateTime.month(.wide).year())).")
+                    Text("Writing days in \(monthTitle).")
                         .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
@@ -466,7 +437,7 @@ struct CalendarView: View {
             } else {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(days, id: \.self) { day in
-                        agendaDaySection(day, byDay: byDay)
+                        agendaDaySection(day, entries: snap.entries(on: day, calendar: calendar))
                     }
                 }
             }
@@ -481,10 +452,10 @@ struct CalendarView: View {
             Image(systemName: "calendar.badge.exclamationmark")
                 .font(OmegaTheme.font(.title, .light))
                 .foregroundColor(theme.secondaryTextColor)
-            Text("No entries in this month’s reflective scope.")
+            Text("No writing days in \(monthTitle).")
                 .font(OmegaTheme.font(.caption, .medium))
                 .foregroundColor(theme.titleTextColor)
-            Text("Choose a date in the inspector to begin writing.")
+            Text("Pick a day and use New Entry in the inspector to start one.")
                 .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
         }
@@ -492,8 +463,7 @@ struct CalendarView: View {
         .padding(.vertical, 34)
     }
 
-    private func agendaDaySection(_ day: Date, byDay: [Date: [JournalEntry]]) -> some View {
-        let entries = dayEntries(for: day, in: byDay)
+    private func agendaDaySection(_ day: Date, entries: [JournalEntry]) -> some View {
         let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -527,26 +497,21 @@ struct CalendarView: View {
             .accessibilityLabel("\(day.formatted(date: .complete, time: .omitted)), \(entries.count) \(entryWord(for: entries.count))")
             .accessibilityHint("Select this day in the calendar inspector")
 
-            if entries.isEmpty {
-                Text("No entries on this selected date.")
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-                    .padding(.leading, 12)
-            } else {
-                ForEach(entries) { entry in
-                    CalendarEntryRow(entry: entry, onOpen: { openEntry(entry) })
-                }
+            ForEach(entries) { entry in
+                CalendarEntryRow(entry: entry, onOpen: { openEntry(entry) })
             }
         }
     }
 
     // MARK: - Selected day inspector
 
-    private var selectedDayInspector: some View {
-        let entries = selectedDayEntries
+    private func selectedDayInspector(_ snap: CalendarMonthSnapshot) -> some View {
+        let entries = snap.entries(on: selectedDay, calendar: calendar)
         let words = entries.reduce(0) { $0 + $1.wordCount }
         let readingMinutes = entries.reduce(0) { $0 + $1.readingMinutes }
-        let mood = averageMood(for: entries)
+        let mood = CalendarMonthSnapshot.averageMood(entries)
+        let metrics = ReflectionDayMetrics.summary(entryCount: entries.count, words: words, readingMinutes: readingMinutes)
+        let dateTitle = selectedDay.formatted(date: .complete, time: .omitted)
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
@@ -555,12 +520,23 @@ struct CalendarView: View {
                         .font(OmegaTheme.font(.meta, .semibold))
                         .tracking(0.8)
                         .foregroundColor(theme.secondaryTextColor)
-                    Text(selectedDay.formatted(date: .complete, time: .omitted))
+                    Text(dateTitle)
                         .font(OmegaTheme.font(.heading, .bold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
-                    Text("\(entries.count) \(entryWord(for: entries.count)) in this reflective scope")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
+                    // One consolidated metrics line (was a subtitle plus a
+                    // 2×2 grid repeating the entry count, with zeros on empty days).
+                    if let metrics {
+                        HStack(spacing: 6) {
+                            if let mood {
+                                Text(mood.emoji)
+                                    .accessibilityLabel("Average mood \(mood.label)")
+                            }
+                            Text(metrics)
+                                .font(OmegaTheme.font(.meta, .medium))
+                                .foregroundColor(theme.secondaryTextColor)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                 }
 
                 Spacer(minLength: 8)
@@ -574,45 +550,17 @@ struct CalendarView: View {
                         .background(Capsule().fill(theme.accentColor))
                 }
                 .buttonStyle(.plain)
-                .omegaTooltip("Create an entry for \(selectedDay.formatted(date: .complete, time: .omitted))")
-                .accessibilityLabel("New entry for \(selectedDay.formatted(date: .complete, time: .omitted))")
-            }
-
-            LazyVGrid(columns: inspectorColumns, spacing: 8) {
-                dayTotal(value: "\(entries.count)", label: "Entries", icon: "book.closed")
-                dayTotal(value: words.formatted(), label: "Words", icon: "text.word.spacing")
-                dayTotal(value: "\(readingMinutes) min", label: "Reading", icon: "clock")
-                dayTotal(
-                    value: mood.map { "\($0.emoji) \($0.label)" } ?? "—",
-                    label: "Avg. mood",
-                    icon: "face.smiling"
-                )
+                .omegaTooltip("Create an entry for \(dateTitle)")
+                .accessibilityLabel("New entry for \(dateTitle)")
             }
 
             Divider().opacity(0.22)
 
-            HStack {
-                Text("Entries")
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.titleTextColor)
-                Spacer()
-                if !entries.isEmpty {
-                    Text("Open to read or edit")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
-                }
-            }
-
             if entries.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Nothing written on this day yet.")
-                        .font(OmegaTheme.font(.caption, .medium))
-                        .foregroundColor(theme.titleTextColor)
-                    Text("Start a dated entry without leaving Calendar.")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
-                }
-                .padding(.vertical, 4)
+                Text("Nothing written on this day yet.")
+                    .font(OmegaTheme.font(.caption, .medium))
+                    .foregroundColor(theme.secondaryTextColor)
+                    .padding(.vertical, 2)
             } else {
                 VStack(spacing: 7) {
                     ForEach(entries) { entry in
@@ -626,29 +574,6 @@ struct CalendarView: View {
         .background(cardSurface(opacity: 0.56))
         .overlay(cardBorder)
         .accessibilityElement(children: .contain)
-    }
-
-    private func dayTotal(value: String, label: String, icon: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: icon)
-                .font(OmegaTheme.font(.meta, .medium))
-                .foregroundColor(theme.accentColor)
-                .frame(width: 22, height: 22)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(theme.accentColor.opacity(0.12)))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value)
-                    .font(OmegaTheme.font(.caption, .bold, design: .rounded))
-                    .foregroundColor(theme.titleTextColor)
-                    .lineLimit(1)
-                Text(label)
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.cardColor.opacity(0.35)))
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Actions and helpers
@@ -718,22 +643,6 @@ struct CalendarView: View {
             anchorMonth = interval.start
             selectedDay = calendar.startOfDay(for: target)
         }
-    }
-
-    private func dayEntries(for day: Date, in byDay: [Date: [JournalEntry]]) -> [JournalEntry] {
-        byDay[calendar.startOfDay(for: day), default: []]
-            .sorted { $0.createdAt < $1.createdAt }
-    }
-
-    private func isInAnchorMonth(_ day: Date) -> Bool {
-        calendar.isDate(day, equalTo: anchorMonth, toGranularity: .month)
-    }
-
-    private func averageMood(for entries: [JournalEntry]) -> Mood? {
-        guard !entries.isEmpty else { return nil }
-        let total = entries.reduce(0) { $0 + $1.mood.rawValue }
-        let value = Int((Double(total) / Double(entries.count)).rounded())
-        return Mood(rawValue: value) ?? .neutral
     }
 
     private func entryWord(for count: Int) -> String {
