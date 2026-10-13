@@ -7,6 +7,13 @@ struct FilterBar: View {
     @ObservedObject var vm: JournalViewModel
     @ObservedObject var theme = ThemeManager.shared
 
+    /// Tag chips shown in the panel before the rest scroll out of reach.
+    static let tagChipLimit = 14
+
+    static func tagChoices(_ ordered: [String], selected: Set<String>) -> [String] {
+        ShellTagChoices.visible(ordered, selected: selected, limit: tagChipLimit)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -16,8 +23,8 @@ struct FilterBar: View {
                     .foregroundColor(theme.secondaryTextColor)
                 Spacer()
                 if vm.filter.isActive {
-                    Button("Reset") { vm.filter = .empty }
-                        .accessibilityLabel("Reset all filters")
+                    Button("Clear filters") { vm.filter = .empty }
+                        .accessibilityLabel("Clear all filters")
                         .buttonStyle(.plain)
                         .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.accentColor)
@@ -89,15 +96,18 @@ struct FilterBar: View {
             }
 
             // Tag chips
-            if !vm.allTags.isEmpty {
+            if !vm.allTags.isEmpty || !vm.filter.tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 4) {
-                        ForEach(vm.allTags.prefix(14), id: \.tag) { item in
-                            let on = vm.filter.tags.contains(item.tag)
+                        // Most-used tags first; an active tag filter is always
+                        // listed even when it is not among them, so it can be
+                        // seen and turned off here.
+                        ForEach(Self.tagChoices(vm.allTags.map(\.tag), selected: vm.filter.tags), id: \.self) { tag in
+                            let on = vm.filter.tags.contains(tag)
                             Button {
-                                if on { vm.filter.tags.remove(item.tag) } else { vm.filter.tags.insert(item.tag) }
+                                if on { vm.filter.tags.remove(tag) } else { vm.filter.tags.insert(tag) }
                             } label: {
-                                Text("#\(item.tag)")
+                                Text("#\(tag)")
                                     .font(OmegaTheme.font(.meta, on ? .semibold : .regular))
                                     .foregroundColor(on ? theme.accentColor : theme.secondaryTextColor)
                                     .padding(.horizontal, 6)
@@ -107,7 +117,7 @@ struct FilterBar: View {
                                     )
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(A11yDescriptions.filterChipLabel(kind: "tag", name: item.tag))
+                            .accessibilityLabel(A11yDescriptions.filterChipLabel(kind: "tag", name: tag))
                             .accessibilityValue(A11yDescriptions.filterChipValue(isOn: on))
                             .accessibilityAddTraits(on ? .isSelected : [])
                         }

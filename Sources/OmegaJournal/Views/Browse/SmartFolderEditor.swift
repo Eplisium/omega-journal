@@ -20,6 +20,12 @@ struct SmartFolderEditor: View {
     }
 
     private var isNew: Bool { vm.smartFolder(id: folder.id) == nil }
+
+    static let tagChipLimit = 30
+
+    static func tagChoices(_ ordered: [String], selected: [String]) -> [String] {
+        ShellTagChoices.visible(ordered, selected: Set(selected), limit: tagChipLimit)
+    }
     private var canSave: Bool { !folder.name.trimmingCharacters(in: .whitespaces).isEmpty && folder.hasCriteria }
     private var previewCount: Int { folder.count(in: vm.entries.map(\.searchRecord), hiddenLocked: vm.hiddenLocked) }
 
@@ -44,13 +50,17 @@ struct SmartFolderEditor: View {
             GroupBox("Tags (any of)") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(vm.allTags.prefix(30), id: \.tag) { item in
-                            let on = folder.tags.contains(item.tag)
-                            OmegaChip(title: "#\(item.tag)", isSelected: on) {
-                                if on { folder.tags.removeAll { $0 == item.tag } } else { folder.tags.append(item.tag) }
+                        // A folder's saved tags stay listed (and removable)
+                        // even when they are not among the 30 most used.
+                        ForEach(Self.tagChoices(vm.allTags.map(\.tag), selected: folder.tags), id: \.self) { tag in
+                            let on = folder.tags.contains(tag)
+                            OmegaChip(title: "#\(tag)", isSelected: on) {
+                                if on { folder.tags.removeAll { $0 == tag } } else { folder.tags.append(tag) }
                             }
+                            .accessibilityLabel(A11yDescriptions.filterChipLabel(kind: "tag", name: tag))
+                            .accessibilityValue(A11yDescriptions.filterChipValue(isOn: on))
                         }
-                        if vm.allTags.isEmpty { Text("No tags yet").font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor) }
+                        if vm.allTags.isEmpty && folder.tags.isEmpty { Text("No tags yet").font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor) }
                     }.padding(6)
                 }
             }
