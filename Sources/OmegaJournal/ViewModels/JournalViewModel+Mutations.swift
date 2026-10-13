@@ -13,8 +13,7 @@ extension JournalViewModel {
     /// archive/hide state. Flush first so storage reflects what is on screen,
     /// then apply the mutation on top.
     func flushBeforeImmediateMutation() {
-        saveDebounce?.cancel()
-        if let e = editingEntry { db.saveEntry(e) }
+        flushPendingSave()
     }
 
     func togglePin(_ entry: JournalEntry) {
@@ -45,8 +44,9 @@ extension JournalViewModel {
     /// Moves an entry to the trash (recoverable for 30 days).
     func deleteEntry(_ entry: JournalEntry) {
         // A pending autosave captured the pre-trash snapshot (deletedAt == nil);
-        // letting it fire would overwrite deleted_at and resurrect the entry.
-        saveDebounce?.cancel()
+        // letting it fire later would overwrite deleted_at and resurrect the
+        // entry, and cancelling it would lose the edit. Save it now, THEN trash.
+        flushBeforeImmediateMutation()
         db.trashEntry(id: entry.id)
         entries.removeAll { $0.id == entry.id }
         searchResults?.removeAll { $0.id == entry.id }
@@ -62,6 +62,7 @@ extension JournalViewModel {
     }
 
     func restoreFromTrash(_ entry: JournalEntry) {
+        flushBeforeImmediateMutation()
         db.restoreEntry(id: entry.id)
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
@@ -70,7 +71,7 @@ extension JournalViewModel {
     }
 
     func deleteForever(_ entry: JournalEntry) {
-        saveDebounce?.cancel()
+        flushBeforeImmediateMutation()
         db.hardDeleteEntry(id: entry.id)
         entries.removeAll { $0.id == entry.id }
         searchResults?.removeAll { $0.id == entry.id }
@@ -84,7 +85,7 @@ extension JournalViewModel {
     }
 
     func emptyTrash() {
-        saveDebounce?.cancel()
+        flushBeforeImmediateMutation()
         let count = trashedEntries.count
         db.emptyTrash()
         trashedEntries = []
@@ -165,7 +166,7 @@ extension JournalViewModel {
     /// Soft-deletes the selected active or archived entries. The operation is
     /// intentionally reversible via the toast's Undo action.
     func bulkMoveToTrash() {
-        saveDebounce?.cancel()
+        flushBeforeImmediateMutation()
         let ids = selectedIDs(in: nonTrashedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()
@@ -219,6 +220,7 @@ extension JournalViewModel {
     }
 
     func bulkRestoreFromTrash() {
+        flushBeforeImmediateMutation()
         let ids = selectedIDs(in: trashedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()
@@ -234,7 +236,7 @@ extension JournalViewModel {
     /// Irreversibly removes only selected entries that are already in Trash.
     /// The UI must obtain explicit confirmation before invoking this method.
     func bulkDeleteForever() {
-        saveDebounce?.cancel()
+        flushBeforeImmediateMutation()
         let ids = selectedIDs(in: trashedEntries)
         guard !ids.isEmpty else {
             clearBulkSelection()
@@ -311,6 +313,7 @@ extension JournalViewModel {
 
     func performUndo() {
         guard let action = undoStack.popLast() else { return }
+        flushBeforeImmediateMutation()
         // Report what actually changed: entries may since have been deleted
         // forever or restored by hand.
         switch action {

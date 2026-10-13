@@ -44,7 +44,9 @@ extension JournalViewModel {
     /// count while the biometric session is unlocked; trashed entries never do.
     func backlinks(for entry: JournalEntry) -> [JournalEntry] {
         let unlocked = BiometricAuth.shared.isAuthenticated
-        let pool = entries + archivedEntries + (unlocked ? hiddenEntries : [])
+        // `entries`/`archivedEntries` already include hidden rows (masked in
+        // the UI); adding `hiddenEntries` listed each hidden linker twice.
+        let pool = Self.uniqueById(entries + archivedEntries)
         let linkable = pool.map { LinkableEntry(id: $0.id, title: $0.title, body: $0.body, isHidden: $0.isHidden) }
         let ids = Set(WikiLinks.backlinks(toTitle: entry.title, in: linkable, excludingId: entry.id, includeHidden: unlocked).map(\.id))
         return pool.filter { ids.contains($0.id) }
@@ -85,7 +87,9 @@ extension JournalViewModel {
     @discardableResult
     func createReviewEntry(period: ReviewPeriod, reference: Date = Date()) -> JournalEntry {
         let unlocked = BiometricAuth.shared.isAuthenticated
-        let pool = entries + (unlocked ? hiddenEntries : [])
+        // `entries` already contains active hidden rows; the generator drops
+        // them while locked. Adding `hiddenEntries` double-counted them.
+        let pool = Self.uniqueById(entries)
         let values = pool.map {
             ReviewEntry(title: $0.title, body: $0.body, mood: $0.mood.rawValue, tags: $0.tags,
                         createdAt: $0.createdAt, isFavorite: $0.isFavorite, isPinned: $0.isPinned, isHidden: $0.isHidden)
@@ -93,6 +97,26 @@ extension JournalViewModel {
         let draft = ReviewGenerator.draft(period: period, entries: values, reference: reference, includeHidden: unlocked)
         flushBeforeImmediateMutation()
         return createEntry(title: draft.title, body: draft.body, tags: ["review"])
+    }
+
+    /// Keeps the first occurrence of each id, preserving order.
+    static func uniqueById(_ source: [JournalEntry]) -> [JournalEntry] {
+        var seen = Set<String>()
+        return source.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Parses the `.reviewRequested` notification payload (`userInfo["period"]`).
+    nonisolated static func reviewPeriod(fromRequest userInfo: [AnyHashable: Any]?) -> ReviewPeriod? {
+        (userInfo?["period"] as? String).flatMap(ReviewPeriod.init(rawValue:))
+    }
+
+    /// A tapped weekly/monthly review reminder: save (or reopen) that period's
+    /// review entry. Returns nil when the payload carries no valid period.
+    @discardableResult
+    func handleReviewRequest(userInfo: [AnyHashable: Any]?) -> JournalEntry? {
+        guard let period = Self.reviewPeriod(fromRequest: userInfo) else { return nil }
+        flushBeforeImmediateMutation()
+        return saveReviewAsEntry(period)
     }
 
     func recomputeMoodCounts() {

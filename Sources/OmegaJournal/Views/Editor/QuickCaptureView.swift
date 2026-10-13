@@ -27,7 +27,45 @@ enum QuickCapture {
 }
 
 extension Notification.Name {
+    /// Signals that `QuickCaptureInbox` has new items. The payload lives in the
+    /// inbox, not in `userInfo`, so a capture made before any journal window
+    /// exists (launch gate still waiting for the key) is not dropped.
     static let quickCapture = Notification.Name("OmegaJournal.quickCapture")
+}
+
+/// One menu-bar capture waiting to be saved by the journal's view model.
+struct QuickCaptureItem: Equatable {
+    var body: String
+    var mood: Mood
+    var tags: [String]
+}
+
+/// In-memory hand-off between the menu-bar popover and the journal window.
+///
+/// The popover can be used before `LaunchGateView` has adopted the encryption
+/// key and built `ContentView`, and it must never touch the database itself.
+/// Captures queue here; ContentView drains the queue when it appears and on
+/// every `.quickCapture` signal, so nothing typed is lost and multiple windows
+/// never save the same capture twice.
+@MainActor
+enum QuickCaptureInbox {
+    private static var items: [QuickCaptureItem] = []
+
+    static var pendingCount: Int { items.count }
+
+    /// Queues a capture and pings any live journal window.
+    static func submit(_ item: QuickCaptureItem) {
+        items.append(item)
+        NotificationCenter.default.post(name: .quickCapture, object: nil)
+    }
+
+    /// Hands every queued capture to the caller exactly once.
+    static func drain() -> [QuickCaptureItem] {
+        defer { items.removeAll() }
+        return items
+    }
+
+    static func removeAll() { items.removeAll() }
 }
 
 /// Drives `MenuBarExtra(isInserted:)` for the quick-capture item.
@@ -84,8 +122,8 @@ final class QuickCapturePresence: ObservableObject {
 }
 
 /// Small popover for the menu-bar extra. It never touches the database itself:
-/// it posts `.quickCapture`, and ContentView's single view model saves the
-/// entry through the normal `createEntry` path.
+/// it queues into `QuickCaptureInbox`, and ContentView's view model saves the
+/// entry through the normal `createEntry` path once the journal is open.
 struct QuickCaptureView: View {
     @State private var text = ""
     @State private var mood: Mood = .neutral
@@ -132,10 +170,7 @@ struct QuickCaptureView: View {
 
     private func save() {
         guard let body = QuickCapture.normalized(text) else { return }
-        NotificationCenter.default.post(name: .quickCapture, object: nil,
-                                        userInfo: [QuickCapture.notificationKey: body,
-                                                   QuickCapture.moodKey: mood.rawValue,
-                                                   QuickCapture.tagsKey: QuickCapture.tags(from: tagText)])
+        QuickCaptureInbox.submit(QuickCaptureItem(body: body, mood: mood, tags: QuickCapture.tags(from: tagText)))
         text = ""
         tagText = ""
     }

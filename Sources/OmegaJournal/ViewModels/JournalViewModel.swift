@@ -61,6 +61,10 @@ final class JournalViewModel: ObservableObject {
     let db = DatabaseManager.shared
     var searchDebounce: Task<Void, Never>?
     var saveDebounce: Task<Void, Never>?
+    /// The exact snapshot `saveDebounce` will persist. Flushing writes THIS —
+    /// not whatever `editingEntry` happens to be by then — so switching,
+    /// creating, trashing or reloading can never drop or misdirect an edit.
+    var pendingSave: JournalEntry?
     /// Editor save indicator: `.pending` while a debounced autosave is queued.
     enum SaveState: Equatable { case idle, pending, saved }
     @Published var saveState: SaveState = .idle
@@ -165,6 +169,10 @@ final class JournalViewModel: ObservableObject {
     // MARK: - Loading
 
     func reload() {
+        // A queued autosave must land before rows are re-read, or the reload
+        // would replace the edit in memory with stale storage. Only the
+        // pending snapshot is written, never other in-memory state.
+        persistPendingSnapshot()
         // One shared attachments/tags scan for all four scopes (was 8 full-table
         // scans per reload) plus the single tagsWithCounts query below.
         let scopes = db.fetchScopes([
@@ -350,14 +358,18 @@ final class JournalViewModel: ObservableObject {
     // MARK: - Creating entries
 
     @discardableResult
-    func createEntry(title: String = "", body: String = "", tags: [String] = []) -> JournalEntry {
+    func createEntry(title: String = "", body: String = "", tags: [String] = [],
+                     journalId: String? = nil, isHidden: Bool = false) -> JournalEntry {
+        flushPendingSave()
         var entry = JournalEntry.new()
-        entry.journalId = newEntryJournalId
+        entry.journalId = journalId ?? newEntryJournalId
         entry.title = title
         entry.body = body
         entry.tags = OmegaCore.normalizeTags(tags)
+        entry.isHidden = isHidden
         db.saveEntry(entry)
         entries.insert(entry, at: 0)
+        if isHidden { hiddenEntries.insert(entry, at: 0) }
         sortInPlace()
         if searchResults != nil { refreshQuery() }
         selectedEntryId = entry.id
@@ -382,6 +394,7 @@ final class JournalViewModel: ObservableObject {
 
     /// Creates an entry back-dated to a specific day — used by the calendar view.
     func createEntry(on date: Date) {
+        flushPendingSave()
         var entry = JournalEntry.new()
         entry.journalId = newEntryJournalId
         // Keep the current time-of-day but move to the requested calendar day.
@@ -398,11 +411,15 @@ final class JournalViewModel: ObservableObject {
     }
 
     /// Duplicates an entry as a fresh draft.
-    func duplicate(_ entry: JournalEntry) {
+    @discardableResult
+    func duplicate(_ entry: JournalEntry) -> Task<JournalEntry?, Never> {
         Task {
-            guard await revealIfNeeded(entry) else { return }
-            createEntry(title: entry.title.isEmpty ? "" : "\(entry.title) (copy)", body: entry.body, tags: entry.tags)
+            guard await revealIfNeeded(entry) else { return nil }
+            // A copy of a private entry must stay private and in its notebook.
+            let copy = createEntry(title: entry.title.isEmpty ? "" : "\(entry.title) (copy)", body: entry.body,
+                                   tags: entry.tags, journalId: entry.journalId, isHidden: entry.isHidden)
             showToast("Duplicated entry")
+            return copy
         }
     }
 
@@ -448,6 +465,7 @@ final class JournalViewModel: ObservableObject {
     func select(_ entry: JournalEntry) { selectedEntryId = entry.id }
 
     func startEditing(_ entry: JournalEntry) {
+        flushPendingSave()
         selectedEntryId = entry.id
         if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
             Task {
@@ -465,7 +483,7 @@ final class JournalViewModel: ObservableObject {
         // editingEntryId is already nil by the time it runs, so that flush used
         // to be a no-op and the final keystrokes depended entirely on the
         // debounce Task surviving a fast "type → Done → quit".
-        saveDebounce?.cancel()
+        flushPendingSave()
         if let e = editingEntry {
             if e.title.isEmpty && e.body.isEmpty {
                 // Discard entries that were never given any content.
@@ -476,8 +494,6 @@ final class JournalViewModel: ObservableObject {
                 trashedEntries.removeAll { $0.id == e.id }
                 hiddenEntries.removeAll { $0.id == e.id }
                 if selectedEntryId == e.id { selectedEntryId = nil }
-            } else {
-                db.saveEntry(e)
             }
         }
         editingEntryId = nil
@@ -491,14 +507,19 @@ final class JournalViewModel: ObservableObject {
         // Update in-memory immediately so the UI stays responsive; persist on a debounce.
         var updated = entry
         updated.updatedAt = Date()
+        // A snapshot queued for a different entry is persisted now, never
+        // silently replaced.
+        if let queued = pendingSave, queued.id != updated.id { persistPendingSnapshot() }
         updateEntry(updated, refreshSearch: false)
         saveState = .pending
         saveDebounce?.cancel()
+        pendingSave = updated
         saveDebounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
-                self.db.saveEntry(updated)
+                guard self.pendingSave != nil else { return }
+                self.persistPendingSnapshot()
                 self.saveState = .saved
                 if self.searchResults != nil { self.refreshQuery() }
                 self.refreshTagCounts()
@@ -509,9 +530,56 @@ final class JournalViewModel: ObservableObject {
 
     /// Forces any pending debounced save to disk right away.
     func flushPendingSave() {
-        saveDebounce?.cancel()
-        if let e = editingEntry { db.saveEntry(e) }
+        persistPendingSnapshot()
         if saveState == .pending { saveState = .saved }
+    }
+
+    /// Cancels the debounce and writes its queued snapshot, if any. Never
+    /// writes other in-memory state, so it cannot clobber newer storage.
+    @discardableResult
+    func persistPendingSnapshot() -> Bool {
+        saveDebounce?.cancel()
+        saveDebounce = nil
+        guard let snapshot = pendingSave else { return false }
+        pendingSave = nil
+        db.saveEntry(snapshot)
+        return true
+    }
+
+    /// Saves every capture queued by the menu-bar popover. The user's current
+    /// edit session is flushed first and resumed afterwards.
+    @discardableResult
+    func drainQuickCaptureInbox() -> [JournalEntry] {
+        let items = QuickCaptureInbox.drain()
+        guard !items.isEmpty else { return [] }
+        let resumeId = editingEntryId
+        flushPendingSave()
+        var created: [JournalEntry] = []
+        for item in items {
+            guard let body = QuickCapture.normalized(item.body) else { continue }
+            var entry = createEntry(body: body, tags: item.tags.isEmpty ? [QuickCapture.tag] : item.tags)
+            if item.mood != entry.mood {
+                entry.mood = item.mood
+                db.saveEntry(entry)
+                updateEntry(entry)
+            }
+            // createEntry opened an editor on the capture; close it without
+            // touching the resumed entry's state.
+            editingEntryId = nil
+            created.append(entry)
+        }
+        saveState = .idle
+        refreshTagCounts()
+        GoalManager.shared.loadGoals()
+        if let resumeId, let previous = entry(id: resumeId), !previous.isTrashed {
+            startEditing(previous)
+        } else if let last = created.last {
+            selectedEntryId = last.id
+        }
+        if !created.isEmpty {
+            showToast(created.count == 1 ? "Saved quick capture" : "Saved \(created.count) quick captures")
+        }
+        return created
     }
 
     /// Replaces an entry's body immediately (e.g. ticking a task in the reader).

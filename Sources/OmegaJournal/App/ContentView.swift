@@ -17,7 +17,7 @@ struct ContentView: View {
         ZStack {
             if vm.isZenMode, let entry = vm.editingEntry {
                 // Zen mode takes over the whole window — no chrome, just the page.
-                EditorView(vm: vm, entry: entry)
+                Self.zenEditor(vm: vm, entry: entry)
                     .transition(.opacity.combined(with: .scale(scale: 1.02)))
             } else {
                 mainSplitView
@@ -51,6 +51,15 @@ struct ContentView: View {
         .modifier(ShellEntryCommands(vm: vm, selection: $sidebarSelection))
         .modifier(ShellLifecycle(vm: vm, selection: $sidebarSelection, showTemplatePicker: $showTemplatePicker,
                                  storedSelection: $storedSelection, didRestore: $didRestoreSelection))
+        .modifier(ShellReviewRequests(vm: vm, selection: $sidebarSelection))
+    }
+
+    /// Zen-mode editor. Keyed by entry id (as DetailView does) so switching or
+    /// creating an entry rebuilds the editor instead of carrying the previous
+    /// entry's @State (title/body/tags) into the next one and autosaving it there.
+    static func zenEditor(vm: JournalViewModel, entry: JournalEntry) -> some View {
+        EditorView(vm: vm, entry: entry)
+            .id(entry.id)
     }
 
     @ViewBuilder
@@ -287,28 +296,11 @@ struct ShellEntryCommands: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .exportSelected)) { _ in
                 if vm.selectedEntry != nil { ImportExportPanels.exportCurrentEntry(vm: vm) }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .quickCapture)) { note in
-                guard let text = note.userInfo?[QuickCapture.notificationKey] as? String,
-                      let body = QuickCapture.normalized(text) else { return }
-                // Keep whatever the user is editing intact: flush, capture, then
-                // put them back where they were.
-                let resumeId = vm.editingEntryId
-                vm.flushPendingSave()
-                let tags = note.userInfo?[QuickCapture.tagsKey] as? [String] ?? [QuickCapture.tag]
-                var created = vm.createEntry(body: body, tags: tags)
-                if let raw = note.userInfo?[QuickCapture.moodKey] as? Int, let m = Mood(rawValue: raw), m != created.mood {
-                    created.mood = m
-                    _ = vm.db.saveEntry(created)
-                    vm.reload()
-                }
-                vm.stopEditing()
-                if let resumeId, let previous = vm.entries.first(where: { $0.id == resumeId }) {
-                    vm.startEditing(previous)
-                } else {
-                    vm.selectedEntryId = created.id
-                }
-                vm.showToast("Saved quick capture")
+            .onReceive(NotificationCenter.default.publisher(for: .quickCapture)) { _ in
+                vm.drainQuickCaptureInbox()
             }
+            // Captures made before this window existed (launch gate) are queued.
+            .onAppear { vm.drainQuickCaptureInbox() }
             .onReceive(NotificationCenter.default.publisher(for: .findInEntryOrList)) { _ in
                 if vm.editingEntryId != nil, NSApp.keyWindow?.firstResponder is NSTextView {
                     let item = NSMenuItem()
@@ -397,11 +389,29 @@ struct ShellLifecycle: ViewModifier {
         .onReceive(NotificationCenter.default.publisher(for: .lockHiddenEntries)) { _ in
             vm.lockHiddenEntries()
         }
+
         .onReceive(NotificationCenter.default.publisher(for: .quitTimeSave)) { _ in
             // Quit is in progress and this call runs synchronously — flush
             // regardless of the `isEditing` guard used for workspace switches,
             // otherwise the final keystrokes of an edit session are lost.
             vm.flushPendingSave()
+        }
+    }
+}
+
+// MARK: - Review reminder receiver
+
+/// Tapping a weekly/monthly review notification posts `.reviewRequested`
+/// (see `NotificationPresenter`); open Today and save that period's review.
+struct ShellReviewRequests: ViewModifier {
+    @ObservedObject var vm: JournalViewModel
+    @Binding var selection: SidebarItem?
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .reviewRequested)) { note in
+            guard JournalViewModel.reviewPeriod(fromRequest: note.userInfo) != nil else { return }
+            selection = .today
+            vm.handleReviewRequest(userInfo: note.userInfo)
         }
     }
 }

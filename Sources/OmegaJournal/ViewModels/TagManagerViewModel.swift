@@ -99,10 +99,21 @@ extension JournalViewModel {
         let target = id.flatMap { want in journals.contains { $0.id == want } ? want : nil }
         guard target != activeJournalId else { return }
         flushBeforeImmediateMutation()
+        // An editor on an entry that is about to leave scope is closed first,
+        // so stopEditing can still resolve it (save or discard an empty draft).
+        if let target, let editing = editingEntry, editing.journalId != target {
+            stopEditing()
+        }
         activeJournalId = target
         db.setSetting(Self.activeJournalSettingKey, value: target ?? "")
-        if let sel = selectedEntryId, entry(id: sel) == nil { selectedEntryId = nil }
         reload()
+        // Scope is only known after the reload: drop dangling ids.
+        if let sel = selectedEntryId, entry(id: sel) == nil { selectedEntryId = nil }
+        if let editing = editingEntryId, entry(id: editing) == nil {
+            editingEntryId = nil
+            isZenMode = false
+            saveState = .idle
+        }
     }
 
     @discardableResult
