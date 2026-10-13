@@ -8,6 +8,10 @@ import OmegaJournalCore
 struct SmartInsightsSections: View {
     @ObservedObject var vm: JournalViewModel
     let entries: [JournalEntry]
+    /// Identity of the included entries' content (ids + edit times). Themes
+    /// are re-derived whenever it changes — keying on the entry COUNT kept
+    /// stale keywords/tone after edits or same-size scope changes.
+    var contentFingerprint: Int? = nil
     @ObservedObject private var store = CheckinStore.shared
     @ObservedObject private var theme = ThemeManager.shared
     @State private var themes = ThemeSnapshot()
@@ -27,8 +31,12 @@ struct SmartInsightsSections: View {
                 }
             }
         }
-        .task(id: entries.count) { themes = vm.themeSnapshot(for: entries) }
+        .task(id: themeTaskID) { themes = vm.themeSnapshot(for: entries) }
         .sheet(isPresented: $showYearReview) { YearReviewView(vm: vm) }
+    }
+
+    private var themeTaskID: Int {
+        contentFingerprint ?? ReflectionFingerprint.make(entries.map { ($0.id, $0.updatedAt) })
     }
 
     private func section<C: View>(_ title: String, _ subtitle: String, @ViewBuilder _ content: () -> C) -> some View {

@@ -12,27 +12,40 @@ import OmegaJournalCore
 /// open entries directly — all through the shared drill-through sheet.
 struct InsightsWorkspaceView: View {
     @ObservedObject var vm: JournalViewModel
+    @ObservedObject private var biometricAuth = BiometricAuth.shared
+
+    var body: some View {
+        // Derive everything once per render; the content reads stored values.
+        InsightsWorkspaceContent(vm: vm, data: InsightsSnapshot.make(vm: vm))
+    }
+}
+
+/// The Insights workspace body. `data` is computed once by the parent, so
+/// hover callbacks and the ~20 derived labels never re-filter the journal.
+struct InsightsWorkspaceContent: View {
+    let vm: JournalViewModel
+    let data: InsightsSnapshot
     @ObservedObject private var theme = ThemeManager.shared
     @ObservedObject private var biometricAuth = BiometricAuth.shared
+    @ObservedObject private var checkins = CheckinStore.shared
 
     @State private var drill = DrillThroughPresentation()
     @State private var workspaceSize: CGSize = .zero
 
-    private var entries: [JournalEntry] { vm.scopedAnalyticsEntries }
+    private var entries: [JournalEntry] { data.entries }
     /// Habit completion share per day (dot overlay on the heatmap).
     private var habitCompletionByDate: [Date: Double] {
         var out: [Date: Double] = [:]
-        for (key, v) in CheckinStore.shared.dailyHabitCompletion {
+        for (key, v) in checkins.dailyHabitCompletion {
             if let d = DayKey.date(from: key) { out[Calendar.current.startOfDay(for: d)] = v }
         }
         return out
     }
-    private var writingPoints: [WordPoint] { vm.wordsPerDay(for: entries, period: vm.analyticsPeriod) }
-    private var moodPoints: [MoodPoint] { vm.moodTrend(for: entries) }
-    private var distribution: [MoodCount] { vm.moodDistribution(for: entries) }
-    private var activity: [Date: JournalViewModel.DayInfo] { vm.dailyInfo(for: entries) }
-    /// Pre-computed once per render — drives chart hover lookups and drill-down.
-    private var entriesByDay: [Date: [JournalEntry]] { vm.entriesByDay(for: entries) }
+    private var entriesByDay: [Date: [JournalEntry]] { data.entriesByDay }
+
+    private var periodBinding: Binding<AnalyticsPeriod> {
+        Binding(get: { vm.analyticsPeriod }, set: { vm.analyticsPeriod = $0 })
+    }
 
     var body: some View {
         ScrollView {
@@ -40,27 +53,30 @@ struct InsightsWorkspaceView: View {
                 header
                 // Only relevant when hidden entries exist; otherwise it's noise.
                 if vm.hiddenCount > 0 { scopeCard }
-                reflectionSummary
 
-                if entries.isEmpty {
+                if data.state.isEmpty {
                     emptyState
                 } else {
+                    reflectionSummary
+                    if case .sparse(let days) = data.state { sparseNote(writingDays: days) }
                     heroMetrics
                     writingSection
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 18) {
                             moodSection.frame(maxWidth: .infinity, alignment: .leading)
-                            patternsSection.frame(width: 300, alignment: .leading)
+                            if data.state == .populated {
+                                patternsSection.frame(width: 300, alignment: .leading)
+                            }
                         }
                         VStack(alignment: .leading, spacing: 18) {
                             moodSection
-                            patternsSection
+                            if data.state == .populated { patternsSection }
                         }
                     }
                     activitySection
                     distributionSection
-                    rhythmSection
-                    SmartInsightsSections(vm: vm, entries: entries)
+                    if data.state == .populated { rhythmSection }
+                    SmartInsightsSections(vm: vm, entries: entries, contentFingerprint: data.contentFingerprint)
                     recentWritingSection
                 }
             }
@@ -159,7 +175,7 @@ struct InsightsWorkspaceView: View {
     }
 
     private var periodSelector: some View {
-        Picker("Insight period", selection: $vm.analyticsPeriod) {
+        Picker("Insight period", selection: periodBinding) {
             ForEach(AnalyticsPeriod.allCases) { period in
                 Text(period.label).tag(period)
             }
@@ -173,47 +189,15 @@ struct InsightsWorkspaceView: View {
     // MARK: - Scope
 
     private var scopeCard: some View {
-        HStack(spacing: 12) {
-            Image(systemName: biometricAuth.isAuthenticated ? "eye" : "lock.fill")
-                .font(OmegaTheme.font(.body, .semibold))
-                .foregroundColor(theme.accentColor)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(theme.accentColor.opacity(0.14)))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Reflective scope")
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.titleTextColor)
-                Text(vm.analyticsVisibilityLabel)
-                    .font(OmegaTheme.font(.meta))
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-
-            Spacer(minLength: 12)
-
-            if biometricAuth.isAuthenticated {
-                Toggle("Include private", isOn: privateInclusionBinding)
-                    .toggleStyle(.switch)
-                    .font(OmegaTheme.font(.meta, .medium))
-                    .foregroundColor(theme.bodyTextColor)
-                    .accessibilityLabel("Include private entries in Insights")
-            } else {
-                Button(action: requestPrivateInclusion) {
-                    Label("Unlock to include", systemImage: "lock.open")
-                        .font(OmegaTheme.font(.meta, .semibold))
-                        .foregroundColor(theme.accentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Authenticates before private entries can be included")
-            }
-        }
-        .padding(14)
-        .background(surface(opacity: 0.5))
-        .overlay(border)
-        .accessibilityElement(children: .contain)
+        ReflectionScopeBar(
+            visibility: data.visibility,
+            excludedCount: data.excludedPrivateCount,
+            scopeNoun: data.period == .allTime ? "your journal" : "this period",
+            isAuthenticated: biometricAuth.isAuthenticated,
+            includePrivate: privateInclusionBinding,
+            onUnlock: requestPrivateInclusion,
+            surfaceName: "Insights"
+        )
     }
 
     private var privateInclusionBinding: Binding<Bool> {
@@ -229,7 +213,7 @@ struct InsightsWorkspaceView: View {
 
     private var reflectionSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(summaryTitle)
+            Text("Your \(data.period.label.lowercased()) in writing")
                 .font(OmegaTheme.font(.meta, .medium, design: .serif))
                 .foregroundColor(theme.titleTextColor)
             Text(summaryBody)
@@ -248,17 +232,10 @@ struct InsightsWorkspaceView: View {
         )
     }
 
-    private var summaryTitle: String {
-        entries.isEmpty ? "A reflection starts with a page." : "Your \(vm.analyticsPeriod.label.lowercased()) in writing"
-    }
-
     private var summaryBody: String {
-        guard !entries.isEmpty else {
-            return "Write when you are ready. Insights will stay quiet until there is something meaningful to notice."
-        }
         let entryWord = entries.count == 1 ? "entry" : "entries"
-        let dayWord = vm.analyticsWritingDays == 1 ? "day" : "days"
-        var sentence = "You wrote \(entries.count) \(entryWord) on \(vm.analyticsWritingDays) \(dayWord), adding \(vm.analyticsWordCount.formatted()) words."
+        let dayWord = data.writingDays == 1 ? "day" : "days"
+        var sentence = "You wrote \(entries.count) \(entryWord) on \(data.writingDays) \(dayWord), adding \(data.wordCount.formatted()) words."
         if let mood = averageMood {
             sentence += " Your recorded check-ins centered around \(mood.emoji) \(mood.label.lowercased())."
         }
@@ -315,21 +292,21 @@ struct DrillThroughPresentation {
 
 // MARK: - InsightsWorkspaceView content
 
-extension InsightsWorkspaceView {
+extension InsightsWorkspaceContent {
 
     // MARK: Hero metrics
 
     private var heroMetrics: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
             ReflectionMetric(
-                value: "\(vm.analyticsWritingDays)",
+                value: "\(data.writingDays)",
                 label: "Writing days",
-                detail: vm.analyticsPeriod.label,
+                detail: data.period.label,
                 icon: "calendar.badge.checkmark",
                 tint: theme.accentColor
             )
             ReflectionMetric(
-                value: vm.analyticsWordCount.formatted(),
+                value: data.wordCount.formatted(),
                 label: "Words written",
                 detail: "Across \(entries.count) \(entries.count == 1 ? "entry" : "entries")",
                 icon: "text.word.spacing",
@@ -352,7 +329,7 @@ extension InsightsWorkspaceView {
             ReflectionMetric(
                 value: entriesPerWritingDay.map { String(format: "%.1f", $0) } ?? "—",
                 label: "Entries per writing day",
-                detail: averageMood == nil ? "No rhythm yet" : "Your cadence",
+                detail: entriesPerWritingDay == nil ? "No rhythm yet" : "Your cadence",
                 icon: "square.stack.3d.up",
                 tint: .indigo
             )
@@ -363,13 +340,13 @@ extension InsightsWorkspaceView {
 
     private var writingSection: some View {
         InsightSection(title: "Writing volume", subtitle: "Words recorded across your selected period") {
-            WritingVolumeChart(points: writingPoints)
+            WritingVolumeChart(points: data.writingPoints)
         }
     }
 
     private var moodSection: some View {
         InsightSection(title: "Mood check-ins", subtitle: "Hover a point to see the entries behind it · click to open the day") {
-            MoodCheckInChart(points: moodPoints, hoverTitleProvider: moodHoverTitle, onOpenDay: { openDay($0.date) })
+            MoodCheckInChart(points: data.moodPoints, hoverTitleProvider: { data.moodHoverTitle(for: $0) }, onOpenDay: { openDay($0.date) })
         }
     }
 
@@ -391,7 +368,7 @@ extension InsightsWorkspaceView {
                 PatternRow(
                     icon: "flame",
                     title: "Current rhythm",
-                    value: scopedWritingStreak > 0 ? "\(scopedWritingStreak)-day streak" : "Start when ready",
+                    value: data.streak > 0 ? "\(data.streak)-day streak" : "Start when ready",
                     tint: .orange
                 )
                 PatternRow(
@@ -406,30 +383,31 @@ extension InsightsWorkspaceView {
 
     private var activitySection: some View {
         InsightSection(title: "Writing activity", subtitle: "Hover for a day's story · click to open its entries") {
-            HeatmapView(info: activity, habitCompletion: habitCompletionByDate, onOpenDate: openDay)
+            HeatmapView(info: data.activity, habitCompletion: habitCompletionByDate,
+                        periodStart: data.periodStart, onOpenDate: openDay)
         }
     }
 
     private var distributionSection: some View {
         InsightSection(title: "Mood distribution", subtitle: "How your check-ins lean across the scale") {
-            MoodDistributionRow(data: distribution, averageMood: averageMood)
+            MoodDistributionRow(data: data.distribution, averageMood: averageMood)
         }
     }
 
     private var rhythmSection: some View {
         InsightSection(title: "Weekday rhythm", subtitle: "Which days carry your writing") {
-            WeekdayRhythmChart(data: weekdayCounts)
+            WeekdayRhythmChart(data: data.weekdayCounts)
         }
     }
 
     private var recentWritingSection: some View {
         InsightSection(title: "Recent writing", subtitle: "Click a row to open the entry right here") {
-            let recent = entries.sorted { $0.createdAt > $1.createdAt }.prefix(4)
+            let recent = data.recent
             if recent.isEmpty {
                 chartEmptyState("Nothing written in this period yet.", icon: "book.closed")
             } else {
                 VStack(spacing: 8) {
-                    ForEach(Array(recent), id: \.id) { entry in
+                    ForEach(recent, id: \.id) { entry in
                         InsightsEntryRow(entry: entry, onOpen: { openEntry(entry) })
                     }
                 }
@@ -437,103 +415,99 @@ extension InsightsWorkspaceView {
         }
     }
 
-    // MARK: Empty state
+    // MARK: Empty and sparse states
 
+    /// One state per reason — empty journal, quiet period, or only private
+    /// entries — each with the action that actually changes it.
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "book.closed")
+        let copy = ReflectionEmptyCopy(state: data.state, period: data.period,
+                                     isAuthenticated: biometricAuth.isAuthenticated)
+        return VStack(spacing: 12) {
+            Image(systemName: copy.icon)
                 .font(OmegaTheme.font(.display, .light))
                 .foregroundColor(theme.accentColor.opacity(0.7))
-            Text("No writing in this period")
+                .accessibilityHidden(true)
+            Text(copy.title)
                 .font(OmegaTheme.font(.heading, .semibold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
-            Text("Try a longer period, or begin a new entry when the moment feels right.")
+            Text(copy.message)
                 .font(OmegaTheme.font(.caption))
                 .foregroundColor(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
-            Button {
-                NotificationCenter.default.post(name: .newEntry, object: nil)
-            } label: {
-                Label("Write an entry", systemImage: "square.and.pencil")
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.onAccentColor)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(theme.accentColor))
+                .frame(maxWidth: 420)
+            HStack(spacing: 10) {
+                ForEach(copy.actions, id: \.self) { action in
+                    emptyActionButton(action, primary: action == copy.actions.first)
+                }
             }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 52)
         .background(surface(opacity: 0.42))
         .overlay(border)
+        .accessibilityElement(children: .contain)
     }
 
-    // MARK: Chart hover helpers
+    private func emptyActionButton(_ action: ReflectionEmptyCopy.Action, primary: Bool) -> some View {
+        Button { perform(action) } label: {
+            Label(action.title(isAuthenticated: biometricAuth.isAuthenticated), systemImage: action.icon)
+                .font(OmegaTheme.font(.caption, .semibold))
+                .foregroundColor(primary ? theme.onAccentColor : theme.accentColor)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(primary ? theme.accentColor : theme.accentColor.opacity(0.14)))
+        }
+        .buttonStyle(.plain)
+    }
 
-    /// Titles of the entries behind a mood point — what the hover card shows.
-    private func moodHoverTitle(for point: MoodPoint) -> String {
-        let day = Calendar.current.startOfDay(for: point.date)
-        let dayEntries = entriesByDay[day] ?? []
-        guard !dayEntries.isEmpty else { return point.avg.formatted(.number.precision(.fractionLength(1))) }
-        return dayEntries
-            .sorted { $0.createdAt < $1.createdAt }
-            .map(\.displayTitle)
-            .joined(separator: " · ")
+    private func perform(_ action: ReflectionEmptyCopy.Action) {
+        switch action {
+        case .write:
+            NotificationCenter.default.post(name: .newEntry, object: nil)
+        case .showAllTime:
+            vm.analyticsPeriod = .allTime
+        case .includePrivate:
+            // Same rule as the scope bar: inclusion needs an authenticated session.
+            if biometricAuth.isAuthenticated {
+                vm.analyticsVisibility = .includePrivate
+            } else {
+                requestPrivateInclusion()
+            }
+        }
+    }
+
+    private func sparseNote(writingDays: Int) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "leaf")
+                .foregroundColor(theme.accentColor)
+                .accessibilityHidden(true)
+            Text(ReflectionEmptyCopy.sparseMessage(writingDays: writingDays))
+                .font(OmegaTheme.font(.caption))
+                .foregroundColor(theme.secondaryTextColor)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(surface(opacity: 0.32))
+        .overlay(border)
     }
 
     // MARK: Derived descriptions
 
-    private var averageMood: Mood? {
-        guard let average = vm.analyticsAverageMood else { return nil }
-        return Mood(rawValue: Int(average.rounded())) ?? .neutral
-    }
-
-    private var bestDay: WordPoint? {
-        writingPoints.max { $0.words < $1.words }.flatMap { $0.words > 0 ? $0 : nil }
-    }
-
-    private var entriesPerWritingDay: Double? {
-        guard vm.analyticsWritingDays > 0 else { return nil }
-        return Double(entries.count) / Double(vm.analyticsWritingDays)
-    }
+    private var averageMood: Mood? { data.averageMood }
+    private var bestDay: WordPoint? { data.bestDay }
+    private var entriesPerWritingDay: Double? { data.entriesPerWritingDay }
 
     private var averageWordsPerEntry: String {
-        let count = entries.count
-        guard count > 0 else { return "Not enough data" }
-        let words = vm.analyticsWordCount / count
-        return "\(words) words"
-    }
-
-    private var weekdayCounts: [WeekdayCount] {
-        let cal = Calendar.current
-        var counts: [Int: Int] = [:]
-        for entry in entries {
-            counts[cal.component(.weekday, from: entry.createdAt), default: 0] += 1
-        }
-        return (1...7).map {
-            WeekdayCount(weekday: $0, symbol: cal.veryShortWeekdaySymbols[$0 - 1], count: counts[$0] ?? 0)
-        }
-    }
-
-    /// DST-safe strict streak (see `StreakHistory.currentLength`).
-    private var scopedWritingStreak: Int {
-        StreakHistory.currentLength(days: Set(entries.map(\.createdAt)))
-    }
-
-    private var activitySamples: [ActivitySample] {
-        entries.map { ActivitySample(date: $0.createdAt, words: $0.wordCount) }
+        data.averageWordsPerEntry.map { "\($0) words" } ?? "Not enough data"
     }
 
     /// Deterministic on ties (lowest weekday wins).
-    private var mostProductiveDay: String {
-        ActivityStats.mostProductiveWeekday(activitySamples) ?? "Not enough data"
-    }
+    private var mostProductiveDay: String { data.mostProductiveDay ?? "Not enough data" }
 
     /// Deterministic on ties (earliest hour wins).
-    private var mostProductiveHour: String {
-        ActivityStats.mostProductiveHour(activitySamples).map(ActivityStats.hourLabel) ?? "Not enough data"
-    }
+    private var mostProductiveHour: String { data.mostProductiveHour ?? "Not enough data" }
 
     private func requestPrivateInclusion() {
         Task { @MainActor in

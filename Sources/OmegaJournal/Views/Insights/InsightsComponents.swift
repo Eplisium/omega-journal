@@ -517,3 +517,59 @@ func chartEmptyState(_ message: String, icon: String) -> some View {
         Spacer()
     }
 }
+
+// MARK: - Compact privacy scope bar (Calendar + Insights)
+
+/// One quiet line that says which privacy scope a reflective surface uses and
+/// how many private entries it leaves out — replacing the old two-line
+/// "Reflective scope" card. It only renders the existing inclusion rule:
+/// including private entries still needs an authenticated session.
+struct ReflectionScopeBar: View {
+    let visibility: AnalyticsVisibility
+    let excludedCount: Int
+    /// e.g. "this period", "September 2026".
+    let scopeNoun: String
+    let isAuthenticated: Bool
+    @Binding var includePrivate: Bool
+    let onUnlock: () -> Void
+    var surfaceName: String = "Insights"
+
+    @ObservedObject private var theme = ThemeManager.shared
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: visibility == .includePrivate ? "eye" : "lock.fill")
+                .font(OmegaTheme.font(.meta, .semibold))
+                .foregroundColor(theme.accentColor)
+                .accessibilityHidden(true)
+            Text(ReflectionScopeCopy.line(visibility: visibility, excludedCount: excludedCount, scopeNoun: scopeNoun))
+                .font(OmegaTheme.font(.meta, .medium))
+                .foregroundColor(theme.secondaryTextColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            if isAuthenticated {
+                Toggle("Include private", isOn: $includePrivate)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(OmegaTheme.font(.meta, .medium))
+                    .foregroundColor(theme.bodyTextColor)
+                    .accessibilityLabel("Include private entries in \(surfaceName)")
+            } else {
+                Button(action: onUnlock) {
+                    Label("Unlock to include", systemImage: "lock.open")
+                        .font(OmegaTheme.font(.meta, .semibold))
+                        .foregroundColor(theme.accentColor)
+                }
+                .buttonStyle(.plain)
+                .omegaTooltip("Authenticate before including private entries")
+                .accessibilityHint("Authenticates before private entries can be included")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(theme.accentColor.opacity(0.07)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Privacy scope")
+    }
+}
