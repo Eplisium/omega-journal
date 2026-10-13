@@ -25,6 +25,12 @@ struct ReadView: View {
         VStack(spacing: 0) {
             toolbar
             Divider().opacity(0.25)
+            // A failed save stays visible here after the editor (and its
+            // toast) are gone. Reason only — safe for locked hidden entries.
+            if let reason = vm.unsavedFailureReason(entryId: entry.id) {
+                UnsavedEntryBanner(reason: reason, onRetry: { vm.retryFailedSaves() })
+                Divider().opacity(0.25)
+            }
 
             ScrollViewReader { proxy in
             ScrollView {
@@ -564,5 +570,60 @@ struct ReadView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Unsaved banner
+
+/// Persistent, non-blocking "Not saved · reason · Retry" strip shown in the
+/// reader while the entry's latest text is only in memory.
+struct UnsavedEntryBanner: View {
+    let reason: SaveFailureReason
+    let onRetry: () -> Void
+    /// Test seam: reports the Retry button's frame.
+    var onFrame: ((CGRect) -> Void)? = nil
+
+    @ObservedObject private var theme = ThemeManager.shared
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                Text(SaveUnsavedPresentation.bannerText(reason))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(OmegaTheme.font(.caption, .medium))
+            .foregroundColor(theme.dangerColor)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(SaveUnsavedPresentation.bannerAccessibilityLabel(reason))
+            .accessibilityIdentifier("reader-unsaved-banner")
+            .layoutPriority(1)
+            Spacer(minLength: 4)
+            Button(SaveStatusPresentation.retryLabel, action: onRetry)
+                .buttonStyle(.plain)
+                .font(OmegaTheme.font(.caption, .semibold))
+                .foregroundColor(theme.accentColor)
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .background(Capsule().fill(theme.accentColor.opacity(0.14)))
+                .accessibilityLabel(SaveStatusPresentation.retryAccessibilityLabel)
+                .accessibilityIdentifier("reader-unsaved-retry")
+                .help(SaveStatusPresentation.help(.failed(reason)) ?? "")
+                .fixedSize()
+                .layoutPriority(2)
+                .background {
+                    if let report = onFrame {
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { report(geo.frame(in: .global)) }
+                                .onChange(of: geo.frame(in: .global)) { _, f in report(f) }
+                        }
+                    }
+                }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.dangerColor.opacity(0.10))
     }
 }

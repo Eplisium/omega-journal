@@ -32,7 +32,11 @@ extension JournalViewModel {
             showToast("Couldn't rename “\(old)”", isError: true)
             return
         }
-        fixFiltersAfterRename(old: old, new: TagPath.normalize(new) ?? new)
+        let target = TagPath.normalize(new) ?? new
+        fixFiltersAfterRename(old: old, new: target)
+        // Unsaved snapshots carry their own tag list; rewrite it before the
+        // reload re-applies them, or a retry would resurrect the old tag.
+        applyTagRewriteToUnsavedSnapshots(.rename(from: old, to: target))
         reload()
         showToast("Renamed to #\(TagPath.normalize(new) ?? new)")
     }
@@ -47,6 +51,7 @@ extension JournalViewModel {
         flushBeforeImmediateMutation()
         for name in db.allTagNames() where TagPath.isSameOrDescendant(name, of: tag) { db.deleteTag(name) }
         filter.tags = filter.tags.filter { !TagPath.isSameOrDescendant($0, of: tag) }
+        applyTagRewriteToUnsavedSnapshots(.delete(tag))
         reload()
         showToast("Deleted #\(tag)")
     }

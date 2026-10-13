@@ -146,6 +146,12 @@ struct EditorView: View {
         .onChange(of: title) { _, _ in persist() }
         .onChange(of: mood) { _, _ in persist() }
         .onChange(of: tags) { _, _ in persist() }
+        // A tag rename/delete elsewhere rewrites this editor's tag list the
+        // same way, so the next keystroke can't save the old tag back.
+        .onReceive(vm.$lastTagRewrite.dropFirst().compactMap { $0 }) { rewrite in
+            let rewritten = rewrite.apply(to: tags)
+            if rewritten != tags { tags = rewritten }
+        }
         .onChange(of: stamp) { _, _ in persist() }
         .onChange(of: fontSize) { _, new in
             vm.editorFontSize = new

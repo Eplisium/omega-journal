@@ -73,7 +73,24 @@ final class JournalViewModel: ObservableObject {
     /// failure: each flush, the next edit, and the explicit Retry action try
     /// them again, and `reload()` re-applies them so stale storage cannot
     /// replace text the user typed.
-    var unsavedSnapshots: [String: JournalEntry] = [:]
+    var unsavedSnapshots: [String: JournalEntry] = [:] {
+        didSet {
+            // Publish only real changes: every successful write clears its id,
+            // which must not wake every observer on each keystroke save.
+            let ids = Set(unsavedSnapshots.keys)
+            if ids != unsavedEntryIds { unsavedEntryIds = ids }
+            unsavedReasons = unsavedReasons.filter { ids.contains($0.key) }
+        }
+    }
+    /// Ids of entries with an unsaved snapshot. Published so views outside the
+    /// editor (reader banner, list rows, sidebar) keep showing the failure
+    /// after the editor closes and the toast is gone.
+    @Published private(set) var unsavedEntryIds: Set<String> = []
+    /// Failure reason per unsaved entry (fixed wording, never content).
+    var unsavedReasons: [String: SaveFailureReason] = [:]
+    /// Last tag rename/delete, applied to unsaved snapshots and published so an
+    /// open editor rewrites its own tag list the same way.
+    @Published private(set) var lastTagRewrite: SaveTagRewrite?
     /// Reason for the most recent failed snapshot write.
     var lastSaveFailure: SaveFailureReason?
     /// The failure toast is shown once per failure episode, not per retry.
@@ -582,6 +599,41 @@ final class JournalViewModel: ObservableObject {
 
     // MARK: Save failure handling
 
+    /// Number of entries whose latest text is not in storage.
+    var unsavedEntryCount: Int { unsavedEntryIds.count }
+
+    /// Whether `entryId` has text that failed to save (row/list badge seam).
+    func hasUnsavedChanges(entryId: String) -> Bool { unsavedEntryIds.contains(entryId) }
+
+    /// Why `entryId`'s last write failed, or nil when it is saved.
+    func unsavedFailureReason(entryId: String) -> SaveFailureReason? {
+        guard unsavedEntryIds.contains(entryId) else { return nil }
+        return unsavedReasons[entryId] ?? lastSaveFailure ?? .writeFailed
+    }
+
+    /// Quit check: writes the queued snapshot and retries failed ones, then
+    /// asks for confirmation only if something is still unsaved.
+    func quitDecision() -> SaveQuitDecision {
+        flushPendingSave()
+        return SaveQuitDecision.decide(unsavedCount: unsavedEntryCount)
+    }
+
+    /// Applies a tag rename/delete to every snapshot still held in memory
+    /// (queued or failed). Retries write the snapshot's tags, so without this
+    /// a pending retry would bring the old tag back.
+    func applyTagRewriteToUnsavedSnapshots(_ rewrite: SaveTagRewrite) {
+        if var queued = pendingSave {
+            queued.tags = rewrite.apply(to: queued.tags)
+            pendingSave = queued
+        }
+        for id in Array(unsavedSnapshots.keys) {
+            guard let tags = unsavedSnapshots[id]?.tags else { continue }
+            let rewritten = rewrite.apply(to: tags)
+            if rewritten != tags { unsavedSnapshots[id]?.tags = rewritten }
+        }
+        lastTagRewrite = rewrite
+    }
+
     /// `.failed(reason)` while anything is unsaved, else nil.
     var currentFailureState: SaveState? {
         unsavedSnapshots.isEmpty ? nil : .failed(lastSaveFailure ?? .writeFailed)
@@ -589,11 +641,13 @@ final class JournalViewModel: ObservableObject {
 
     /// The single write path for autosave snapshots and retries.
     func writeEntrySnapshot(_ entry: JournalEntry) throws {
+        // The seam replaces only the raw write; the post-write check below
+        // always runs, so an injected writer exercises the same rules.
         if let override = saveWriterOverride {
             try override(entry)
-            return
+        } else {
+            try db.saveEntryChecked(entry)
         }
-        try db.saveEntryChecked(entry)
         // saveEntry keeps an undecryptable stored body (it refuses to replace
         // ciphertext it cannot read) yet commits the metadata — so the write
         // "succeeds" while the new text was not stored. Treat that as failed.
@@ -611,8 +665,10 @@ final class JournalViewModel: ObservableObject {
             unsavedSnapshots[snapshot.id] = nil
             return true
         } catch {
+            let reason = Self.saveFailureReason(for: error, db: db)
             unsavedSnapshots[snapshot.id] = snapshot
-            lastSaveFailure = Self.saveFailureReason(for: error, db: db)
+            unsavedReasons[snapshot.id] = reason
+            lastSaveFailure = reason
             return false
         }
     }
