@@ -146,6 +146,13 @@ struct EntryRow: View {
 
     var titleLine: some View {
         HStack(spacing: 5) {
+            if vm.hasUnsavedChanges(entryId: entry.id) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(OmegaTheme.font(.meta))
+                    .foregroundColor(theme.dangerColor)
+                    .help("Not saved")
+                    .accessibilityLabel(SaveUnsavedPresentation.countLabel(1) ?? "Not saved")
+            }
             if entry.isPinned {
                 Image(systemName: "pin.fill").font(OmegaTheme.font(.meta)).foregroundColor(theme.accentColor)
             }

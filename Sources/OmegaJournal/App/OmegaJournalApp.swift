@@ -1,4 +1,5 @@
 import SwiftUI
+import OmegaJournalCore
 import AppKit
 
 // MARK: - App Entry Point
@@ -176,6 +177,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// Warn before quitting while a save has failed. `quitDecision()` first
+    /// flushes and retries, so this only asks when text is genuinely unsaved.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard case .confirm(let count) = QuitGuard.check?() ?? .terminate else { return .terminateNow }
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = SaveUnsavedPresentation.quitAlertTitle
+            alert.informativeText = SaveUnsavedPresentation.quitAlertMessage(unsavedCount: count)
+            alert.addButton(withTitle: SaveUnsavedPresentation.quitCancelButton)
+            alert.addButton(withTitle: SaveUnsavedPresentation.quitAnywayButton)
+            return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Make sure any debounced autosave has landed before the process goes
         // away. ContentView owns the one-and-only JournalViewModel (a
@@ -186,6 +202,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .quitTimeSave, object: nil)
         DatabaseManager.shared.purgeExpiredTrash()
     }
+}
+
+/// Bridge from the AppDelegate to the view-owned JournalViewModel.
+@MainActor enum QuitGuard {
+    static var check: (() -> SaveQuitDecision)?
 }
 
 enum ShellPrefs {

@@ -47,7 +47,10 @@ struct ContentView: View {
         .sheet(isPresented: $onboarding.isPresentingWhatsNew) {
             WhatsNewView(onboarding: onboarding)
         }
-        .onAppear { onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty) }
+        .onAppear {
+            onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
+            QuitGuard.check = { [weak vm] in vm?.quitDecision() ?? .terminate }
+        }
         .modifier(ShellEntryCommands(vm: vm, selection: $sidebarSelection))
         .modifier(ShellLifecycle(vm: vm, selection: $sidebarSelection, showTemplatePicker: $showTemplatePicker,
                                  storedSelection: $storedSelection, didRestore: $didRestoreSelection))

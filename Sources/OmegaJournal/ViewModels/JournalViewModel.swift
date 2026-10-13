@@ -594,6 +594,11 @@ final class JournalViewModel: ObservableObject {
         flushPendingSave()
         let ok = unsavedSnapshots.isEmpty
         if ok && hadFailures { showToast("Saved") }
+        if !ok, let reason = lastSaveFailure {
+            // The once-per-failure toast already fired; an explicit Retry that
+            // fails again still needs feedback.
+            showToast("Still not saved — \(reason.message). Your text is kept.", isError: true)
+        }
         return ok
     }
 

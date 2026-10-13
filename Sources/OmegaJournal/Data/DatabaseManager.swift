@@ -155,6 +155,12 @@ final class DatabaseManager {
             return
         }
         exec("PRAGMA busy_timeout=5000;")
+        // SQLite silently opens an unwritable file read-only; say so up front
+        // instead of letting every later save fail without explanation.
+        if sqlite3_db_readonly(db, "main") == 1 {
+            enterReadOnlyMode("The journal file is read-only, so changes can't be saved. Check its permissions, then reopen Omega Journal.")
+            return
+        }
         exec("PRAGMA journal_mode=WAL;")
         exec("PRAGMA synchronous=NORMAL;")
         exec("PRAGMA foreign_keys=ON;")
@@ -164,8 +170,10 @@ final class DatabaseManager {
 
     /// Refuses further writes on this connection and records why.
     func enterReadOnlyMode(_ reason: String) {
+        // Keep the first, most specific reason (e.g. "file is read-only")
+        // rather than a later generic consequence of it.
+        if !isReadOnly || startupError == nil { startupError = reason }
         isReadOnly = true
-        startupError = reason
         _ = sqlite3_exec(db, "PRAGMA query_only=ON;", nil, nil, nil)
         reportError(reason)
     }

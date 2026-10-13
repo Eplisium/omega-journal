@@ -203,9 +203,10 @@ struct WritingFooterView: View {
     /// layout priority so it is the last thing a narrow column squeezes.
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            row(showDetails: true, showSession: true)
-            row(showDetails: false, showSession: true)
-            row(showDetails: false, showSession: false)
+            row(showDetails: true, showSession: true, showReason: true)
+            row(showDetails: false, showSession: true, showReason: true)
+            row(showDetails: false, showSession: false, showReason: true)
+            row(showDetails: false, showSession: false, showReason: false)
         }
         .font(OmegaTheme.font(.meta))
         .foregroundColor(theme.secondaryTextColor)
@@ -215,7 +216,7 @@ struct WritingFooterView: View {
         .background(theme.cardColor.opacity(0.3))
     }
 
-    private func row(showDetails: Bool, showSession: Bool) -> some View {
+    private func row(showDetails: Bool, showSession: Bool, showReason: Bool) -> some View {
         HStack(spacing: 12) {
             Label("\(wordCount) words", systemImage: "text.word.spacing")
                 .fixedSize()
@@ -246,11 +247,11 @@ struct WritingFooterView: View {
             if isZen {
                 Text("⎋ exit zen").foregroundColor(theme.secondaryTextColor.opacity(0.7)).fixedSize()
             }
-            saveIndicator
+            saveIndicator(showReason: showReason)
         }
     }
 
-    private var saveIndicator: some View {
+    private func saveIndicator(showReason: Bool) -> some View {
         let pending = saveState == .pending
         let failed = saveState.isFailed
         let tint: Color = failed ? theme.dangerColor : theme.secondaryTextColor.opacity(pending ? 0.9 : 0.7)
@@ -258,6 +259,10 @@ struct WritingFooterView: View {
             HStack(spacing: 4) {
                 Image(systemName: SaveStatusPresentation.systemImage(saveState))
                 Text(SaveStatusPresentation.label(saveState))
+                // The reason is a fixed, body-free message (SaveFailureReason).
+                if showReason, let reason = saveState.failureReason {
+                    Text("— \(reason.message)").lineLimit(1)
+                }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(SaveStatusPresentation.accessibilityLabel(saveState))

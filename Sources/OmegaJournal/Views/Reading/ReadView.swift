@@ -400,7 +400,7 @@ struct ReadView: View {
                 readingTime: isContentLocked ? "" : entry.readingTime,
                 stampSummary: isContentLocked ? nil : bodyParts.stamp.flatMap { $0.isEmpty ? nil : $0.summary },
                 canShowContent: !isContentLocked)
-            HStack(spacing: 8) {
+            FlowLayout(spacing: 8) {
                 ForEach(Array(chips.enumerated()), id: \.offset) { index, text in
                     metaChip(text, color: index == 0 ? entry.mood.color : nil)
                 }
@@ -484,6 +484,8 @@ struct ReadView: View {
     private func metaChip(_ text: String, color: Color? = nil) -> some View {
         Text(text)
             .font(OmegaTheme.font(.meta))
+            .lineLimit(1)
+            .fixedSize()
             .foregroundColor(color ?? theme.secondaryTextColor)
             .padding(.horizontal, 7)
             .padding(.vertical, 2.5)
