@@ -220,7 +220,7 @@ struct SettingsView: View {
         case .writingGoals: goalsCard(card)
         case .quickCapture: quickCaptureCard(card)
         case .reviewReminders: ReviewRemindersPanel()
-        case .periodicReview: ReviewCard(vm: vm)
+        case .periodicReview: PeriodicReviewPanel(vm: vm)
         case .aiAssist: AIAssistPanel()
         case .whatsProtected: protectionCard(card)
         case .appLock: AppLockPanel()

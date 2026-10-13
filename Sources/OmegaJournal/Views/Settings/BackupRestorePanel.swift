@@ -254,6 +254,42 @@ struct ReviewRemindersPanel: View {
     }
 }
 
+/// Settings version of the Today review card, drawn as a regular settings card
+/// (the shared `ReviewCard` uses the large dashboard header, which looked out of
+/// place between settings cards).
+struct PeriodicReviewPanel: View {
+    @ObservedObject var vm: JournalViewModel
+    @ObservedObject private var theme = ThemeManager.shared
+    @State private var period: ReviewPeriod = .week
+
+    var body: some View {
+        let draft = vm.reviewDraft(period)
+        let span = period == .week ? "week" : "month"
+        PanelCard(card: .periodicReview,
+                  footnote: "Saves a summary of the period's entries as a new entry you can add to.") {
+            SettingsRow(title: "Period") {
+                Picker("Review period", selection: $period) {
+                    ForEach(ReviewPeriod.allCases) { Text($0 == .week ? "This week" : "This month").tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            SettingsRowDivider()
+            SettingsRow(
+                title: draft.entryCount == 0 ? "Nothing written yet this \(span)" : "\(draft.entryCount) \(draft.entryCount == 1 ? "entry" : "entries") this \(span)",
+                subtitle: draft.entryCount == 0 ? "Write something first, then come back." : nil
+            ) {
+                SettingsPillButton(title: "Save Review as Entry", icon: "square.and.arrow.down") {
+                    vm.saveReviewAsEntry(period)
+                }
+                .disabled(draft.entryCount == 0)
+                .opacity(draft.entryCount == 0 ? 0.45 : 1)
+            }
+        }
+    }
+}
+
 struct AIAssistPanel: View {
     @ObservedObject private var theme = ThemeManager.shared
     @State private var aiEnabled = SmartAssist.isEnabled()
