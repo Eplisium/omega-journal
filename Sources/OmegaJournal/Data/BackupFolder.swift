@@ -33,8 +33,18 @@ extension DatabaseManager {
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
-    func setChosenBackupFolder(_ url: URL?) {
+    /// Saves (or clears) the extra backup folder. Refuses the local backups
+    /// directory itself — mirroring a file onto itself would delete it.
+    @discardableResult
+    func setChosenBackupFolder(_ url: URL?) -> Bool {
+        if let url, Self.samePath(url, backupsDirectory) { return false }
         setSetting(Self.backupFolderKey, value: url?.path ?? "")
+        return true
+    }
+
+    /// Path equality after standardizing and resolving symlinks (`/var` vs `/private/var`, trailing `/`).
+    static func samePath(_ a: URL, _ b: URL) -> Bool {
+        a.standardizedFileURL.resolvingSymlinksInPath().path == b.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     /// Copies a freshly written daily backup into the chosen folder and prunes old copies there.
@@ -45,6 +55,9 @@ extension DatabaseManager {
         do {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             let dest = folder.appendingPathComponent(source.lastPathComponent)
+            // The chosen folder may BE the local backups folder: removing `dest`
+            // would then delete the backup we just wrote.
+            guard !Self.samePath(dest, source) else { return }
             try? fm.removeItem(at: dest)
             try fm.copyItem(at: source, to: dest)
             cleanupOldBackups(in: folder, prefix: Self.dailyBackupPrefix, keep: Self.dailyBackupsToKeep * 4)

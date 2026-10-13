@@ -132,7 +132,9 @@ struct BackupPanel: View {
         guard FileManager.default.isWritableFile(atPath: url.path) else {
             report("That folder isn't writable.", error: true); return
         }
-        vm.db.setChosenBackupFolder(url)
+        guard vm.db.setChosenBackupFolder(url) else {
+            report("That is the journal's own backups folder — choose a different one.", error: true); return
+        }
         refresh()
         report("Daily backups will also be copied to “\(url.lastPathComponent)”.")
     }
@@ -158,12 +160,27 @@ struct BackupPanel: View {
         vm.flushBeforeImmediateMutation()
         do {
             try vm.db.restoreBackup(from: b.url)
-            vm.reload()
+            vm.reloadAfterRestore()
             CheckinStore.shared.reload()
             report("Restored \(b.date.formatted(date: .abbreviated, time: .shortened)).")
             refresh()
         } catch { report(error.localizedDescription, error: true) }
         pendingRestore = nil
+    }
+}
+
+extension JournalViewModel {
+    /// After the database file is swapped, every piece of state read from it must be
+    /// re-read: notebooks (dropping an active notebook that no longer exists), smart
+    /// folders, saved searches, persisted view state, templates, then the entry lists.
+    func reloadAfterRestore() {
+        loadPersistedViewState()
+        loadOrganizationState()
+        if let active = activeJournalId, !journals.contains(where: { $0.id == active }) {
+            activeJournalId = nil
+        }
+        loadTemplates()
+        reload()
     }
 }
 
