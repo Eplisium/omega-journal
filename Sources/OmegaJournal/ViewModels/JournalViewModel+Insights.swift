@@ -158,21 +158,28 @@ extension JournalViewModel {
     }
 
     /// The privacy-aware memory surface used by Today and reflection pages.
+    /// Reads the reflective (through-today) scope, never `calendarEntries`, so
+    /// a future-dated entry can't surface as a memory.
     var reflectiveOnThisDay: [JournalEntry] {
-        onThisDay(in: calendarEntries)
+        reflectiveOnThisDay(relativeTo: Date())
+    }
+
+    func reflectiveOnThisDay(relativeTo reference: Date, calendar: Calendar = .current) -> [JournalEntry] {
+        Self.onThisDay(in: reflectiveEntries(relativeTo: reference), reference: reference, calendar: calendar)
     }
 
     func onThisDay(in source: [JournalEntry]) -> [JournalEntry] {
         Self.onThisDay(in: source)
     }
 
-    /// Entries on `reference`'s month/day in other years, newest first. On
+    /// Entries on `reference`'s month/day in earlier years, newest first (a
+    /// future-dated entry on the same month/day is not a memory). On
     /// Feb 28 of a non-leap year, Feb 29 memories are included too.
     nonisolated static func onThisDay(in source: [JournalEntry], reference: Date = Date(),
                                       calendar cal: Calendar = .current) -> [JournalEntry] {
         let thisYear = cal.component(.year, from: reference)
         return source.filter { e in
-            cal.component(.year, from: e.createdAt) != thisYear
+            cal.component(.year, from: e.createdAt) < thisYear
                 && OnThisDayGrouping.isSameMonthDay(e.createdAt, as: reference, calendar: cal)
         }
         .sorted { $0.createdAt > $1.createdAt }

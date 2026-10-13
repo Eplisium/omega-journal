@@ -106,7 +106,7 @@ extension JournalViewModel {
 
     /// Memories from this month/day, grouped by year (newest first). Respects the hidden-entry scope.
     var onThisDayByYear: [OnThisDayYear<JournalEntry>] {
-        OnThisDayGrouping.group(calendarEntries, date: { $0.createdAt })
+        OnThisDayGrouping.group(reflectiveEntries(), date: { $0.createdAt })
     }
 
     // MARK: Weekly / monthly review → entry

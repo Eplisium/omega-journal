@@ -36,7 +36,8 @@ struct TodayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var recentEntries: [JournalEntry] {
-        Array(vm.calendarEntries.sorted { $0.createdAt > $1.createdAt }.prefix(3))
+        // Reflective scope: a future-dated entry is not "recent writing".
+        vm.recentReflectiveEntries(limit: 3)
     }
 
     var body: some View {

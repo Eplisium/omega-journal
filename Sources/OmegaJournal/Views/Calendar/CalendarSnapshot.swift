@@ -52,10 +52,11 @@ struct CalendarMonthSnapshot {
         averageMood = Self.averageMood(monthEntries)
 
         if visibility == .visibleOnly {
-            // Same "through today" bound the reflective scope applies.
-            let endOfToday = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: reference)) ?? reference
+            // Calendar shows every date (future included), so the date-only
+            // private count covers the whole month too. `reference` is kept for
+            // call-site compatibility.
             excludedPrivateCount = journal.filter {
-                $0.isHidden && inMonth($0.createdAt) && $0.createdAt < endOfToday
+                $0.isHidden && inMonth($0.createdAt)
             }.count
         } else {
             excludedPrivateCount = 0

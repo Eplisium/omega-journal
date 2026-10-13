@@ -34,8 +34,24 @@ extension JournalViewModel {
 
     /// Non-punitive streak: see `StreakCalculator` (one rest day per 7 is
     /// forgiven; weekly-goal mode counts weeks that hit the target).
+    /// Writing days up to and including `reference`'s day. Future-dated entries
+    /// are planned, not written, so they must never extend a streak record.
+    nonisolated static func pastWritingDays(_ days: Set<Date>, relativeTo reference: Date = Date(),
+                                            calendar: Calendar = .current) -> Set<Date> {
+        let today = calendar.startOfDay(for: reference)
+        return Set(days.map { calendar.startOfDay(for: $0) }.filter { $0 <= today })
+    }
+
+    /// Streak math over past writing days only (see `pastWritingDays`).
+    nonisolated static func reflectiveStreakSummary(writingDays: Set<Date>, mode: StreakMode, weeklyTarget: Int = 3,
+                                                    relativeTo reference: Date = Date(),
+                                                    calendar: Calendar = .current) -> StreakSummary {
+        StreakCalculator.summary(writingDays: pastWritingDays(writingDays, relativeTo: reference, calendar: calendar),
+                                 mode: mode, weeklyTarget: weeklyTarget, today: reference, calendar: calendar)
+    }
+
     var streakSummary: StreakSummary {
-        GoalManager.shared.streakSummary(writingDays: writingDays)
+        GoalManager.shared.streakSummary(writingDays: Self.pastWritingDays(writingDays))
     }
     var writingStreak: Int { streakSummary.current }
     var longestStreak: Int { streakSummary.longest }

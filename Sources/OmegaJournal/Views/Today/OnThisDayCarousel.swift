@@ -4,7 +4,7 @@ import OmegaJournalCore
 // MARK: - On This Day v2
 
 /// Multi-year memory carousel ("1 year ago", "2 years ago"…). Hidden entries are masked
-/// (only appear when the privacy scope and biometric session allow, via `vm.calendarEntries`).
+/// (only appear when the privacy scope and biometric session allow, via `vm.reflectiveEntries()`).
 /// Embed standalone: `OnThisDayCarousel(vm: vm, onOpenEntry: …)`. Renders nothing when empty
 /// unless `showWhenEmpty` is set.
 struct OnThisDayCarousel: View {

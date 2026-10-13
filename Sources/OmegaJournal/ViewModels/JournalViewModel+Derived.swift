@@ -70,16 +70,34 @@ extension JournalViewModel {
 
     var analyticsVisibilityLabel: String { effectiveAnalyticsVisibility.label }
 
-    /// Calendar always shows the full active journal, subject to the clearly
-    /// communicated privacy choice. It is never narrowed by library search.
+    /// Calendar scope: the full active journal on EVERY date — past, today and
+    /// future — subject only to the clearly communicated privacy choice. It is
+    /// never narrowed by library search or by a "through today" bound, so an
+    /// entry created for a future day still appears on its day and stays
+    /// resolvable by the drill-through sheet. Use `reflectiveEntries` (not this)
+    /// for anything that counts past writing: Today, On This Day, streaks, Insights.
     var calendarEntries: [JournalEntry] {
-        reflectionEntries(period: .allTime)
+        let visibility = effectiveAnalyticsVisibility
+        // Same privacy rule as `OmegaAnalytics.filteredRecords`, minus the date bounds.
+        return entries.filter { visibility == .includePrivate || !$0.isHidden }
     }
 
     /// Insights uses its own selected period and privacy scope, independently
     /// from Journal search and filters.
     var scopedAnalyticsEntries: [JournalEntry] {
         reflectionEntries(period: analyticsPeriod)
+    }
+
+    /// Reflective all-time scope: privacy-scoped entries written up to the end
+    /// of `reference`'s day. Future-dated entries are excluded so they never
+    /// count as past writing (Today recents, On This Day, Year in review).
+    func reflectiveEntries(relativeTo reference: Date = Date()) -> [JournalEntry] {
+        reflectionEntries(period: .allTime, relativeTo: reference)
+    }
+
+    /// Newest reflective entries for Today's "recent writing" strip.
+    func recentReflectiveEntries(limit: Int = 3, relativeTo reference: Date = Date()) -> [JournalEntry] {
+        Array(reflectiveEntries(relativeTo: reference).sorted { $0.createdAt > $1.createdAt }.prefix(limit))
     }
 
     func reflectionEntries(

@@ -26,8 +26,12 @@ struct EntryDrillThroughSheet: View {
     /// Resolve on every body update rather than retaining an entry snapshot.
     /// The scoped lookup also removes private metadata immediately on re-lock.
     private var currentEntry: JournalEntry? {
-        guard let entry = vm.calendarEntries.first(where: { $0.id == entryID }) else { return nil }
-        return entry.isHidden && !biometricAuth.isAuthenticated ? nil : entry
+        Self.resolveEntry(id: entryID, in: vm, isAuthenticated: biometricAuth.isAuthenticated)
+    }
+
+    static func resolveEntry(id: String, in vm: JournalViewModel, isAuthenticated: Bool) -> JournalEntry? {
+        guard let entry = vm.calendarEntries.first(where: { $0.id == id }) else { return nil }
+        return entry.isHidden && !isAuthenticated ? nil : entry
     }
 
     var body: some View {
