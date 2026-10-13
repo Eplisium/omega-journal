@@ -70,13 +70,15 @@ public struct SearchQuery: Equatable, Sendable {
                 q.tags.append(unquote(String(token.dropFirst())))
                 continue
             }
+            // Free tokens keep their quotes so `terms` (splitTerms) still sees
+            // `"exact phrase"` as ONE term after the join below.
             guard let colon = token.firstIndex(of: ":") else {
-                free.append(unquote(token)); continue
+                free.append(token); continue
             }
             let key = token[..<colon].lowercased()
             let value = unquote(String(token[token.index(after: colon)...]))
             guard Self.operatorKeys.contains(key), !value.isEmpty else {
-                free.append(unquote(token)); continue
+                free.append(token); continue
             }
             switch key {
             case "tag":
@@ -95,7 +97,7 @@ public struct SearchQuery: Equatable, Sendable {
                 free.append(token)
             }
         }
-        q.text = free.filter { !$0.isEmpty }.joined(separator: " ")
+        q.text = free.filter { !unquote($0).isEmpty }.joined(separator: " ")
         return q
     }
 

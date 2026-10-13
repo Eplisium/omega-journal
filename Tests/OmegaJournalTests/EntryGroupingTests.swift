@@ -79,8 +79,8 @@ struct EntryGroupingTests {
         #expect(EntryGrouping.sections(for: [], groupByDate: true, fallbackTitle: "x", now: now, calendar: cal).isEmpty)
     }
 
-    @Test("Future-dated entries group with Today instead of a month bucket")
+    @Test("Future-dated entries get an Upcoming bucket, not Today or a month")
     func future() {
-        #expect(EntryGrouping.bucketTitle(for: date(2026, 10, 12), now: now, calendar: cal) == "Today")
+        #expect(EntryGrouping.bucketTitle(for: date(2026, 10, 12), now: now, calendar: cal) == EntryGrouping.upcomingTitle)
     }
 }

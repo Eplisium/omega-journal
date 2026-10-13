@@ -41,15 +41,39 @@ public struct CheckinValue: Equatable, Hashable, Sendable {
 }
 
 public enum DayKey {
+    /// Keys are always Gregorian `yyyy-MM-dd` digits. Only the caller's time
+    /// zone is honoured, so a Japanese/Buddhist calendar user gets the same
+    /// stored keys as everyone else (era years would otherwise read `0008-…`
+    /// or `2569-…`). Gregorian users' existing keys are unchanged.
+    public static func gregorian(matching calendar: Calendar) -> Calendar {
+        var g = Calendar(identifier: .gregorian)
+        g.timeZone = calendar.timeZone
+        return g
+    }
+
     public static func string(from date: Date, calendar: Calendar = .current) -> String {
-        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        let c = gregorian(matching: calendar).dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     public static func date(from key: String, calendar: Calendar = .current) -> Date? {
         let p = key.split(separator: "-").compactMap { Int($0) }
         guard p.count == 3 else { return nil }
-        return calendar.date(from: DateComponents(year: p[0], month: p[1], day: p[2]))
+        return gregorian(matching: calendar).date(from: DateComponents(year: p[0], month: p[1], day: p[2]))
+    }
+
+    /// Whole calendar days from `a`'s day to `b`'s day (local to `calendar`'s
+    /// time zone). DST-safe: it compares day components, never `date(byAdding:)`
+    /// results against `startOfDay`, which disagree on days whose midnight is
+    /// skipped (e.g. America/Sao_Paulo 2018-11-04).
+    public static func dayDistance(from a: Date, to b: Date, calendar: Calendar = .current) -> Int {
+        let g = gregorian(matching: calendar)
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        // Re-anchor both local days in UTC, where every day is 24h long.
+        guard let da = utc.date(from: g.dateComponents([.year, .month, .day], from: a)),
+              let db = utc.date(from: g.dateComponents([.year, .month, .day], from: b)) else { return 0 }
+        return utc.dateComponents([.day], from: da, to: db).day ?? 0
     }
 }
 
@@ -210,7 +234,7 @@ public enum StreakHistory {
         var out: [StreakRun] = []
         var start: Date?, prev: Date?, len = 0
         for d in sorted {
-            if let p = prev, calendar.date(byAdding: .day, value: 1, to: p) == d {
+            if let p = prev, DayKey.dayDistance(from: p, to: d, calendar: calendar) == 1 {
                 len += 1
             } else {
                 if let s = start, let p = prev { out.append(StreakRun(start: s, end: p, length: len)) }
@@ -220,5 +244,26 @@ public enum StreakHistory {
         }
         if let s = start, let p = prev { out.append(StreakRun(start: s, end: p, length: len)) }
         return out.sorted { $0.length != $1.length ? $0.length > $1.length : $0.end > $1.end }
+    }
+
+    /// Strict consecutive-day streak ending today (or yesterday, when today has
+    /// no entry yet). DST-safe: walks noon-anchored days by day key.
+    public static func currentLength(days: Set<Date>, today: Date = Date(), calendar: Calendar = .current) -> Int {
+        let g = DayKey.gregorian(matching: calendar)
+        let keys = Set(days.map { DayKey.string(from: $0, calendar: g) })
+        guard !keys.isEmpty,
+              var cursor = g.date(bySettingHour: 12, minute: 0, second: 0, of: g.startOfDay(for: today)) else { return 0 }
+        if !keys.contains(DayKey.string(from: cursor, calendar: g)) {
+            guard let y = g.date(byAdding: .day, value: -1, to: cursor),
+                  keys.contains(DayKey.string(from: y, calendar: g)) else { return 0 }
+            cursor = y
+        }
+        var streak = 0
+        while keys.contains(DayKey.string(from: cursor, calendar: g)) {
+            streak += 1
+            guard let p = g.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = p
+        }
+        return streak
     }
 }

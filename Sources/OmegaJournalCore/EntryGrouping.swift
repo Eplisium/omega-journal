@@ -22,18 +22,28 @@ public struct EntryGroupItem: Equatable, Sendable {
     }
 }
 
-public struct EntryGroupSection: Equatable, Sendable {
+public struct EntryGroupSection: Equatable, Sendable, Identifiable {
     public let title: String
     public var ids: [String]
+    /// The leading pinned section. Use this, never `title == "Pinned"`, so a
+    /// collection that happens to be named "Pinned" is not mistaken for it.
+    public let isPinned: Bool
 
-    public init(title: String, ids: [String]) {
+    /// Stable, unique identity: the pinned section and a same-titled
+    /// collection/date bucket can never collide.
+    public var id: String { isPinned ? "pinned" : "section:" + title }
+
+    public init(title: String, ids: [String], isPinned: Bool = false) {
         self.title = title
         self.ids = ids
+        self.isPinned = isPinned
     }
 }
 
 public enum EntryGrouping {
     public static let pinnedTitle = "Pinned"
+    /// Bucket for entries dated after today (e.g. back-dated into the future).
+    public static let upcomingTitle = "Upcoming"
 
     /// Sections for an already-sorted list. Pinned entries always lead.
     /// - Parameter groupByDate: true for date sorts; any other sort (title,
@@ -48,7 +58,7 @@ public enum EntryGrouping {
     ) -> [EntryGroupSection] {
         var result: [EntryGroupSection] = []
         let pinned = items.filter(\.isPinned).map(\.id)
-        if !pinned.isEmpty { result.append(EntryGroupSection(title: pinnedTitle, ids: pinned)) }
+        if !pinned.isEmpty { result.append(EntryGroupSection(title: pinnedTitle, ids: pinned, isPinned: true)) }
 
         let rest = items.filter { !$0.isPinned }
         guard !rest.isEmpty else { return result }
@@ -81,6 +91,10 @@ public enum EntryGrouping {
 
     private static func bucketTitle(for date: Date, now: Date, calendar: Calendar, monthFormatter: DateFormatter) -> String {
         let startOfToday = calendar.startOfDay(for: now)
+        // "Today" is bounded by the start of tomorrow; later dates are Upcoming.
+        let startOfTomorrow = calendar.dateInterval(of: .day, for: now)?.end
+            ?? startOfToday.addingTimeInterval(86_400)
+        if date >= startOfTomorrow { return upcomingTitle }
         if date >= startOfToday { return "Today" }
         if let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfToday), date >= startOfYesterday {
             return "Yesterday"

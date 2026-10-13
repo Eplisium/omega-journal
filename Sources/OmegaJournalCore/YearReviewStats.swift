@@ -91,16 +91,33 @@ public enum OnThisDayGrouping {
     /// `yearsAgo` filters (e.g. 1 for "a year ago").
     public static func group<Item>(_ items: [Item], date: (Item) -> Date, reference: Date = Date(),
                                    calendar: Calendar = .current) -> [OnThisDayYear<Item>] {
-        let m = calendar.component(.month, from: reference), d = calendar.component(.day, from: reference)
         let y = calendar.component(.year, from: reference)
         var byYear: [Int: [Item]] = [:]
         for item in items {
-            let c = calendar.dateComponents([.year, .month, .day], from: date(item))
-            guard let iy = c.year, iy < y, c.month == m, c.day == d else { continue }
+            let iy = calendar.component(.year, from: date(item))
+            guard iy < y, isSameMonthDay(date(item), as: reference, calendar: calendar) else { continue }
             byYear[iy, default: []].append(item)
         }
         return byYear.keys.sorted(by: >).map { year in
             OnThisDayYear(year: year, items: (byYear[year] ?? []).sorted { date($0) < date($1) })
         }
+    }
+
+    /// Whether `date` falls on `reference`'s month/day. On Feb 28 of a year
+    /// without Feb 29, leap-day (Feb 29) memories also match so they surface.
+    public static func isSameMonthDay(_ date: Date, as reference: Date, calendar: Calendar = .current) -> Bool {
+        let r = calendar.dateComponents([.month, .day], from: reference)
+        let c = calendar.dateComponents([.month, .day], from: date)
+        if c.month == r.month && c.day == r.day { return true }
+        guard r.month == 2, r.day == 28, c.month == 2, c.day == 29 else { return false }
+        let daysInFeb = calendar.range(of: .day, in: .month, for: reference)?.count ?? 28
+        return daysInFeb < 29
+    }
+
+    /// "N years ago" by calendar year, independent of time of day (a
+    /// `dateComponents([.year])` diff reads 0 when the old entry was written
+    /// later in the day than now).
+    public static func yearsAgo(_ date: Date, reference: Date = Date(), calendar: Calendar = .current) -> Int {
+        calendar.component(.year, from: reference) - calendar.component(.year, from: date)
     }
 }

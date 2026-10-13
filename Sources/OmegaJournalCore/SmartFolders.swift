@@ -18,8 +18,9 @@ public struct SmartFolder: Codable, Identifiable, Equatable, Sendable {
             switch self {
             case .any: return nil
             case .today: return sod
-            case .last7: return calendar.date(byAdding: .day, value: -7, to: sod)
-            case .last30: return calendar.date(byAdding: .day, value: -30, to: sod)
+            // Today counts as one of the N days (matches AnalyticsPeriod).
+            case .last7: return calendar.date(byAdding: .day, value: -6, to: sod)
+            case .last30: return calendar.date(byAdding: .day, value: -29, to: sod)
             case .thisMonth: return calendar.dateInterval(of: .month, for: now)?.start
             case .thisYear: return calendar.dateInterval(of: .year, for: now)?.start
             }
