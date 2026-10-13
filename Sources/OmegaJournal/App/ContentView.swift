@@ -62,36 +62,103 @@ struct ContentView: View {
             .id(entry.id)
     }
 
-    @ViewBuilder
+    /// ONE split view for every workspace. The window used to swap between a
+    /// three-column split (Library) and a two-column one (Today, Calendar,
+    /// Insights, On This Day); each swap rebuilt the sidebar column, so a
+    /// dragged sidebar width snapped back to 232pt, its scroll jumped to the
+    /// top, and the list header moved between the title-bar row and below
+    /// it. Now the sidebar column is never rebuilt and only the pane to its
+    /// right changes (`Self.workspacePane`).
     private var mainSplitView: some View {
-        if (sidebarSelection?.workspace ?? .today).usesEntryCollection {
-            journalSplitView
-        } else {
-            reflectiveSplitView
-        }
-    }
-
-    private var journalSplitView: some View {
-        NavigationSplitView {
-            SidebarView(vm: vm, selection: $sidebarSelection)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
-        } content: {
-            EntryListView(vm: vm, selection: $sidebarSelection)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 460)
-        } detail: {
-            DetailView(vm: vm, selection: $sidebarSelection)
-        }
-        .navigationSplitViewStyle(.balanced)
-    }
-
-    private var reflectiveSplitView: some View {
         NavigationSplitView {
             SidebarView(vm: vm, selection: $sidebarSelection)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
         } detail: {
-            ReflectionWorkspaceView(vm: vm, selection: $sidebarSelection)
+            Self.workspacePane(vm: vm, selection: $sidebarSelection)
+                .frame(minWidth: ShellListColumn.paneMinWidth)
         }
         .navigationSplitViewStyle(.balanced)
+    }
+
+    /// What sits right of the sidebar for the current destination.
+    @ViewBuilder
+    static func workspacePane(vm: JournalViewModel, selection: Binding<SidebarItem?>) -> some View {
+        switch ShellColumns.forWorkspace(usesEntryCollection: (selection.wrappedValue?.workspace ?? .today).usesEntryCollection) {
+        case .listAndDetail:
+            JournalColumnsView(vm: vm, selection: selection)
+        case .page:
+            ReflectionWorkspaceView(vm: vm, selection: selection)
+        }
+    }
+}
+
+// MARK: - Journal columns (list | detail)
+
+/// Entry list and entry detail side by side, with a draggable divider. The
+/// list width is the user's (persisted), clamped by `ShellListColumn` so the
+/// reader/editor keeps the room it was designed for at 940pt.
+struct JournalColumnsView: View {
+    @ObservedObject var vm: JournalViewModel
+    @Binding var selection: SidebarItem?
+    @ObservedObject private var theme = ThemeManager.shared
+    @AppStorage(ShellListColumn.storageKey) private var storedWidth = ShellListColumn.idealWidth
+    /// Live width while dragging; persisted once on release.
+    @State private var dragWidth: Double?
+    @State private var dragOrigin: Double?
+
+    var body: some View {
+        GeometryReader { geo in
+            let available = Double(geo.size.width)
+            let width = ShellListColumn.width(stored: dragWidth ?? storedWidth, available: available)
+            HStack(spacing: 0) {
+                EntryListView(vm: vm, selection: $selection)
+                    .frame(width: width)
+                divider(width: width, available: available)
+                    .zIndex(1) // grab area overlaps both columns
+                DetailView(vm: vm, selection: $selection)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private func divider(width: Double, available: Double) -> some View {
+        Rectangle()
+            .fill(theme.secondaryTextColor.opacity(0.18))
+            .frame(width: ShellListColumn.dividerWidth)
+            .frame(maxHeight: .infinity)
+            .overlay {
+                // Wider invisible grab area than the 1pt line.
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let origin = dragOrigin ?? width
+                                dragOrigin = origin
+                                dragWidth = ShellListColumn.dragged(from: origin, by: Double(value.translation.width),
+                                                                    available: available)
+                            }
+                            .onEnded { _ in
+                                if let dragWidth { storedWidth = dragWidth }
+                                dragWidth = nil
+                                dragOrigin = nil
+                            }
+                    )
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Entry list width")
+            .accessibilityValue("\(Int(width)) points")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: storedWidth = ShellListColumn.clampStored(width + ShellListColumn.step)
+                case .decrement: storedWidth = ShellListColumn.clampStored(width - ShellListColumn.step)
+                @unknown default: break
+                }
+            }
     }
 }
 
