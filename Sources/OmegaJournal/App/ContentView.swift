@@ -11,6 +11,7 @@ struct ContentView: View {
     @StateObject private var onboarding = OnboardingState()
     @SceneStorage("shell.sidebarSelection") private var storedSelection = SidebarItem.today.storageKey
     @State private var didRestoreSelection = false
+    @State private var showLegacyImportOffer = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -48,8 +49,32 @@ struct ContentView: View {
             WhatsNewView(onboarding: onboarding)
         }
         .onAppear {
-            onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
+            // ContentView only exists after the launch gate adopted the key,
+            // so reading the database here is safe. A sandboxed build with an
+            // empty journal first offers to import the earlier version's
+            // journal; onboarding waits until that offer is answered.
+            if vm.shouldOfferLegacyImport() {
+                showLegacyImportOffer = true
+            } else {
+                onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
+            }
             QuitGuard.check = { [weak vm] in vm?.quitDecision() ?? .terminate }
+        }
+        .alert("Bring over your earlier journal?", isPresented: $showLegacyImportOffer) {
+            Button("Choose Folder…") {
+                JournalViewModel.markLegacyImportOfferHandled()
+                // Let the alert finish dismissing before the open panel runs.
+                DispatchQueue.main.async {
+                    vm.chooseAndImportLegacyJournal()
+                    onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
+                }
+            }
+            Button("Not Now", role: .cancel) {
+                JournalViewModel.markLegacyImportOfferHandled()
+                onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
+            }
+        } message: {
+            Text("If you used Omega Journal downloaded from GitHub, you can import that journal into this one. You can also do this later in Settings › Data.")
         }
         .modifier(ShellEntryCommands(vm: vm, selection: $sidebarSelection))
         .modifier(ShellLifecycle(vm: vm, selection: $sidebarSelection, showTemplatePicker: $showTemplatePicker,

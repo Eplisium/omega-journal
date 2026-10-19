@@ -639,12 +639,30 @@ struct SettingsView: View {
             SettingsRowDivider()
             // The journal this window actually uses (a relocated or test
             // database lives elsewhere — never point at a hard-coded folder).
+            // Inside the App Sandbox NSHomeDirectory() is the container, which
+            // would print the container's folder as "~/Library/…". Abbreviate
+            // against the REAL home so the shown path is the real on-disk one.
             SettingsRow(
                 title: "Journal location",
-                subtitle: SettingsStorageLocation.displayFolder(forDatabasePath: vm.db.dbPath)
+                subtitle: SettingsStorageLocation.displayFolder(
+                    forDatabasePath: vm.db.dbPath, home: AppEnvironment.realHomeDirectory.path)
             ) {
                 SettingsPillButton(title: "Show in Finder", icon: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: vm.db.dbPath)])
+                }
+            }
+            // Only the sandboxed (App Store) build has a separate journal to
+            // import from; in the direct build the earlier folder IS this
+            // journal (or the container one is picked up automatically).
+            if AppEnvironment.isSandboxed {
+                SettingsRowDivider()
+                SettingsRow(
+                    title: "Import journal from an earlier version",
+                    subtitle: "Brings in the journal from the version downloaded from GitHub. Works while this journal is still empty."
+                ) {
+                    SettingsPillButton(title: "Import…", icon: "tray.and.arrow.down") {
+                        vm.chooseAndImportLegacyJournal()
+                    }
                 }
             }
         }
