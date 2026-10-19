@@ -154,12 +154,27 @@ enum ImportExportPanels {
 
     static func importDayOne(vm: JournalViewModel) {
         let panel = NSOpenPanel()
-        panel.message = "Choose a Day One JSON export (the .json file or its unzipped folder)."
+        panel.message = "Choose your unzipped Day One export folder (includes photos), or just its .json file."
+        panel.prompt = "Import"
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowedContentTypes = [.json, .folder]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        vm.importDayOneJSON(from: url)
+        vm.importDayOneJSON(from: url, askForPhotoFolder: askForDayOnePhotoFolder)
+    }
+
+    /// Sandboxed builds only get the one `.json` file the user picked. When its entries
+    /// have photos, ask for the export folder so the `photos/` folder can be read too.
+    private static func askForDayOnePhotoFolder(suggested: URL) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = "Include Day One Photos"
+        panel.message = "These Day One entries have photos, kept in the “photos” folder next to the .json file. To import them too, choose that export folder. Click Cancel to import the text only."
+        panel.prompt = "Include Photos"
+        panel.directoryURL = suggested
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = false
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     static func importNotesFolder(vm: JournalViewModel) {

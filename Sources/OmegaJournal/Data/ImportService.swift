@@ -106,7 +106,7 @@ extension JournalViewModel {
         }
     }
 
-    private func toast(_ report: FolderImportReport, noun: String) {
+    private func toast(_ report: FolderImportReport, noun: String, note: String? = nil) {
         guard report.added > 0 || report.duplicates > 0 else {
             showToast("No \(noun) found to import", isError: true); return
         }
@@ -114,34 +114,88 @@ extension JournalViewModel {
         if report.attachments > 0 { parts.append("\(report.attachments) attachment\(report.attachments == 1 ? "" : "s")") }
         if report.duplicates > 0 { parts.append("\(report.duplicates) already present") }
         if !report.skipped.isEmpty { parts.append("\(report.skipped.count) skipped") }
-        showToast(parts.joined(separator: " · "), isError: !report.skipped.isEmpty)
+        if let note { parts.append(note) }
+        showToast(parts.joined(separator: " · "), isError: !report.skipped.isEmpty || note != nil)
     }
 
     /// Day One "Export → JSON" — either the `.json` file or the unzipped folder containing it
     /// (photos are read from the sibling `photos/` directory).
+    ///
+    /// In the App Sandbox picking only the `.json` grants that one file, so when entries list
+    /// photos the importer calls `askForPhotoFolder` (with the folder to start in) to get the
+    /// export folder; returning nil imports the text only and says so.
     @discardableResult
-    func importDayOneJSON(from url: URL) -> FolderImportReport {
+    func importDayOneJSON(from url: URL,
+                          isSandboxed: Bool = AppEnvironment.isSandboxed,
+                          canReadPhotosFolder: (URL) -> Bool = MASSandboxDayOneImport.folderIsReadable,
+                          askForPhotoFolder: ((URL) -> URL?)? = nil) -> FolderImportReport {
+        let fm = FileManager.default
         var jsonURL = url
         var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            let found = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil))?
-                .first { $0.pathExtension.lowercased() == "json" }
+        let pickedFolder = fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+        if pickedFolder {
+            let found = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension.lowercased() == "json" }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+                .first
             guard let found else {
                 showToast("No Day One JSON file found in that folder", isError: true)
                 return FolderImportReport()
             }
             jsonURL = found
         }
+        let result: ImportParsers.DayOneResult
         do {
-            let result = try ImportParsers.parseDayOneJSON(Data(contentsOf: jsonURL))
-            var report = importRecords(result.entries, attachmentRoot: jsonURL.deletingLastPathComponent(), extraTag: "dayone")
-            if result.skipped > 0 { report.skipped = Array(repeating: "entry", count: result.skipped) }
-            toast(report, noun: "Day One entries")
-            return report
+            result = try ImportParsers.parseDayOneJSON(Data(contentsOf: jsonURL))
+        } catch is ImportParsers.ImportParseError {
+            showToast("Day One import failed: that file isn't a Day One JSON export", isError: true)
+            return FolderImportReport()
         } catch {
-            showToast("Day One import failed: \(error.localizedDescription)", isError: true)
+            showToast("Day One import failed: the file couldn't be read as a Day One export", isError: true)
             return FolderImportReport()
         }
+
+        // Shape check on every photo name from the JSON before anything touches the disk.
+        var records = result.entries.map { r -> ImportedEntry in
+            var r = r
+            r.attachmentPaths = MASSandboxDayOneImport.sanitizedPhotoPaths(r.attachmentPaths)
+            return r
+        }
+        let referencesPhotos = records.contains { !$0.attachmentPaths.isEmpty }
+        var root: URL?
+        var photosSkipped = false
+        switch MASSandboxDayOneImport.photoAccess(selection: pickedFolder ? url : jsonURL,
+                                                  selectionIsDirectory: pickedFolder,
+                                                  referencesPhotos: referencesPhotos,
+                                                  isSandboxed: isSandboxed,
+                                                  canReadPhotosFolder: canReadPhotosFolder) {
+        case .useRoot(let r): root = r
+        case .noPhotosNeeded: root = nil
+        case .askForFolder(let suggested):
+            if let picked = askForPhotoFolder?(suggested) {
+                let photos = picked.appendingPathComponent(MASSandboxDayOneImport.photosFolderName, isDirectory: true)
+                var sub: ObjCBool = false
+                let hasPhotos = fm.fileExists(atPath: photos.path, isDirectory: &sub) && sub.boolValue
+                root = MASSandboxDayOneImport.exportRoot(forPickedFolder: picked, hasPhotosSubfolder: hasPhotos)
+            }
+            photosSkipped = root == nil
+        }
+        // Containment: each photo must really live inside `<root>/photos`.
+        if let root {
+            for i in records.indices {
+                records[i].attachmentPaths = records[i].attachmentPaths.filter {
+                    MASSandboxDayOneImport.containedPhotoFile($0, root: root) != nil
+                }
+            }
+        } else {
+            for i in records.indices { records[i].attachmentPaths = [] }
+        }
+
+        var report = importRecords(records, attachmentRoot: root, extraTag: "dayone")
+        if result.skipped > 0 { report.skipped = Array(repeating: "entry", count: result.skipped) }
+        toast(report, noun: "Day One entries",
+              note: photosSkipped && report.added > 0 ? "photos not imported (choose the export folder to include them)" : nil)
+        return report
     }
 
     /// Recursively imports `.md`/`.markdown`/`.txt` files (Obsidian vault or any notes folder).
