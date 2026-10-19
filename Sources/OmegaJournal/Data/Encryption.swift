@@ -8,13 +8,29 @@ import Security
 /// everything in plaintext, readable by any process with disk access).
 ///
 /// Scheme: a single 256-bit AES-GCM key lives in the Keychain
-/// (`kSecClassGenericPassword`, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
-/// and never touches disk. Body text and attachment files are sealed as
+/// (`kSecClassGenericPassword`) and never touches disk. It is read from the
+/// data-protection keychain (access group `dataProtectionAccessGroup`, App
+/// Store build) first, then the legacy login keychain (every earlier build);
+/// see `MASDataKeyResolver`. Body text and attachment files are sealed as
 /// AES-GCM containers; auto-backup files are sealed whole.
 enum JournalCrypto {
 
     private static let service = "com.omegajournal.encryption"
     private static let account = "journal-content-key"
+    /// Keychain access group of the App Store build. Must match the
+    /// `keychain-access-groups` entitlement (team ID + bundle id). Builds
+    /// without that entitlement get errSecMissingEntitlement and fall back to
+    /// the legacy login keychain.
+    static let dataProtectionAccessGroup = "WWC5HJN6AL.com.eplisium.omega-journal"
+
+    /// The app's key resolver: data-protection keychain, then legacy login
+    /// keychain. Pure value — safe to build on any thread.
+    nonisolated static func appKeyResolver() -> MASDataKeyResolver {
+        MASDataKeyResolver(
+            preferred: MASDataKeychainStore(kind: .dataProtection(accessGroup: dataProtectionAccessGroup),
+                                            service: service, account: account),
+            legacy: MASDataKeychainStore(kind: .legacyLogin, service: service, account: account))
+    }
 
     enum KeyError: Error, LocalizedError, Equatable {
         /// The Keychain has no key but encrypted data exists. Minting a new key
@@ -62,40 +78,28 @@ enum JournalCrypto {
             cachedKey = key
             return key
         }
-        let key = try loadOrCreateKey(service: service, account: account, allowCreate: { !encryptedDataExists() })
+        let key = try loadOrCreateKey(using: appKeyResolver(), allowCreate: { !encryptedDataExists() })
         cachedKey = key
         return key
     }
 
-    /// Keychain logic with injectable identity so tests never touch the real key.
-    static func loadOrCreateKey(service: String, account: String, allowCreate: () -> Bool) throws -> SymmetricKey {
-        var item: CFTypeRef?
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-        ]
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-
-        if status == errSecSuccess, let data = item as? Data, data.count == 32 {
-            return SymmetricKey(data: data)
+    /// Resolver-based load (data-protection → legacy, copy forward, mint into
+    /// the preferred store only when `allowCreate()`). Injectable for tests.
+    static func loadOrCreateKey(using resolver: MASDataKeyResolver, allowCreate: () -> Bool) throws -> SymmetricKey {
+        let resolved = try resolver.resolve(allowCreate: allowCreate)
+        if case .legacyCopyFailed(let status) = resolved.origin {
+            print("OmegaJournal: could not copy the encryption key to the data-protection keychain (status \(status)); using the login keychain copy.")
         }
-        guard status == errSecItemNotFound else { throw KeyError.keychainUnavailable(status) }
-        guard allowCreate() else { throw KeyError.keyMissing }
+        return resolved.key
+    }
 
-        let newKey = SymmetricKey(size: .bits256)
-        let newData = newKey.withUnsafeBytes { Data($0) }
-        let add: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: newData,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-        ]
-        let addStatus = SecItemAdd(add as CFDictionary, nil)
-        guard addStatus == errSecSuccess else { throw KeyError.keyStoreFailed(addStatus) }
-        return newKey
+    /// Legacy login-keychain logic with injectable identity so tests never
+    /// touch the real key (throwaway service names only).
+    static func loadOrCreateKey(service: String, account: String, allowCreate: () -> Bool) throws -> SymmetricKey {
+        let resolver = MASDataKeyResolver(
+            preferred: nil,
+            legacy: MASDataKeychainStore(kind: .legacyLogin, service: service, account: account))
+        return try loadOrCreateKey(using: resolver, allowCreate: allowCreate)
     }
 
     static func deleteKeyForTesting(service: String, account: String) {
@@ -119,7 +123,13 @@ enum JournalCrypto {
         if let testPath = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"], !testPath.isEmpty {
             return nil // isolated runs use an ephemeral key; never read the real one
         }
-        return fetchExistingKey(service: "com.omegajournal.encryption", account: "journal-content-key")
+        return fetchExistingKey(using: appKeyResolver())
+    }
+
+    /// Load-only fetch through a resolver. Copying a legacy-only key into the
+    /// data-protection keychain is allowed here; minting is not.
+    nonisolated static func fetchExistingKey(using resolver: MASDataKeyResolver) -> SymmetricKey? {
+        try? resolver.resolve(allowCreate: { false }).key
     }
 
     /// Main thread only: caches a prefetched key so database startup and entry
