@@ -107,6 +107,19 @@ open "Omega Journal.app"
 
 `swift build` compiles the executable. `build_app.sh` builds a release binary, packages **Omega Journal.app**, and regenerates the Ω icon. Repackage and reopen the bundle after source changes; compiling alone does not update the double-clickable app.
 
+### Packaging
+
+All three entry points share `VERSION` (marketing version), `packaging/` (Info.plist template, entitlements, privacy manifest, sandbox migration manifest) and `scripts/lib/oj-packaging.sh`. The build number defaults to `git rev-list --count HEAD`; override it with `OMEGA_JOURNAL_BUILD_NUMBER`.
+
+| Command | Output | Signing |
+|---|---|---|
+| `bash build_app.sh` | `Omega Journal.app` (local dev, host arch) | Apple Development, hardened runtime, microphone entitlement, not sandboxed |
+| `scripts/make_release.sh` | `dist/Omega-Journal-<version>.dmg` (universal) | ad-hoc by default; `OMEGA_JOURNAL_SIGN_IDENTITY="Developer ID Application: …"` + `OMEGA_JOURNAL_NOTARY_PROFILE` to notarize |
+| `scripts/make_mas.sh` | `dist/OmegaJournal-<version>-<build>.pkg` (universal, sandboxed) | Apple Distribution + Mac App Store profile (`OMEGA_JOURNAL_MAS_PROFILE`); `--validate` / `--upload` via `xcrun altool` |
+| `scripts/make_mas.sh --dev` | sandboxed smoke-test bundle, QA bundle id, no pkg | Apple Development; never touches the real journal |
+
+App Store submission steps, metadata and review notes are in [`docs/app-store/`](docs/app-store/SUBMISSION.md).
+
 ## Workspaces
 
 - **Today:** start or continue writing, see daily goal progress (when goals are set), revisit recent entries, and surface an On This Day memory. The daily prompt card is shown for a small library; prompt-based creation remains available from the menu.
