@@ -90,21 +90,24 @@ final class DatabaseManager {
 
     static func defaultPaths() -> (db: String, attachments: String, isTest: Bool) {
         let fileManager = FileManager.default
-        if let testPath = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"], !testPath.isEmpty {
-            // An explicit, test-only override keeps lifecycle integration tests
-            // completely isolated from a person's real journal database.
-            let databaseURL = URL(fileURLWithPath: testPath)
-            let testRoot = databaseURL.deletingLastPathComponent()
-            try? fileManager.createDirectory(at: testRoot, withIntermediateDirectories: true)
-            let att = ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH"]
-                ?? testRoot.appendingPathComponent("attachments", isDirectory: true).path
-            return (databaseURL.path, att, true)
-        }
+        // Application Support as THIS process sees it: the real folder when
+        // unsandboxed, the container's when sandboxed.
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
-        try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
-        return (appDir.appendingPathComponent("omega_journal.sqlite3").path,
-                appDir.appendingPathComponent("attachments", isDirectory: true).path, false)
+        let ownDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
+        let sandboxed = AppEnvironment.isSandboxed
+        // Test-mode env vars win; otherwise see MASDataJournalLocation for the
+        // legacy-vs-container rules (keeps a direct build on the App Store
+        // container's journal when the legacy folder has none).
+        let paths = MASDataJournalLocation.resolvePaths(
+            environment: ProcessInfo.processInfo.environment,
+            isSandboxed: sandboxed,
+            legacyDir: sandboxed ? AppEnvironment.legacyJournalDirectory : ownDir,
+            containerDir: sandboxed ? ownDir : AppEnvironment.containerJournalDirectory,
+            fileExists: { fileManager.fileExists(atPath: $0) })
+        // An explicit, test-only override keeps lifecycle integration tests
+        // completely isolated from a person's real journal database.
+        try? fileManager.createDirectory(atPath: paths.directory, withIntermediateDirectories: true)
+        return (paths.databasePath, paths.attachmentsPath, paths.isTest)
     }
 
     init() {

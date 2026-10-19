@@ -141,6 +141,9 @@ public enum SettingsSheetSizing {
 
 public enum SettingsStorageLocation {
     /// Folder holding the journal database, with the home directory shown as `~`.
+    /// Inside the App Sandbox `NSHomeDirectory()` is the app's container, so the
+    /// app passes the user's REAL home (`AppEnvironment.realHomeDirectory`) —
+    /// otherwise the container's folder would be shown as `~/Library/…`.
     public static func displayFolder(forDatabasePath path: String,
                                      home: String = NSHomeDirectory()) -> String {
         let folder = (path as NSString).deletingLastPathComponent
