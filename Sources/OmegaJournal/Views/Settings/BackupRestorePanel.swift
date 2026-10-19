@@ -51,7 +51,7 @@ struct AppLockPanel: View {
 struct BackupPanel: View {
     @ObservedObject var vm: JournalViewModel
     @ObservedObject private var theme = ThemeManager.shared
-    @State private var folder: URL?
+    @State private var folderState: MASSandboxBackupFolder.State = .notSet
     @State private var backups: [BackupInfo] = []
     @State private var status: String?
     @State private var statusIsError = false
@@ -62,14 +62,18 @@ struct BackupPanel: View {
                   footnote: "Backups are encrypted with your Keychain key and contain entries, tags and check-ins (not attachment files). A copy of each daily backup also goes to the folder you choose — iCloud Drive or an external disk both work. Restoring first snapshots your current journal.") {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Extra backup folder").font(OmegaTheme.font(.body, .medium)).foregroundColor(theme.titleTextColor)
-                    Text(folder?.path ?? "Not set — backups stay on this Mac only")
-                        .font(OmegaTheme.metaFont).foregroundColor(theme.secondaryTextColor).lineLimit(1).truncationMode(.middle)
+                    Text(folderCopy.title).font(OmegaTheme.font(.body, .medium))
+                        .foregroundColor(folderCopy.isWarning ? theme.warningColor : theme.titleTextColor)
+                    Text(folderCopy.detail)
+                        .font(OmegaTheme.metaFont).foregroundColor(theme.secondaryTextColor)
+                        .lineLimit(folderCopy.isWarning ? 3 : 1).truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: folderCopy.isWarning)
                 }
                 Spacer()
-                Button("Choose…") { chooseFolder() }
-                if folder != nil { Button("Clear") { vm.db.setChosenBackupFolder(nil); refresh() } }
+                Button(folderCopy.chooseLabel) { chooseFolder() }
+                if folderState != .notSet { Button("Clear") { vm.db.setChosenBackupFolder(nil); refresh() } }
             }
+            .accessibilityElement(children: .contain)
             HStack {
                 Button { backupNow() } label: { Label("Back up now", systemImage: "arrow.clockwise.icloud") }
                 Button { checkIntegrity() } label: { Label("Check integrity", systemImage: "checkmark.shield") }
@@ -109,8 +113,10 @@ struct BackupPanel: View {
         }
     }
 
+    private var folderCopy: MASSandboxBackupFolderCopy { MASSandboxBackupFolderCopy(state: folderState) }
+
     private func refresh() {
-        folder = vm.db.chosenBackupFolder
+        folderState = vm.db.backupFolderState()
         backups = vm.db.backupInfos()
     }
 
@@ -121,12 +127,19 @@ struct BackupPanel: View {
         panel.message = "Choose a folder for extra backup copies (iCloud Drive, external disk…)."
         panel.prompt = "Use Folder"
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        // Re-picking after the sandbox lost access: start where the old folder was.
+        if case .needsRepick(let last) = folderState, last.hasPrefix("/") {
+            panel.directoryURL = URL(fileURLWithPath: last, isDirectory: true)
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard FileManager.default.isWritableFile(atPath: url.path) else {
             report("That folder isn't writable.", error: true); return
         }
-        guard vm.db.setChosenBackupFolder(url) else {
+        guard !DatabaseManager.samePath(url, vm.db.backupsDirectory) else {
             report("That is the journal's own backups folder — choose a different one.", error: true); return
+        }
+        guard vm.db.setChosenBackupFolder(url) else {
+            report("Omega Journal couldn't get lasting permission for that folder. Try a different folder.", error: true); return
         }
         refresh()
         report("Daily backups will also be copied to “\(url.lastPathComponent)”.")

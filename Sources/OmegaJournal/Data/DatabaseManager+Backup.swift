@@ -151,7 +151,8 @@ extension DatabaseManager {
 
         // 1. Decrypt + stage.
         let raw: Data
-        do { raw = try Data(contentsOf: url) } catch { throw RestoreError.invalid("Could not read the backup file.") }
+        // A backup in the extra folder needs that folder's security scope in the sandbox.
+        do { raw = try readBackupFile(at: url) } catch { throw RestoreError.invalid("Could not read the backup file.") }
         let plain: Data
         if raw.starts(with: Data("SQLite format 3\0".utf8)) {
             plain = raw

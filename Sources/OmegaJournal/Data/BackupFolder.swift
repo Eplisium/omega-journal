@@ -24,45 +24,98 @@ struct BackupVerification: Equatable {
 }
 
 extension DatabaseManager {
+    /// Plain path of the extra backup folder. Always written (older builds and the
+    /// unsandboxed fallback read it; the UI shows it).
     static let backupFolderKey = "backupFolderPath"
+    /// Bookmark for the same folder (`MASSandboxBackupFolder.StoredBookmark.encoded`).
+    /// Security-scoped in sandboxed builds, so access survives a relaunch.
+    static let backupFolderBookmarkKey = "backupFolderBookmark"
 
-    /// User-chosen extra backup destination (iCloud Drive, external disk…), if set and present.
-    var chosenBackupFolder: URL? {
-        let path = getSetting(Self.backupFolderKey, defaultValue: "")
-        guard !path.isEmpty else { return nil }
-        return URL(fileURLWithPath: path, isDirectory: true)
+    /// Resolves the stored folder settings and persists any refreshed bookmark/path.
+    func backupFolderState(environment env: MASSandboxBackupFolder.Environment = MASSandboxBackupFolder.environment)
+        -> MASSandboxBackupFolder.State {
+        let r = MASSandboxBackupFolder.resolve(path: getSetting(Self.backupFolderKey, defaultValue: ""),
+                                               bookmark: getSetting(Self.backupFolderBookmarkKey, defaultValue: ""),
+                                               environment: env)
+        // Refreshing is opportunistic: a read-only journal just resolves again next time.
+        if !isReadOnly {
+            if let b = r.updatedBookmark { _ = setSetting(Self.backupFolderBookmarkKey, value: b.encoded) }
+            if let p = r.updatedPath { _ = setSetting(Self.backupFolderKey, value: p) }
+        }
+        return r.state
     }
 
+    /// User-chosen extra backup destination (iCloud Drive, external disk…), if set and usable.
+    var chosenBackupFolder: URL? { backupFolderState().url }
+
     /// Saves (or clears) the extra backup folder. Refuses the local backups
-    /// directory itself — mirroring a file onto itself would delete it.
+    /// directory itself — mirroring a file onto itself would delete it — and, in the
+    /// sandbox, a folder that can't be remembered across launches.
     @discardableResult
-    func setChosenBackupFolder(_ url: URL?) -> Bool {
-        if let url, Self.samePath(url, backupsDirectory) { return false }
-        setSetting(Self.backupFolderKey, value: url?.path ?? "")
+    func setChosenBackupFolder(_ url: URL?,
+                               environment env: MASSandboxBackupFolder.Environment = MASSandboxBackupFolder.environment) -> Bool {
+        guard let url else {
+            _ = setSetting(Self.backupFolderKey, value: "")
+            _ = setSetting(Self.backupFolderBookmarkKey, value: "")
+            return true
+        }
+        if Self.samePath(url, backupsDirectory) { return false }
+        let bookmark = MASSandboxBackupFolder.bookmarkForNewFolder(url, environment: env)
+        if env.isSandboxed && bookmark == nil { return false }
+        _ = setSetting(Self.backupFolderKey, value: url.path)
+        _ = setSetting(Self.backupFolderBookmarkKey, value: bookmark?.encoded ?? "")
         return true
     }
 
-    /// Path equality after standardizing and resolving symlinks (`/var` vs `/private/var`, trailing `/`).
-    static func samePath(_ a: URL, _ b: URL) -> Bool {
-        a.standardizedFileURL.resolvingSymlinksInPath().path == b.standardizedFileURL.resolvingSymlinksInPath().path
+    /// Runs `body` with (security-scoped) access to the chosen folder; nil when no
+    /// usable folder is set. Access is always released, also when `body` throws.
+    func withChosenBackupFolder<T>(environment env: MASSandboxBackupFolder.Environment = MASSandboxBackupFolder.environment,
+                                   _ body: (URL) throws -> T) rethrows -> T? {
+        try MASSandboxBackupFolder.withAccess(to: backupFolderState(environment: env), environment: env, body)
     }
+
+    /// Reads a backup file, opening the chosen folder's security scope when the file
+    /// lives there (restore / verify of an "extra folder" backup in the sandbox).
+    func readBackupFile(at url: URL,
+                        environment env: MASSandboxBackupFolder.Environment = MASSandboxBackupFolder.environment) throws -> Data {
+        let state = backupFolderState(environment: env)
+        if let folder = state.url, MASSandboxBackupFolder.isInside(url, folder: folder),
+           let data = try MASSandboxBackupFolder.withAccess(to: state, environment: env, { _ in try Data(contentsOf: url) }) {
+            return data
+        }
+        return try Data(contentsOf: url)
+    }
+
+    /// Path equality after standardizing and resolving symlinks (`/var` vs `/private/var`, trailing `/`).
+    static func samePath(_ a: URL, _ b: URL) -> Bool { MASSandboxBackupFolder.samePath(a, b) }
 
     /// Copies a freshly written daily backup into the chosen folder and prunes old copies there.
     /// Failure never fails the local backup — it is reported and the local copy stands.
-    func mirrorBackupToChosenFolder(_ source: URL) {
-        guard let folder = chosenBackupFolder else { return }
+    func mirrorBackupToChosenFolder(_ source: URL,
+                                    environment env: MASSandboxBackupFolder.Environment = MASSandboxBackupFolder.environment) {
+        let state = backupFolderState(environment: env)
+        if state.needsRepick {
+            reportError("The extra backup copy was skipped: choose your backup folder again in Settings › Data. Backups are still saved on this Mac.")
+            return
+        }
+        guard let name = state.url?.lastPathComponent else { return }
         let fm = FileManager.default
         do {
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            let dest = folder.appendingPathComponent(source.lastPathComponent)
-            // The chosen folder may BE the local backups folder: removing `dest`
-            // would then delete the backup we just wrote.
-            guard !Self.samePath(dest, source) else { return }
-            try? fm.removeItem(at: dest)
-            try fm.copyItem(at: source, to: dest)
-            cleanupOldBackups(in: folder, prefix: Self.dailyBackupPrefix, keep: Self.dailyBackupsToKeep * 4)
+            let done: Void? = try MASSandboxBackupFolder.withAccess(to: state, environment: env) { folder in
+                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                let dest = folder.appendingPathComponent(source.lastPathComponent)
+                // The chosen folder may BE the local backups folder: removing `dest`
+                // would then delete the backup we just wrote.
+                guard !Self.samePath(dest, source) else { return }
+                try? fm.removeItem(at: dest)
+                try fm.copyItem(at: source, to: dest)
+                cleanupOldBackups(in: folder, prefix: Self.dailyBackupPrefix, keep: Self.dailyBackupsToKeep * 4)
+            }
+            if done == nil {
+                reportError("The extra backup copy was skipped: Omega Journal can't open “\(name)”. Choose your backup folder again in Settings › Data.")
+            }
         } catch {
-            reportError("Couldn't copy the backup to “\(folder.lastPathComponent)”: \(error.localizedDescription)")
+            reportError("Couldn't copy the backup to “\(name)”. Check that the folder or disk is available.")
         }
     }
 
@@ -83,7 +136,7 @@ extension DatabaseManager {
             }
         }
         var all = infos(in: backupsDirectory, external: false)
-        if let folder = chosenBackupFolder { all += infos(in: folder, external: true) }
+        all += withChosenBackupFolder { infos(in: $0, external: true) } ?? []
         return all.sorted { $0.date > $1.date }
     }
 
@@ -91,7 +144,7 @@ extension DatabaseManager {
     func verifyBackup(at url: URL) throws -> BackupVerification {
         let fm = FileManager.default
         let raw: Data
-        do { raw = try Data(contentsOf: url) } catch { throw RestoreError.invalid("Could not read the backup file.") }
+        do { raw = try readBackupFile(at: url) } catch { throw RestoreError.invalid("Could not read the backup file.") }
         let plain: Data
         if raw.starts(with: Data("SQLite format 3\0".utf8)) { plain = raw }
         else if let opened = try? JournalCrypto.decrypt(raw) { plain = opened }
