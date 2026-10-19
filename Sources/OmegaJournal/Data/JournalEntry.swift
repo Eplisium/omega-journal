@@ -11,15 +11,6 @@ struct Attachment: Identifiable, Hashable {
     let mimeType: String
     let createdAt: Date
 
-    var fileURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport
-            .appendingPathComponent("OmegaJournal", isDirectory: true)
-            .appendingPathComponent("attachments", isDirectory: true)
-            .appendingPathComponent(id, isDirectory: true)
-            .appendingPathComponent(filename)
-    }
-
     var isImage: Bool {
         mimeType.hasPrefix("image/")
     }
