@@ -121,12 +121,14 @@ struct OmegaJournalApp: App {
         }
 
         CommandGroup(replacing: .help) {
-            Button("Omega Journal Help") {
-                NSWorkspace.shared.open(URL(string: "https://github.com/Eplisium/omega-journal")!)
-            }
-            Button("Keyboard Shortcuts") { post(.showShortcuts) }
-            Button("Report an Issue…") {
-                NSWorkspace.shared.open(URL(string: "https://github.com/Eplisium/omega-journal/issues")!)
+            // App Store: support page + privacy policy, no GitHub. Direct: GitHub help/issues + privacy policy.
+            ForEach(MASSandboxHelpMenu.items(for: AppEnvironment.channel)) { item in
+                Button(item.title) {
+                    switch item.action {
+                    case .open(let url): NSWorkspace.shared.open(url)
+                    case .showShortcuts: post(.showShortcuts)
+                    }
+                }
             }
         }
     }
