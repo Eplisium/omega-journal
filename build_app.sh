@@ -1,90 +1,56 @@
 #!/bin/bash
-set -e
+# Local dev build: packages "Omega Journal.app" in the repo root for daily use.
+#
+#   bash build_app.sh
+#
+# Channel "direct", NOT sandboxed, hardened runtime + packaging/OmegaJournal-Direct.entitlements
+# (microphone for voice memos), signed with your Apple Development identity so the
+# Keychain "Always Allow" for the journal key survives rebuilds.
+#   OMEGA_JOURNAL_SIGN_IDENTITY="<name>"   pick an identity explicitly ("-" = ad-hoc)
+#   OMEGA_JOURNAL_ARCHS=universal          build arm64 + x86_64 (default: this Mac only)
+#
+# Distribution builds: scripts/make_release.sh (DMG) and scripts/make_mas.sh (App Store).
+set -euo pipefail
 
 # Resolve the project directory from this script's own location so the repo
-# can be checked out at any path (issue #1: hardcoding $HOME/OmegaJournal
-# broke clones like ~/omega-journal).
+# can be checked out at any path (issue #1).
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$PROJECT_DIR/.build"
-APP_NAME="OmegaJournal"
-APP_BUNDLE="$PROJECT_DIR/Omega Journal.app"
+OJ_PROJECT_DIR="$PROJECT_DIR"
+# shellcheck source=scripts/lib/oj-packaging.sh
+source "$PROJECT_DIR/scripts/lib/oj-packaging.sh"
 
-# The icon-generation heredoc below needs the project dir as well; hand it
-# over via the environment so arbitrary checkout locations work (issue #1).
-export OMEGA_JOURNAL_PROJECT_DIR="$PROJECT_DIR"
+APP_BUNDLE="$PROJECT_DIR/$OJ_APP_NAME.app"
+VERSION="$(oj_version)"
+BUILD_NUMBER="$(oj_build_number)"
 
-# Build the release binary here and package that exact file. Guessing "the
-# newest binary under .build" shipped stale code more than once: SwiftPM's
-# build layout moved (.build/<triple>/… → .build/out/Products/…) and old
-# products from either layout can be newer than the code you meant to ship.
-echo "Building release binary..."
-swift build -c release --package-path "$PROJECT_DIR"
-BIN_DIR="$(swift build -c release --package-path "$PROJECT_DIR" --show-bin-path)"
-BINARY="$BIN_DIR/$APP_NAME"
-if [ ! -x "$BINARY" ]; then echo "Error: release binary not found at $BINARY"; exit 1; fi
-echo "Found binary: $BINARY"
+# Build the release binary here and package that exact file (guessing "the newest
+# binary under .build" shipped stale code more than once).
+oj_build_binary "${OMEGA_JOURNAL_ARCHS:-host}"
+oj_check_binary_sdk "$OJ_BINARY" warn
 
-rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
-cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+oj_assemble_bundle "$APP_BUNDLE" "$OJ_BINARY" direct "$OJ_PRODUCTION_BUNDLE_ID" "$VERSION" "$BUILD_NUMBER"
 
-cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key><string>Omega Journal</string>
-    <key>CFBundleDisplayName</key><string>Omega Journal</string>
-    <key>CFBundleIdentifier</key><string>com.eplisium.omega-journal</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleExecutable</key><string>OmegaJournal</string>
-    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>Omega Journal uses the microphone only when you record a voice memo to attach to an entry. Recordings are stored encrypted on this Mac.</string>
-    <key>NSPrincipalClass</key><string>NSApplication</string>
-</dict>
-</plist>
-PLIST
-
-# Generate icon
-echo "Generating Omega Journal icon..."
-swift "$PROJECT_DIR/make_icon.swift"
-
-if [ -f "$APP_BUNDLE/Contents/Resources/AppIcon.icns" ]; then
-    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon.icns" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-    echo "Icon added"
-fi
-
-echo "Codesigning..."
-# Sign with a STABLE identity when one exists. The journal's encryption key
-# lives in the login Keychain, whose access list remembers the app by its
-# code signature. Ad-hoc signatures change on every build, so every rebuild
-# re-triggered "Omega Journal wants to use your confidential information"
-# and blocked launch until the login password was typed. With a certificate
-# identity, "Always Allow" survives rebuilds.
-#   OMEGA_JOURNAL_SIGN_IDENTITY="<name>"  pick one explicitly ("-" = ad-hoc)
+# Sign with a STABLE identity when one exists. The journal's encryption key lives in
+# the login Keychain, whose access list remembers the app by its code signature.
+# Ad-hoc signatures change on every build, so every rebuild re-prompted for the login
+# password. With a certificate identity, "Always Allow" survives rebuilds.
 SIGN_IDENTITY="${OMEGA_JOURNAL_SIGN_IDENTITY:-}"
 if [ -z "$SIGN_IDENTITY" ]; then
-    SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-        | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
+    SIGN_IDENTITY="$(oj_find_codesign_identity "Apple Development: " || true)"
 fi
+ENTITLEMENTS="$OJ_PACKAGING_DIR/OmegaJournal-Direct.entitlements"
 if [ -n "$SIGN_IDENTITY" ] && [ "$SIGN_IDENTITY" != "-" ]; then
-    echo "Signing identity: $SIGN_IDENTITY"
-    if ! codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"; then
-        echo "Warning: signing with '$SIGN_IDENTITY' failed; falling back to ad-hoc (Keychain will re-prompt)."
-        codesign --force --deep --sign - "$APP_BUNDLE"
+    if ! oj_sign_app "$APP_BUNDLE" "$SIGN_IDENTITY" "$ENTITLEMENTS" --runtime; then
+        oj_warn "signing with '$SIGN_IDENTITY' failed; falling back to ad-hoc (Keychain will re-prompt)."
+        oj_sign_app "$APP_BUNDLE" - "$ENTITLEMENTS" --runtime
     fi
 else
     echo "No development identity found; signing ad-hoc (Keychain will prompt after each rebuild)."
-    codesign --force --deep --sign - "$APP_BUNDLE"
+    oj_sign_app "$APP_BUNDLE" - "$ENTITLEMENTS" --runtime
 fi
-codesign --verify --strict "$APP_BUNDLE"
 
 echo ""
-echo "=== Omega Journal.app created ==="
+echo "=== $OJ_APP_NAME.app created ==="
 echo "Location: $APP_BUNDLE"
-echo "Size: $(du -sh "$APP_BUNDLE" | cut -f1)"
+echo "Version:  $VERSION ($BUILD_NUMBER), channel direct"
+echo "Size:     $(du -sh "$APP_BUNDLE" | cut -f1)"

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist template shared by build_app.sh, scripts/make_release.sh and scripts/make_mas.sh.
+  scripts/lib/oj-packaging.sh (oj_write_info_plist) replaces the placeholder tokens and fills the
+  DT* toolchain keys App Store Connect checks. Do not hand-edit the version here: the
+  marketing version lives in the VERSION file at the repo root.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Omega Journal</string>
+    <key>CFBundleDisplayName</key><string>Omega Journal</string>
+    <key>CFBundleIdentifier</key><string>@BUNDLE_ID@</string>
+    <key>CFBundleVersion</key><string>@BUILD_NUMBER@</string>
+    <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleExecutable</key><string>OmegaJournal</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.lifestyle</string>
+    <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <key>NSHumanReadableCopyright</key><string>Copyright © @YEAR@ Zach Gladfelter. All rights reserved.</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Omega Journal uses the microphone only when you record a voice memo to attach to an entry. Recordings are stored encrypted on this Mac.</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>OJDistributionChannel</key><string>@CHANNEL@</string>
+</dict>
+</plist>

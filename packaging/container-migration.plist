@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Sandbox container migration manifest (App Store build only, Contents/Resources).
+
+  Format (Apple: "Migrating your app's files to its App Sandbox container"):
+  root dict, key "Move" = array; each item is either
+    - a string: source path, moved to the SAME relative location in the container, or
+    - an array of two strings: [source, destination-in-container].
+  Source variables expand relative to the user's home folder; destination variables
+  relative to the container (~/Library/Containers/<bundle id>/Data).
+
+  macOS runs this exactly once, when it first creates the container. Missing sources
+  are skipped. Verified live with a QA bundle id (see docs/app-store/SUBMISSION.md).
+-->
+<plist version="1.0">
+<dict>
+    <key>Move</key>
+    <array>
+        <string>${ApplicationSupport}/OmegaJournal</string>
+        <string>${Library}/Preferences/com.eplisium.omega-journal.plist</string>
+    </array>
+</dict>
+</plist>

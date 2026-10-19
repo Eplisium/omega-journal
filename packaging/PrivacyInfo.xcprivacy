@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Privacy manifest, copied to Contents/Resources by every packaging script.
+
+  Required-reason APIs used (audited with grep over Sources/):
+  - UserDefaults (@AppStorage, UserDefaults.standard): CA92.1 — app-only settings.
+  - File timestamps (URLResourceValues creationDate / contentModificationDate):
+      C617.1 — backups inside the app's own container (DatabaseManager+Backup).
+      3B52.1 — files/folders the user picked (ImportService, JournalViewModel+Import,
+               BackupFolder in a user-chosen folder).
+  Not used: system boot time, disk space, active keyboards.
+  No tracking, no tracking domains, no data collected (nothing leaves the Mac).
+-->
+<plist version="1.0">
+<dict>
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>C617.1</string>
+                <string>3B52.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
