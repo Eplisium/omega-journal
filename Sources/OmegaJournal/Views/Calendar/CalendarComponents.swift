@@ -12,7 +12,7 @@ struct MonthChevronButton: View {
     let hint: String
     let action: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var isHovered = false
 
     var body: some View {
@@ -44,7 +44,7 @@ struct PillActionButton: View {
     let tooltip: String
     let action: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var isHovered = false
 
     var body: some View {
@@ -75,8 +75,8 @@ struct CalendarDayCell: View {
     let calendar: Calendar
     let onSelect: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
 
     private var safeEntries: [JournalEntry] {
         entries.filter { !$0.isHidden || biometricAuth.isAuthenticated }
@@ -166,8 +166,8 @@ struct CalendarEntryRow: View {
     let entry: JournalEntry
     let onOpen: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
 
     private var isLockedPrivate: Bool {
         entry.isHidden && !biometricAuth.isAuthenticated

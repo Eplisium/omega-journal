@@ -8,7 +8,7 @@ struct OmegaIconButton: View {
     var isActive: Bool = false
     var action: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var hovering = false
 
     init(systemImage: String, accessibilityLabel: String, size: OmegaTheme.TypeSize = .bodyLarge,

@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import Foundation
 import OmegaJournalCore
 import SwiftUI
@@ -8,21 +7,22 @@ import SwiftUI
 
 /// Optional launch / away lock. Settings live in the `settings` table.
 @MainActor
-final class AppLockManager: ObservableObject {
+@Observable
+final class AppLockManager {
     static let shared = AppLockManager()
     static let enabledKey = "appLockEnabled"
     static let timeoutKey = "appLockTimeoutSeconds"
 
-    @Published private(set) var isLocked: Bool
-    @Published var isEnabled: Bool { didSet { persistEnabled() } }
-    @Published var timeout: AppLockTimeout { didSet { persistTimeout() } }
-    @Published private(set) var failedAttempt = false
+    private(set) var isLocked: Bool
+    var isEnabled: Bool { didSet { persistEnabled() } }
+    var timeout: AppLockTimeout { didSet { persistTimeout() } }
+    private(set) var failedAttempt = false
 
     private let db: DatabaseManager
     private let auth: BiometricAuth
-    private var lastActive: Date?
-    private var observers: [NSObjectProtocol] = []
-    private var authInFlight = false
+    @ObservationIgnored private var lastActive: Date?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var authInFlight = false
     var isObservingApp: Bool { !observers.isEmpty }
 
     init(db: DatabaseManager? = nil, auth: BiometricAuth? = nil, observeApp: Bool = true) {
@@ -94,8 +94,7 @@ final class AppLockManager: ObservableObject {
 /// with `AppLockOverlay`, and asks for authentication as soon as a locked
 /// window appears (the launch-time didBecomeActive fired before the gate).
 struct AppLockGate: ViewModifier {
-    @ObservedObject var lock: AppLockManager
-
+    var lock: AppLockManager
     func body(content: Content) -> some View {
         content
             .disabled(lock.isLocked)
@@ -109,8 +108,8 @@ struct AppLockGate: ViewModifier {
 
 /// Full-window cover shown while the app is locked.
 struct AppLockOverlay: View {
-    @ObservedObject var lock: AppLockManager
-    @ObservedObject private var theme = ThemeManager.shared
+    var lock: AppLockManager
+    private let theme = ThemeManager.shared
 
     var body: some View {
         if lock.isLocked {

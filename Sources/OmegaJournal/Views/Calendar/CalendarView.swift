@@ -8,9 +8,9 @@ import OmegaJournalCore
 // ViewModel's reflective scope instead of the Journal list/search result.
 
 struct CalendarView: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    var vm: JournalViewModel
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
 
     private enum DisplayMode: String, CaseIterable, Identifiable {
         case month = "Month"

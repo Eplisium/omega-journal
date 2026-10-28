@@ -10,7 +10,7 @@ struct OmegaChip: View {
     var isSelected: Bool = false
     var action: (() -> Void)? = nil
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var color: Color {
         switch tone {

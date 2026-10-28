@@ -4,15 +4,16 @@ import OmegaJournalCore
 // MARK: - First-run tour & What's new
 
 @MainActor
-final class OnboardingState: ObservableObject {
+@Observable
+final class OnboardingState {
     static let completedKey = "onboarding.completed"
     static let lastSeenVersionKey = "onboarding.lastSeenVersion"
     /// Bump the user-facing version of the highlights below whenever they change.
     static let whatsNewVersion = "2.0"
 
-    @Published var isPresentingTour = false
-    @Published var isPresentingWhatsNew = false
-    private let defaults: UserDefaults
+    var isPresentingTour = false
+    var isPresentingWhatsNew = false
+    @ObservationIgnored private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
@@ -50,10 +51,10 @@ final class OnboardingState: ObservableObject {
 }
 
 struct OnboardingTourView: View {
-    @ObservedObject var onboarding: OnboardingState
+    var onboarding: OnboardingState
     var onStartWriting: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var page = 0
 
@@ -107,8 +108,8 @@ struct OnboardingTourView: View {
 }
 
 struct WhatsNewView: View {
-    @ObservedObject var onboarding: OnboardingState
-    @ObservedObject private var theme = ThemeManager.shared
+    var onboarding: OnboardingState
+    private let theme = ThemeManager.shared
 
     private let items: [(String, String, String)] = [
         ("book.closed", "Notebooks", "Keep Personal, Work and Dreams apart — switch from the sidebar."),

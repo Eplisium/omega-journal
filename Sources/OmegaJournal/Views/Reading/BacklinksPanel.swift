@@ -4,11 +4,11 @@ import OmegaJournalCore
 /// Backlinks + unlinked mentions under an entry in the reader. Hidden entries never appear while locked
 /// (the view model's pool already excludes them); their snippets are never built.
 struct BacklinksPanel: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entry: JournalEntry
     var onShowGraph: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var showMentions = false
 
     var body: some View {

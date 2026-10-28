@@ -11,7 +11,7 @@ struct InlineAttachmentImage: View {
     let db: DatabaseManager
     /// Absolute source line in the entry body; nil disables resizing.
     var onResize: ((Int?) -> Void)?
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var image: NSImage?
 
     var body: some View {

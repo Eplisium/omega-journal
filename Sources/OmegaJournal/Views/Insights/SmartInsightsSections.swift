@@ -6,14 +6,14 @@ import OmegaJournalCore
 
 /// Correlations, weekday mood, themes, habits and streak history for the scoped entries.
 struct SmartInsightsSections: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entries: [JournalEntry]
     /// Identity of the included entries' content (ids + edit times). Themes
     /// are re-derived whenever it changes — keying on the entry COUNT kept
     /// stale keywords/tone after edits or same-size scope changes.
     var contentFingerprint: Int? = nil
-    @ObservedObject private var store = CheckinStore.shared
-    @ObservedObject private var theme = ThemeManager.shared
+    private let store = CheckinStore.shared
+    private let theme = ThemeManager.shared
     @State private var themes = ThemeSnapshot()
     @State private var showYearReview = false
 

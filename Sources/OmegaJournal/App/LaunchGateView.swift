@@ -12,10 +12,11 @@ import CryptoKit
 /// renders first, fetches the existing key on a background thread (load-only,
 /// never minting one), and only then builds the real UI.
 @MainActor
-final class LaunchGate: ObservableObject {
-    @Published private(set) var isReady = false
-    @Published private(set) var isSlow = false
-    private var started = false
+@Observable
+final class LaunchGate {
+    private(set) var isReady = false
+    private(set) var isSlow = false
+    @ObservationIgnored private var started = false
 
     func start() {
         guard !started else { return }
@@ -36,7 +37,7 @@ final class LaunchGate: ObservableObject {
 }
 
 struct LaunchGateView: View {
-    @StateObject private var gate = LaunchGate()
+    @State private var gate = LaunchGate()
 
     /// The real UI once the key is adopted, covered by the whole-app lock.
     /// Only call after the key is ready: `AppLockManager.shared` reads its

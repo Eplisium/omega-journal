@@ -7,7 +7,7 @@ struct OmegaSectionHeader<Trailing: View>: View {
     var systemImage: String? = nil
     @ViewBuilder var trailing: () -> Trailing
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: OmegaTheme.Spacing.s) {

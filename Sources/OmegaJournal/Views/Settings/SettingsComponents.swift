@@ -12,7 +12,7 @@ struct SettingsCard<Content: View>: View {
     var footnote: String?
     let content: Content
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     init(
         title: String,
@@ -80,7 +80,7 @@ struct SettingsRow<Trailing: View>: View {
     var icon: String?
     let trailing: Trailing
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     init(
         title: String,
@@ -124,7 +124,7 @@ struct SettingsValueRow: View {
     let title: String
     let value: String
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 10) {
@@ -144,7 +144,7 @@ struct SettingsValueRow: View {
 
 /// Hairline between rows inside a `SettingsCard`.
 struct SettingsRowDivider: View {
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         Rectangle()
@@ -164,7 +164,7 @@ struct SettingsPillButton: View {
     var destructive: Bool = false
     let action: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var isHovered = false
 
     var body: some View {
@@ -211,7 +211,7 @@ struct GoalTargetField: View {
     var label: String = "Target"
     let onCommit: (Int) -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var text: String
     @State private var isHovered = false
     @FocusState private var isFocused: Bool
@@ -290,7 +290,7 @@ struct SettingsSidebarRow: View {
     let isSelected: Bool
     let action: () -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var isHovered = false
 
     var body: some View {

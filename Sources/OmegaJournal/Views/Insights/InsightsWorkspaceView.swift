@@ -11,8 +11,8 @@ import OmegaJournalCore
 /// hover, every heatmap day drills into its entries, and recent-writing rows
 /// open entries directly — all through the shared drill-through sheet.
 struct InsightsWorkspaceView: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    var vm: JournalViewModel
+    private let biometricAuth = BiometricAuth.shared
 
     var body: some View {
         // Derive everything once per render; the content reads stored values.
@@ -25,9 +25,9 @@ struct InsightsWorkspaceView: View {
 struct InsightsWorkspaceContent: View {
     let vm: JournalViewModel
     let data: InsightsSnapshot
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
-    @ObservedObject private var checkins = CheckinStore.shared
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
+    private let checkins = CheckinStore.shared
 
     @State private var drill = DrillThroughPresentation()
     @State private var workspaceSize: CGSize = .zero

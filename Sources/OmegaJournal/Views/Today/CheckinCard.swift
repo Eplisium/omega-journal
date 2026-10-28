@@ -6,8 +6,8 @@ import OmegaJournalCore
 /// Structured daily check-in: sleep, energy, stress and any custom metrics.
 /// Embed standalone: `CheckinCard()`.
 struct CheckinCard: View {
-    @ObservedObject var store: CheckinStore = .shared
-    @ObservedObject private var theme = ThemeManager.shared
+    var store: CheckinStore = .shared
+    private let theme = ThemeManager.shared
     @State private var showAdd = false
     @State private var isEditing = false
     @State private var newName = ""
@@ -83,8 +83,8 @@ struct CheckinCard: View {
 
 private struct MetricInput: View {
     let metric: CheckinMetric
-    @ObservedObject var store: CheckinStore
-    @ObservedObject private var theme = ThemeManager.shared
+    var store: CheckinStore
+    private let theme = ThemeManager.shared
     @State private var text = ""
 
     var body: some View {
@@ -139,8 +139,8 @@ private struct MetricInput: View {
 
 /// Row of tappable habit chips for today with streak counts. Embed standalone: `HabitStrip()`.
 struct HabitStrip: View {
-    @ObservedObject var store: CheckinStore = .shared
-    @ObservedObject private var theme = ThemeManager.shared
+    var store: CheckinStore = .shared
+    private let theme = ThemeManager.shared
     @State private var adding = false
     @State private var newName = ""
 

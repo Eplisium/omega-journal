@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import SwiftUI
 import AppKit
@@ -7,104 +6,125 @@ import OmegaJournalCore
 // MARK: - Journal View Model
 
 @MainActor
-final class JournalViewModel: ObservableObject {
+@Observable
+final class JournalViewModel {
     // Library
-    @Published var entries: [JournalEntry] = [] {
+    var entries: [JournalEntry] = [] {
         didSet { recomputeMoodCounts() }
     }
     /// Precomputed per-mood counts of active entries (sidebar badges) so views
     /// don't re-filter the whole library for every mood on every render.
     var moodCounts: [Mood: Int] = [:]
-    @Published var trashedEntries: [JournalEntry] = []
-    @Published var archivedEntries: [JournalEntry] = []
-    @Published var hiddenEntries: [JournalEntry] = []
-    @Published var templates: [EntryTemplate] = []
-    @Published var allTags: [(tag: String, count: Int)] = []
+    var trashedEntries: [JournalEntry] = []
+    var archivedEntries: [JournalEntry] = []
+    var hiddenEntries: [JournalEntry] = []
+    var templates: [EntryTemplate] = []
+    var allTags: [(tag: String, count: Int)] = []
     /// Search results are intentionally separate from the active-library snapshot so
     /// Calendar, sidebar counts, goals, and Insights never become search-dependent.
-    @Published var searchResults: [JournalEntry]?
+    var searchResults: [JournalEntry]?
 
     // Selection & editing
-    @Published var selectedEntryId: String?
-    @Published var editingEntryId: String?
+    var selectedEntryId: String?
+    var editingEntryId: String?
 
     // Search & filtering
-    @Published var searchText: String = ""
-    @Published var sortOrder: SortOrder = .dateDesc
-    @Published var filter: EntryFilter = .empty
+    var searchText: String = ""
+    /// Persisted on every real change once `init` finishes (see
+    /// `persistsViewState`); loading the saved value never writes it back.
+    var sortOrder: SortOrder = .dateDesc {
+        didSet {
+            guard persistsViewState, sortOrder != oldValue else { return }
+            db.setSetting(Self.sortOrderSettingKey, value: sortOrder.rawValue)
+        }
+    }
+    var filter: EntryFilter = .empty {
+        didSet {
+            guard persistsViewState, filter != oldValue else { return }
+            if let data = try? JSONEncoder().encode(filter), let text = String(data: data, encoding: .utf8) {
+                db.setSetting(Self.filterSettingKey, value: text)
+            }
+        }
+    }
     /// Named search + tag/mood filter combinations (stored as JSON in settings).
-    @Published var savedSearches: [SavedSearch] = []
+    var savedSearches: [SavedSearch] = []
     /// Notebooks. `activeJournalId == nil` means "All journals".
-    @Published var journals: [Journal] = []
-    @Published var activeJournalId: String?
-    @Published var tagColors: [String: String] = [:]
-    @Published var smartFolders: [SmartFolder] = []
-    @Published var smartFolderCounts: [String: Int] = [:]
-    @Published var recentSearches: [String] = []
-    @Published var journalCounts: [String: Int] = [:]
-    @Published var tagTree: [TagNode] = []
+    var journals: [Journal] = []
+    var activeJournalId: String?
+    var tagColors: [String: String] = [:]
+    var smartFolders: [SmartFolder] = []
+    var smartFolderCounts: [String: Int] = [:]
+    var recentSearches: [String] = []
+    var journalCounts: [String: Int] = [:]
+    var tagTree: [TagNode] = []
 
     // Reflection scope
-    @Published var analyticsPeriod: AnalyticsPeriod = .thirtyDays
-    @Published var analyticsVisibility: AnalyticsVisibility = .visibleOnly
+    var analyticsPeriod: AnalyticsPeriod = .thirtyDays
+    var analyticsVisibility: AnalyticsVisibility = .visibleOnly
 
     // UI state
-    @Published var editorMode: EditorMode = .write
-    @Published var isZenMode = false
-    @Published var showCommandPalette = false
-    @Published var toast: Toast?
+    var editorMode: EditorMode = .write
+    var isZenMode = false
+    var showCommandPalette = false
+    var toast: Toast?
 
     /// Set of entry ids selected for bulk actions (multi-select mode in the list).
-    @Published var bulkSelection: Set<String> = []
-    @Published var isBulkSelecting = false
+    var bulkSelection: Set<String> = []
+    var isBulkSelecting = false
 
     let db: DatabaseManager
-    var searchDebounce: Task<Void, Never>?
-    var saveDebounce: Task<Void, Never>?
+    @ObservationIgnored var searchDebounce: Task<Void, Never>?
+    @ObservationIgnored var saveDebounce: Task<Void, Never>?
     /// The exact snapshot `saveDebounce` will persist. Flushing writes THIS —
     /// not whatever `editingEntry` happens to be by then — so switching,
     /// creating, trashing or reloading can never drop or misdirect an edit.
-    var pendingSave: JournalEntry?
+    @ObservationIgnored var pendingSave: JournalEntry?
     /// Editor save indicator: `.pending` while a debounced autosave is queued,
     /// `.failed(reason)` while any snapshot in `unsavedSnapshots` is unsaved.
     typealias SaveState = SaveStatus
-    @Published var saveState: SaveState = .idle
+    var saveState: SaveState = .idle
     /// Snapshots whose write failed, by entry id. They are never dropped on
     /// failure: each flush, the next edit, and the explicit Retry action try
     /// them again, and `reload()` re-applies them so stale storage cannot
     /// replace text the user typed.
-    var unsavedSnapshots: [String: JournalEntry] = [:] {
+    @ObservationIgnored var unsavedSnapshots: [String: JournalEntry] = [:] {
         didSet {
             // Publish only real changes: every successful write clears its id,
             // which must not wake every observer on each keystroke save.
             let ids = Set(unsavedSnapshots.keys)
             if ids != unsavedEntryIds { unsavedEntryIds = ids }
-            unsavedReasons = unsavedReasons.filter { ids.contains($0.key) }
+            let reasons = unsavedReasons.filter { ids.contains($0.key) }
+            if reasons != unsavedReasons { unsavedReasons = reasons }
         }
     }
     /// Ids of entries with an unsaved snapshot. Published so views outside the
     /// editor (reader banner, list rows, sidebar) keep showing the failure
     /// after the editor closes and the toast is gone.
-    @Published private(set) var unsavedEntryIds: Set<String> = []
+    private(set) var unsavedEntryIds: Set<String> = []
     /// Failure reason per unsaved entry (fixed wording, never content).
     var unsavedReasons: [String: SaveFailureReason] = [:]
     /// Last tag rename/delete, applied to unsaved snapshots and published so an
     /// open editor rewrites its own tag list the same way.
-    @Published private(set) var lastTagRewrite: SaveTagRewrite?
+    private(set) var lastTagRewrite: SaveTagRewrite?
+    /// Bumped on every tag rewrite (even a repeat of the same one) so an open
+    /// editor reacts to each rewrite, as it did to every `$lastTagRewrite` emit.
+    private(set) var tagRewriteGeneration = 0
     /// Reason for the most recent failed snapshot write.
     var lastSaveFailure: SaveFailureReason?
     /// The failure toast is shown once per failure episode, not per retry.
-    var saveFailureAnnounced = false
+    @ObservationIgnored var saveFailureAnnounced = false
     /// Test seam: replaces the database write used for autosave snapshots and
     /// retries. Throwing simulates a failed write without corrupting a DB.
-    var saveWriterOverride: ((JournalEntry) throws -> Void)?
-    var undoStack: [UndoAction] = []
+    @ObservationIgnored var saveWriterOverride: ((JournalEntry) throws -> Void)?
+    @ObservationIgnored var undoStack: [UndoAction] = []
     /// Undo history is bounded: an unbounded stack of id arrays only grows.
     static let maxUndoDepth = 50
-    var cancellables: Set<AnyCancellable> = []
+    /// False until `init` finishes, so loading saved view state never
+    /// re-persists it (the Combine sinks this replaces used `dropFirst`).
+    @ObservationIgnored var persistsViewState = false
     /// Distinct writing days, cached against a cheap fingerprint so keystroke-driven
     /// `entries` updates don't redo calendar math (see `writingDays`).
-    var writingDaysCache: (key: [Double], days: Set<Date>)?
+    @ObservationIgnored var writingDaysCache: (key: [Double], days: Set<Date>)?
 
     enum EditorMode: String, CaseIterable, Identifiable {
         case write = "Write"
@@ -150,36 +170,15 @@ final class JournalViewModel: ObservableObject {
         loadOrganizationState()
         reload()
         loadTemplates()
-        $sortOrder
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] order in
-                self?.db.setSetting(Self.sortOrderSettingKey, value: order.rawValue)
-            }
-            .store(in: &cancellables)
-        $filter
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] filter in
-                guard let self else { return }
-                if let data = try? JSONEncoder().encode(filter), let text = String(data: data, encoding: .utf8) {
-                    self.db.setSetting(Self.filterSettingKey, value: text)
-                }
-            }
-            .store(in: &cancellables)
+        persistsViewState = true
         // Lock/unlock changes which tags may appear in the sidebar, so
-        // re-derive tag counts whenever the biometric session changes. Combine
-        // subscription keeps this in sync without every mutation site needing
-        // to remember to do it.
-        BiometricAuth.shared.$isAuthenticated
-            .dropFirst()
-            .removeDuplicates()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.refreshTagCounts()
-            }
-            .store(in: &cancellables)
+        // re-derive tag counts whenever the biometric session really changes
+        // (delivered asynchronously on the main queue, after the change).
+        // This keeps counts in sync without every mutation site needing to
+        // remember to do it.
+        BiometricAuth.shared.observeSessionChanges(owner: self) { [weak self] in
+            self?.refreshTagCounts()
+        }
     }
 
     // MARK: - Persisted view state
@@ -637,6 +636,7 @@ final class JournalViewModel: ObservableObject {
             if rewritten != tags { unsavedSnapshots[id]?.tags = rewritten }
         }
         lastTagRewrite = rewrite
+        tagRewriteGeneration &+= 1
     }
 
     /// `.failed(reason)` while anything is unsaved, else nil.

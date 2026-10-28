@@ -6,9 +6,9 @@ import OmegaJournalCore
 /// `floating`: drawn as an overlay strip on top of the list (with its own
 /// background and a hairline) so showing it never moves the rows beneath.
 struct SearchOperatorBar: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     var floating = false
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private let inserts = ["tag:", "mood:", "before:", "after:", "has:image"]
 

@@ -121,8 +121,9 @@ enum MarkdownCommand: CaseIterable {
 
 /// Lets SwiftUI parents send formatting commands down into the NSTextView.
 @MainActor
-final class MarkdownEditorController: ObservableObject {
-    fileprivate weak var textView: NSTextView?
+@Observable
+final class MarkdownEditorController {
+    @ObservationIgnored fileprivate weak var textView: NSTextView?
 
     func apply(_ command: MarkdownCommand) {
         // A source hidden behind the preview never takes format edits.

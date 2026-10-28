@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-import Combine
+import Observation
 @testable import OmegaJournal
 
 /// Regression guard for the launch hang: `MenuBarExtra(isInserted:)` used to
@@ -8,10 +8,21 @@ import Combine
 /// whole scene graph on every UserDefaults write (window/split-view frame
 /// autosave included) and spun the main thread at 100% before the window
 /// appeared. `QuickCapturePresence` must only publish on a real change of its
-/// own key.
+/// own key. `@Observable` setters notify even on equal values, so these tests
+/// count actual Observation change notifications on `isInserted`.
 @MainActor
 @Suite("Quick capture menu bar presence")
 struct QuickCapturePresenceTests {
+
+    /// Records whether Observation reported a change to `isInserted` while
+    /// `body` ran. One registration catches the first notification, so
+    /// "no change" means no notification at all.
+    private func changesInsertion(_ presence: QuickCapturePresence, during body: () -> Void) -> Bool {
+        let flag = ChangeFlag()
+        withObservationTracking { _ = presence.isInserted } onChange: { flag.set() }
+        body()
+        return flag.fired
+    }
 
     private func makeDefaults() -> (UserDefaults, String) {
         let suite = "omega.qc.tests.\(UUID().uuidString)"
@@ -32,18 +43,17 @@ struct QuickCapturePresenceTests {
         let (d, suite) = makeDefaults()
         defer { d.removePersistentDomain(forName: suite) }
         let presence = QuickCapturePresence(defaults: d)
-        var publishes = 0
-        let sub = presence.objectWillChange.sink { publishes += 1 }
-        defer { sub.cancel() }
 
-        // Simulates window / split-view frame autosave churn during layout.
-        for i in 0..<50 { d.set("frame \(i)", forKey: "NSWindow Frame Test") }
-        presence.syncFromDefaults()
-        // Rewriting the same value is also not a change.
-        d.set(true, forKey: QuickCapture.insertedKey)
-        presence.syncFromDefaults()
+        let changed = changesInsertion(presence) {
+            // Simulates window / split-view frame autosave churn during layout.
+            for i in 0..<50 { d.set("frame \(i)", forKey: "NSWindow Frame Test") }
+            presence.syncFromDefaults()
+            // Rewriting the same value is also not a change.
+            d.set(true, forKey: QuickCapture.insertedKey)
+            presence.syncFromDefaults()
+        }
 
-        #expect(publishes == 0)
+        #expect(changed == false)
         #expect(presence.isInserted == true)
     }
 
@@ -52,14 +62,15 @@ struct QuickCapturePresenceTests {
         let (d, suite) = makeDefaults()
         defer { d.removePersistentDomain(forName: suite) }
         let presence = QuickCapturePresence(defaults: d)
-        var publishes = 0
-        let sub = presence.objectWillChange.sink { publishes += 1 }
-        defer { sub.cancel() }
 
-        d.set(false, forKey: QuickCapture.insertedKey)   // Settings toggle off
-        presence.syncFromDefaults()
+        let changed = changesInsertion(presence) {
+            d.set(false, forKey: QuickCapture.insertedKey)   // Settings toggle off
+            presence.syncFromDefaults()
+        }
         #expect(presence.isInserted == false)
-        #expect(publishes == 1)
+        #expect(changed == true)
+        // A second sync of the same value does not notify again.
+        #expect(changesInsertion(presence) { presence.syncFromDefaults() } == false)
     }
 
     @Test("binding writes persist only when the value changes")
@@ -67,18 +78,23 @@ struct QuickCapturePresenceTests {
         let (d, suite) = makeDefaults()
         defer { d.removePersistentDomain(forName: suite) }
         let presence = QuickCapturePresence(defaults: d)
-        var publishes = 0
-        let sub = presence.objectWillChange.sink { publishes += 1 }
-        defer { sub.cancel() }
 
         let binding = presence.binding
-        binding.wrappedValue = true          // redundant write from SwiftUI
-        #expect(publishes == 0)
+        // Redundant write from SwiftUI.
+        #expect(changesInsertion(presence) { binding.wrappedValue = true } == false)
         #expect(d.object(forKey: QuickCapture.insertedKey) == nil)
 
-        binding.wrappedValue = false         // user removed the item
-        #expect(publishes == 1)
+        // User removed the item.
+        #expect(changesInsertion(presence) { binding.wrappedValue = false } == true)
         #expect(d.bool(forKey: QuickCapture.insertedKey) == false)
         #expect(presence.isInserted == false)
     }
+}
+
+/// Set from Observation's `@Sendable` onChange callback.
+nonisolated private final class ChangeFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.withLock { value = true } }
+    var fired: Bool { lock.withLock { value } }
 }

@@ -13,7 +13,7 @@ struct HeatmapView: View {
     /// view no longer reports coverage across 26 weeks it never included.
     var periodStart: Date? = nil
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoveredDate: Date?
     @State private var selectedDate: Date?

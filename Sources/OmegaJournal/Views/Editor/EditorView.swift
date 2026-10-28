@@ -6,11 +6,11 @@ import OmegaJournalCore
 // MARK: - Editor
 
 struct EditorView: View {
-    @ObservedObject var vm: JournalViewModel
+    @Bindable var vm: JournalViewModel
     let entry: JournalEntry
 
-    @ObservedObject private var theme = ThemeManager.shared
-    @StateObject private var controller = MarkdownEditorController()
+    private let theme = ThemeManager.shared
+    @State private var controller = MarkdownEditorController()
 
     @State private var title: String
     @State private var body_: String
@@ -148,7 +148,8 @@ struct EditorView: View {
         .onChange(of: tags) { _, _ in persist() }
         // A tag rename/delete elsewhere rewrites this editor's tag list the
         // same way, so the next keystroke can't save the old tag back.
-        .onReceive(vm.$lastTagRewrite.dropFirst().compactMap { $0 }) { rewrite in
+        .onChange(of: vm.tagRewriteGeneration) { _, _ in
+            guard let rewrite = vm.lastTagRewrite else { return }
             let rewritten = rewrite.apply(to: tags)
             if rewritten != tags { tags = rewritten }
         }

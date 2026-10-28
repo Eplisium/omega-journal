@@ -22,8 +22,8 @@ private struct PanelCard<Content: View>: View {
 // MARK: App lock
 
 struct AppLockPanel: View {
-    @ObservedObject private var lock = AppLockManager.shared
-    @ObservedObject private var theme = ThemeManager.shared
+    @Bindable private var lock = AppLockManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         PanelCard(card: .appLock,
@@ -49,8 +49,8 @@ struct AppLockPanel: View {
 // MARK: Backups
 
 struct BackupPanel: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
+    var vm: JournalViewModel
+    private let theme = ThemeManager.shared
     @State private var folderState: MASSandboxBackupFolder.State = .notSet
     @State private var backups: [BackupInfo] = []
     @State private var status: String?
@@ -193,7 +193,7 @@ extension JournalViewModel {
 // MARK: Export / import
 
 struct MoreExportsPanel: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     var body: some View {
         PanelCard(card: .moreExports,
                   footnote: "Markdown folder: one .md file per entry plus an attachments folder. Static website: self-contained HTML you can open or host anywhere. Hidden entries are only included after you unlock them.") {
@@ -212,8 +212,8 @@ struct MoreExportsPanel: View {
 }
 
 struct EncryptedExportPanel: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
+    var vm: JournalViewModel
+    private let theme = ThemeManager.shared
     @State private var passphrase = ""
     @State private var confirm = ""
 
@@ -239,7 +239,7 @@ struct EncryptedExportPanel: View {
 }
 
 struct ImportOtherAppsPanel: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     var body: some View {
         PanelCard(card: .importOtherApps,
                   footnote: "Day One: choose Export → JSON in Day One. Obsidian or notes: pick the vault or folder; titles, dates and tags in front matter are kept and images are attached. Duplicates are skipped and imported entries are never hidden.") {
@@ -271,8 +271,8 @@ struct ReviewRemindersPanel: View {
 /// (the shared `ReviewCard` uses the large dashboard header, which looked out of
 /// place between settings cards).
 struct PeriodicReviewPanel: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
+    var vm: JournalViewModel
+    private let theme = ThemeManager.shared
     @State private var period: ReviewPeriod = .week
 
     var body: some View {
@@ -304,7 +304,7 @@ struct PeriodicReviewPanel: View {
 }
 
 struct AIAssistPanel: View {
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var aiEnabled = SmartAssist.isEnabled()
 
     var body: some View {

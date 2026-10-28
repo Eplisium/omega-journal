@@ -5,7 +5,7 @@ import SwiftUI
 /// Hosts destinations that should never compete with the Journal collection
 /// column. The Journal workspace remains the single dedicated list/detail flow.
 struct ReflectionWorkspaceView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
 
     var body: some View {

@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import OmegaJournalCore
 import SwiftUI
@@ -11,7 +10,8 @@ import SwiftUI
 // cardColor) plus new optional keys, so older databases load unchanged.
 
 @MainActor
-final class ThemeManager: ObservableObject {
+@Observable
+final class ThemeManager {
     static let shared = ThemeManager(db: .shared)
 
     // Settings keys
@@ -20,22 +20,23 @@ final class ThemeManager: ObservableObject {
     static let darkPresetKey = "themeDarkPreset"
     static func accentOverrideKey(_ preset: String) -> String { "themeAccentOverride.\(preset)" }
 
-    @Published var accentColor: Color
-    @Published var backgroundColor: Color
-    @Published var sidebarColor: Color
-    @Published var cardColor: Color
-    @Published var titleTextColor: Color
-    @Published var bodyTextColor: Color
-    @Published var secondaryTextColor: Color
-    @Published var themeName: String
-    @Published var colorScheme: ColorScheme
-    @Published private(set) var followSystem: Bool
-    @Published private(set) var lightPresetName: String
-    @Published private(set) var darkPresetName: String
+    var accentColor: Color
+    var backgroundColor: Color
+    var sidebarColor: Color
+    var cardColor: Color
+    var titleTextColor: Color
+    var bodyTextColor: Color
+    var secondaryTextColor: Color
+    var themeName: String
+    var colorScheme: ColorScheme
+    private(set) var followSystem: Bool
+    private(set) var lightPresetName: String
+    private(set) var darkPresetName: String
     /// Per-preset accent overrides (preset name -> hex).
-    @Published private(set) var accentOverrides: [String: String]
+    private(set) var accentOverrides: [String: String]
 
-    private var cancellables = Set<AnyCancellable>()
+    /// KVO on `NSApp.effectiveAppearance` (was a Combine KVO publisher).
+    @ObservationIgnored private var appearanceObservation: NSKeyValueObservation?
 
     private let db: DatabaseManager
 
@@ -74,18 +75,21 @@ final class ThemeManager: ObservableObject {
         accentOverrides = overrides
 
         // Re-derive text colors (and follow the system light/dark pair) when appearance changes.
-        NSApp.publisher(for: \.effectiveAppearance)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                if self.followSystem {
-                    self.applySystemPair()
-                } else {
-                    self.refreshScheme()
-                }
-            }
-            .store(in: &cancellables)
+        // `.initial` keeps the publisher's behavior of handling the current
+        // appearance once, synchronously, right here in init.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.effectiveAppearanceChanged() }
+        }
 
         if followSystem { applySystemPair(persistSelection: false) } else { applyPresetText() }
+    }
+
+    private func effectiveAppearanceChanged() {
+        if followSystem {
+            applySystemPair()
+        } else {
+            refreshScheme()
+        }
     }
 
     // MARK: Derived semantic colors

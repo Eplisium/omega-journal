@@ -4,11 +4,11 @@ import OmegaJournalCore
 // MARK: - Content View
 
 struct ContentView: View {
-    @StateObject private var vm = JournalViewModel()
-    @ObservedObject private var theme = ThemeManager.shared
+    @LazyState private var vm = JournalViewModel()
+    private let theme = ThemeManager.shared
     @State private var sidebarSelection: SidebarItem? = .today
     @State private var showTemplatePicker = false
-    @StateObject private var onboarding = OnboardingState()
+    @State private var onboarding = OnboardingState()
     @SceneStorage("shell.sidebarSelection") private var storedSelection = SidebarItem.today.storageKey
     @State private var didRestoreSelection = false
     @State private var showLegacyImportOffer = false
@@ -35,7 +35,7 @@ struct ContentView: View {
         .tint(theme.accentColor)
         .preferredColorScheme(theme.colorScheme)
         .background(theme.backgroundColor)
-        .environmentObject(vm)
+        .environment(vm)
         .sheet(isPresented: $showTemplatePicker) {
             TemplatePickerView(vm: vm)
         }
@@ -126,9 +126,9 @@ struct ContentView: View {
 /// list width is the user's (persisted), clamped by `ShellListColumn` so the
 /// reader/editor keeps the room it was designed for at 940pt.
 struct JournalColumnsView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @AppStorage(ShellListColumn.storageKey) private var storedWidth = ShellListColumn.idealWidth
     /// Live width while dragging; persisted once on release.
     @State private var dragWidth: Double?
@@ -360,7 +360,7 @@ enum ShellEntryNavigation {
 /// Menu-driven entry commands, kept out of ContentView.body so the main view
 /// chain stays cheap for the type checker.
 struct ShellEntryCommands: ViewModifier {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
 
     func body(content: Content) -> some View {
@@ -425,7 +425,7 @@ struct ShellEntryCommands: ViewModifier {
 // MARK: - Navigation / lifecycle receivers
 
 struct ShellLifecycle: ViewModifier {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
     @Binding var showTemplatePicker: Bool
     @Binding var storedSelection: String
@@ -499,7 +499,7 @@ struct ShellLifecycle: ViewModifier {
 /// Tapping a weekly/monthly review notification posts `.reviewRequested`
 /// (see `NotificationPresenter`); open Today and save that period's review.
 struct ShellReviewRequests: ViewModifier {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
 
     func body(content: Content) -> some View {

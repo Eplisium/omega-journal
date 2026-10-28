@@ -8,10 +8,10 @@ import OmegaJournalCore
 /// Embed standalone: `OnThisDayCarousel(vm: vm, onOpenEntry: …)`. Renders nothing when empty
 /// unless `showWhenEmpty` is set.
 struct OnThisDayCarousel: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     var showWhenEmpty = false
     let onOpenEntry: (JournalEntry) -> Void
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var groups: [OnThisDayYear<JournalEntry>] { vm.onThisDayByYear }
 

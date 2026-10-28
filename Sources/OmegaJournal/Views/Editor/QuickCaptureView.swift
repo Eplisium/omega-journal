@@ -77,13 +77,17 @@ enum QuickCaptureInbox {
 /// write → App body …) that pinned the main thread at 100% CPU before the
 /// window ever appeared. This model publishes only when the one key it owns
 /// actually changes value, and ignores redundant writes from SwiftUI.
+///
+/// `@Observable` setters notify even when the new value equals the old one,
+/// so every write to `isInserted` below stays behind an equality guard.
 @MainActor
-final class QuickCapturePresence: ObservableObject {
-    @Published private(set) var isInserted: Bool
+@Observable
+final class QuickCapturePresence {
+    private(set) var isInserted: Bool
 
-    private let defaults: UserDefaults
+    @ObservationIgnored private let defaults: UserDefaults
     /// Read by `deinit`, which is nonisolated; set once in `init`.
-    nonisolated(unsafe) private var observer: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var observer: NSObjectProtocol?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

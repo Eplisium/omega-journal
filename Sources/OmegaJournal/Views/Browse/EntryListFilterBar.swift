@@ -4,8 +4,8 @@ import OmegaJournalCore
 // MARK: - Filter Bar
 
 struct FilterBar: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject var theme = ThemeManager.shared
+    @Bindable var vm: JournalViewModel
+    var theme = ThemeManager.shared
 
     /// Tag chips shown in the panel before the rest scroll out of reach.
     static let tagChipLimit = 14

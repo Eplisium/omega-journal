@@ -22,7 +22,7 @@ enum ListDensity: String, CaseIterable, Identifiable {
 
 struct EntryRow: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entry: JournalEntry
     let isTrash: Bool
 
@@ -30,13 +30,13 @@ struct EntryRow: View {
     // passed in as values. Rows live inside a LazyVStack, where stale passed-in
     // copies can survive a parent re-render — the reported symptom was the bulk
     // toolbar active while rows still rendered (and tapped) as if it were off.
-    // @ObservedObject re-renders the row on every publish, so these stay live.
+    // Observation re-renders the row whenever a property it reads changes, so these stay live.
     var isSelected: Bool { vm.selectedEntryId == entry.id }
     var isBulkSelected: Bool { vm.bulkSelection.contains(entry.id) }
     var isBulkSelecting: Bool { vm.isBulkSelecting }
 
-    @ObservedObject var theme = ThemeManager.shared
-    @ObservedObject var biometricAuth = BiometricAuth.shared
+    var theme = ThemeManager.shared
+    var biometricAuth = BiometricAuth.shared
     @State var hover = false
     @State var showPermanentDeleteConfirmation = false
 

@@ -5,9 +5,9 @@ import OmegaJournalCore
 
 /// One-click review generation + schedule controls. Used in Reflection surfaces and Settings.
 struct ReviewCard: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var notifications = NotificationManager.shared
-    @ObservedObject private var theme = ThemeManager.shared
+    var vm: JournalViewModel
+    private let notifications = NotificationManager.shared
+    private let theme = ThemeManager.shared
     @State private var period: ReviewPeriod = .week
 
     var body: some View {
@@ -33,8 +33,8 @@ struct ReviewCard: View {
 
 /// Settings controls for scheduled review reminders.
 struct ReviewScheduleControls: View {
-    @ObservedObject private var notifications = NotificationManager.shared
-    @ObservedObject private var theme = ThemeManager.shared
+    private let notifications = NotificationManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         let s = notifications.reviewSchedule

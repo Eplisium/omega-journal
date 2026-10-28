@@ -219,7 +219,7 @@ struct TooltipContainer<Content: View>: View {
     let tooltip: String
     let color: Color?
     @ViewBuilder let content: () -> Content
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var isHovered = false
     @State private var anchorView: NSView?
     @State private var hostWindow: NSWindow?

@@ -8,7 +8,7 @@ struct InsightSection<Content: View>: View {
     let title: String
     let subtitle: String
     @ViewBuilder let content: Content
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -38,7 +38,7 @@ struct ReflectionMetric: View {
     let detail: String
     let icon: String
     let tint: Color
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 12) {
@@ -77,7 +77,7 @@ struct PatternRow: View {
     let title: String
     let value: String
     let tint: Color
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 10) {
@@ -109,7 +109,7 @@ struct MoodCheckInChart: View {
     var hoverTitleProvider: (MoodPoint) -> String
     var onOpenDay: ((MoodPoint) -> Void)? = nil
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var hovered: HoveredMoodPoint?
 
     private struct HoveredMoodPoint {
@@ -258,7 +258,7 @@ struct MoodCheckInChart: View {
 struct MoodDistributionRow: View {
     let data: [MoodCount]
     let averageMood: Mood?
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var maxCount: Int { data.map(\.count).max() ?? 0 }
 
@@ -320,7 +320,7 @@ struct MoodDistributionRow: View {
 /// numeric axis with custom labels (categorical axes sort alphabetically).
 struct WeekdayRhythmChart: View {
     let data: [WeekdayCount]
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         Chart(data) { item in
@@ -359,7 +359,7 @@ struct WeekdayRhythmChart: View {
 struct InsightsEntryRow: View {
     let entry: JournalEntry
     let onOpen: () -> Void
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var isHovered = false
 
     var body: some View {
@@ -420,7 +420,7 @@ struct DayEntriesSheet: View {
     let entries: [JournalEntry]
     let onOpen: (JournalEntry) -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
     private static let dayFormatter = DateFormatters.fullDate
@@ -474,7 +474,7 @@ struct DayEntriesSheet: View {
 /// Daily word volume for the scoped period.
 struct WritingVolumeChart: View {
     let points: [WordPoint]
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         if points.allSatisfy({ $0.words == 0 }) {
@@ -534,7 +534,7 @@ struct ReflectionScopeBar: View {
     let onUnlock: () -> Void
     var surfaceName: String = "Insights"
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 8) {

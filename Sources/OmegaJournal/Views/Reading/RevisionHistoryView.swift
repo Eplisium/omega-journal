@@ -4,13 +4,13 @@ import OmegaJournalCore
 // MARK: - Version history sheet (list + diff + restore)
 
 struct RevisionHistoryView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entry: JournalEntry
     /// Called after a successful restore with the restored title/body (an open editor adopts them).
     var onRestored: ((String, String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var revisions: [EntryRevision] = []
     @State private var selectedId: String?
     @State private var oldBody = ""

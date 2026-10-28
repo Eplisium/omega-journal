@@ -7,9 +7,9 @@ import OmegaJournalCore
 // states. Calendar and Insights live in their own full-width workspaces.
 
 struct DetailView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -220,7 +220,7 @@ struct DetailView: View {
 private struct ToastView: View {
     let toast: JournalViewModel.Toast
     let onAction: () -> Void
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 10) {

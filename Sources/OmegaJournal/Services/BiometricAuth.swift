@@ -4,13 +4,42 @@ import LocalAuthentication
 /// Manages biometric (Touch ID / Face ID) or password authentication
 /// for accessing hidden journal entries.
 @MainActor
-final class BiometricAuth: ObservableObject {
+@Observable
+final class BiometricAuth {
     static let shared = BiometricAuth()
 
     /// Whether the user has successfully authenticated in this session.
-    @Published private(set) var isAuthenticated = false
+    private(set) var isAuthenticated = false {
+        didSet { if isAuthenticated != oldValue { notifySessionObservers() } }
+    }
     /// True while the system auth dialog is on screen (the app resigns active then).
-    @Published private(set) var isAuthenticating = false
+    private(set) var isAuthenticating = false
+
+    // MARK: - Session change observers
+
+    private struct SessionObserver {
+        weak var owner: AnyObject?
+        let handler: @MainActor () -> Void
+    }
+
+    @ObservationIgnored private var sessionObservers: [SessionObserver] = []
+
+    /// Calls `handler` after every real lock-state change (never for a
+    /// redundant write), asynchronously on the main queue, for as long as
+    /// `owner` is alive. Replaces the `$isAuthenticated` Combine pipeline
+    /// (`dropFirst().removeDuplicates().receive(on: .main)`).
+    func observeSessionChanges(owner: AnyObject, _ handler: @escaping @MainActor () -> Void) {
+        sessionObservers.removeAll { $0.owner == nil }
+        sessionObservers.append(SessionObserver(owner: owner, handler: handler))
+    }
+
+    private func notifySessionObservers() {
+        sessionObservers.removeAll { $0.owner == nil }
+        for observer in sessionObservers {
+            let handler = observer.handler
+            DispatchQueue.main.async { MainActor.assumeIsolated { handler() } }
+        }
+    }
 
     /// Where the idle-relock setting lives; `nil` means `DatabaseManager.shared` (resolved lazily).
     private let settingsDB: DatabaseManager?
@@ -37,11 +66,11 @@ final class BiometricAuth: ObservableObject {
     }
 
     /// Test seam: replaces the system prompt.
-    var evaluateOverride: (() async -> Bool)?
+    @ObservationIgnored var evaluateOverride: (() async -> Bool)?
     /// The single in-flight prompt. Concurrent callers await it instead of
     /// starting a second dialog, so one caller's completion cannot clear
     /// `isAuthenticating` (or flip `isAuthenticated`) under another.
-    private var inFlight: Task<Bool, Never>?
+    @ObservationIgnored private var inFlight: Task<Bool, Never>?
 
     /// Prompts the user to authenticate. Returns true on success. A failed or
     /// cancelled prompt never revokes an existing session.
@@ -86,17 +115,17 @@ final class BiometricAuth: ObservableObject {
     /// Re-locks hidden entries after this much idle time once unlocked.
     /// Zero disables the timer (lock still happens on app resign or manually).
     static let autoRelockIdleMinutesKey = "autoRelockIdleMinutes"
-    private var idleTimer: Task<Void, Never>?
+    @ObservationIgnored private var idleTimer: Task<Void, Never>?
     private var idleMinutes: Int {
         (settingsDB ?? .shared).int(Self.autoRelockIdleMinutesKey, default: 5)
     }
 
     /// Test seam: overrides the idle interval (seconds) instead of the setting.
-    var idleSecondsOverride: TimeInterval?
+    @ObservationIgnored var idleSecondsOverride: TimeInterval?
     /// Minimum spacing between re-arms from `noteActivity()` so per-keystroke
     /// signals don't churn tasks and settings reads.
-    var activityThrottle: TimeInterval = 1.0
-    private var lastArm = Date.distantPast
+    @ObservationIgnored var activityThrottle: TimeInterval = 1.0
+    @ObservationIgnored private var lastArm = Date.distantPast
 
     private var idleInterval: TimeInterval {
         idleSecondsOverride ?? TimeInterval(idleMinutes * 60)

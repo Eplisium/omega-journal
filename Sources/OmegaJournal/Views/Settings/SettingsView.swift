@@ -51,10 +51,10 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 // MARK: - Settings
 
 struct SettingsView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var goals = GoalManager.shared
+    private let theme = ThemeManager.shared
+    private let goals = GoalManager.shared
 
     @State private var section: SettingsSection
     @State private var customAccent = ThemeManager.shared.accentColor
@@ -87,7 +87,7 @@ struct SettingsView: View {
     @State private var sheetSize = SettingsView.preferredSize
 
     init(vm: JournalViewModel, initialSection: SettingsSection = .appearance) {
-        self._vm = ObservedObject(wrappedValue: vm)
+        self.vm = vm
         self._section = State(initialValue: initialSection)
     }
 

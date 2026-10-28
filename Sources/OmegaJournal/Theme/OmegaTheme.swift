@@ -123,7 +123,7 @@ extension View {
 
 private struct OmegaElevationModifier: ViewModifier {
     let level: OmegaTheme.Elevation
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     func body(content: Content) -> some View {
         content.shadow(
@@ -155,7 +155,7 @@ struct HoverGlowModifier: ViewModifier {
     var borderStrength: Double = 0.35
     var lift: Bool = true
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var hovering = false

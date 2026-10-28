@@ -20,7 +20,7 @@ struct SuggestionPopoverView: View {
     let items: [SuggestionItem]
     let selected: Int
     var onPick: (SuggestionItem) -> Void
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -90,7 +90,7 @@ struct WritingFocusSettingsView: View {
     @AppStorage(ReadingPreferences.editorColumnWidthKey) private var columnWidth = WritingFocusLogic.defaultColumnWidth
     @AppStorage(ReadingPreferences.editorTypewriterKey) private var typewriter = false
     @AppStorage(ReadingPreferences.editorDimParagraphsKey) private var dimOthers = false
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -149,7 +149,7 @@ struct WritingFocusSettingsView: View {
 
 struct EntryStampEditor: View {
     @Binding var stamp: EntryStamp
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -196,7 +196,7 @@ struct WritingFooterView: View {
     /// Test seam: the save indicator's frame in window coordinates whenever it lays out.
     var onSaveIndicatorFrame: ((CGRect) -> Void)? = nil
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     /// Widest footer that fits. The save state is in every variant (and in
     /// Zen mode, where it used to be replaced by an "exit zen" hint), with

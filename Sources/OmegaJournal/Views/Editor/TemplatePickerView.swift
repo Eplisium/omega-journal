@@ -8,9 +8,9 @@ import OmegaJournalCore
 /// is created. Start Writing (Return) or a double-click creates the entry;
 /// Cancel / Esc / the close button create nothing.
 struct TemplatePickerView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     @State private var selectedId: String?
     @State private var editing: EntryTemplate?
@@ -344,7 +344,7 @@ struct TemplateEditorView: View {
     var onSave: (EntryTemplate) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @State private var name: String
     @State private var bodyText: String
     @State private var tagsText: String

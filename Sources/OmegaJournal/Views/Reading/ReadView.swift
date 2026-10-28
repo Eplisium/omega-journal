@@ -5,12 +5,12 @@ import OmegaJournalCore
 // MARK: - Read View
 
 struct ReadView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entry: JournalEntry
     var isTrash: Bool = false
 
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
     @State private var showPermanentDeleteConfirmation = false
     @State private var showHistory = false
     @State private var showGraph = false
@@ -585,7 +585,7 @@ struct UnsavedEntryBanner: View {
     /// Test seam: reports the Retry button's frame.
     var onFrame: ((CGRect) -> Void)? = nil
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 8) {

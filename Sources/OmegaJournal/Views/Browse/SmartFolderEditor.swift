@@ -6,12 +6,12 @@ extension SmartFolder: Hashable {
 }
 
 struct SmartFolderEditor: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @State var folder: SmartFolder
     var onDone: (SmartFolder?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     init(vm: JournalViewModel, folder: SmartFolder, onDone: @escaping (SmartFolder?) -> Void) {
         self.vm = vm
@@ -94,12 +94,12 @@ struct SmartFolderEditor: View {
 }
 
 struct NotebookEditor: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let journal: Journal?
     @State private var name: String
     @State private var colorHex: String
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     init(vm: JournalViewModel, journal: Journal?) {
         self.vm = vm; self.journal = journal
@@ -135,7 +135,7 @@ struct NotebookEditor: View {
 struct ColorSwatchRow: View {
     @Binding var selectedHex: String
     var allowsNone: Bool
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 8) {
@@ -161,9 +161,9 @@ struct ColorSwatchRow: View {
 }
 
 struct TagManagerView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     @State private var renaming: String?
     @State private var renameText = ""

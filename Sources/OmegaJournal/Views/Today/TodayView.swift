@@ -24,15 +24,15 @@ struct TodayHeroContent: Equatable {
 /// A calm starting point for writing. It intentionally surfaces only a few
 /// recent memories; the complete library belongs in the Journal workspace.
 struct TodayView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let openJournal: () -> Void
     let openCalendar: () -> Void
     let openInsights: () -> Void
     let openEntry: (JournalEntry) -> Void
 
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var goals = GoalManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let goals = GoalManager.shared
+    private let biometricAuth = BiometricAuth.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var recentEntries: [JournalEntry] {
@@ -419,7 +419,7 @@ struct TodayView: View {
 
 private struct TodayGoalRow: View {
     let goal: WritingGoal
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {

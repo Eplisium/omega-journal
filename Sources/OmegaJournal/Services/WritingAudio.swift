@@ -32,21 +32,22 @@ private final class AVMemoBackend: MemoRecordingBackend {
 /// Records a voice memo to a temp file, exposes live levels, and hands back the bytes
 /// (the caller stores them as an encrypted attachment and the temp file is deleted).
 @MainActor
-final class AudioMemoRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
+@Observable
+final class AudioMemoRecorder: NSObject, AVAudioRecorderDelegate {
     enum State: Equatable { case idle, recording, denied, failed(String) }
 
-    @Published private(set) var state: State = .idle
-    @Published private(set) var elapsed: TimeInterval = 0
-    @Published private(set) var levels: [Float] = []
+    private(set) var state: State = .idle
+    private(set) var elapsed: TimeInterval = 0
+    private(set) var levels: [Float] = []
 
     /// Called with the recorded bytes when the time cap stops a recording on its own.
-    var onAutoStop: ((Data) -> Void)?
+    @ObservationIgnored var onAutoStop: ((Data) -> Void)?
     /// Bytes from an auto-stop that nobody has collected yet (no `onAutoStop` listener).
-    private var pendingMemo: Data?
+    @ObservationIgnored private var pendingMemo: Data?
 
-    private var backend: MemoRecordingBackend?
-    private var timer: Timer?
-    private var fileURL: URL?
+    @ObservationIgnored private var backend: MemoRecordingBackend?
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var fileURL: URL?
     static let maxSeconds: TimeInterval = 600     // keeps memos well under the 25 MB attachment cap
 
     func start() {
@@ -131,10 +132,10 @@ final class AudioMemoRecorder: NSObject, ObservableObject, AVAudioRecorderDelega
 }
 
 struct AudioRecorderPopover: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entry: JournalEntry
-    @StateObject private var recorder = AudioMemoRecorder()
-    @ObservedObject private var theme = ThemeManager.shared
+    @State private var recorder = AudioMemoRecorder()
+    private let theme = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -225,15 +226,16 @@ struct WaveformBars: View {
 /// Inline player for an audio attachment. Audio is decrypted in memory only (the waveform pass
 /// uses a temp file that is deleted immediately).
 @MainActor
-final class AudioMemoPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
-    @Published private(set) var isPlaying = false
-    @Published private(set) var progress: Double = 0
-    @Published private(set) var bars: [Float] = []
-    @Published private(set) var duration: TimeInterval = 0
-    @Published private(set) var failed = false
+@Observable
+final class AudioMemoPlayer: NSObject, AVAudioPlayerDelegate {
+    private(set) var isPlaying = false
+    private(set) var progress: Double = 0
+    private(set) var bars: [Float] = []
+    private(set) var duration: TimeInterval = 0
+    private(set) var failed = false
 
-    private var player: AVAudioPlayer?
-    private var timer: Timer?
+    @ObservationIgnored private var player: AVAudioPlayer?
+    @ObservationIgnored private var timer: Timer?
     private static var barCache: [String: [Float]] = [:]
 
     func load(_ attachment: Attachment, db: DatabaseManager) {
@@ -296,8 +298,8 @@ final class AudioMemoPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 struct AudioMemoRow: View {
     let attachment: Attachment
     let db: DatabaseManager
-    @StateObject private var player = AudioMemoPlayer()
-    @ObservedObject private var theme = ThemeManager.shared
+    @State private var player = AudioMemoPlayer()
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 10) {

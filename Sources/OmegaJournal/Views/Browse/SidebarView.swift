@@ -4,11 +4,11 @@ import OmegaJournalCore
 // MARK: - Sidebar
 
 struct SidebarView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var goals = GoalManager.shared
-    @ObservedObject private var auth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let goals = GoalManager.shared
+    private let auth = BiometricAuth.shared
 
     // Collapsed/expanded state of every section persists across launches.
     @AppStorage(ShellPrefs.sidebarLibraryExpanded) private var libraryExpanded = true

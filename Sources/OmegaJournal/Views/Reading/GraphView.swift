@@ -6,12 +6,15 @@ import OmegaJournalCore
 
 /// Holds the simulation so the Canvas redraws as it settles. Reduce Motion → the layout is settled up front.
 @MainActor
-final class GraphSimulation: ObservableObject {
-    @Published private(set) var tick = 0
-    private(set) var layout: GraphLayout
-    private(set) var graph: LinkGraph
-    private(set) var isSettled = false
-    private var frames = 0
+@Observable
+final class GraphSimulation {
+    private(set) var tick = 0
+    // Only `tick` drives redraws; the simulation state below changes on every
+    // frame and is read through `tick`.
+    @ObservationIgnored private(set) var layout: GraphLayout
+    @ObservationIgnored private(set) var graph: LinkGraph
+    @ObservationIgnored private(set) var isSettled = false
+    @ObservationIgnored private var frames = 0
 
     init(graph: LinkGraph, size: CGSize, settleImmediately: Bool) {
         self.graph = graph
@@ -59,12 +62,12 @@ final class GraphSimulation: ObservableObject {
 }
 
 struct GraphView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     var onOpen: (JournalEntry) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometric = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let biometric = BiometricAuth.shared
 
     @State private var sim: GraphSimulation?
     @State private var includeIsolated = false

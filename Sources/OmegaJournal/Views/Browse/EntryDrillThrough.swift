@@ -15,12 +15,12 @@ struct EntryDrillThroughRoute: Identifiable {
 }
 
 struct EntryDrillThroughSheet: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let entryID: String
     var contextTitle: String = "Entry"
 
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
     @Environment(\.dismiss) private var dismiss
 
     /// Resolve on every body update rather than retaining an entry snapshot.

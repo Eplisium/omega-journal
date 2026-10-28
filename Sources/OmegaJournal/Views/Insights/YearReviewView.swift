@@ -6,8 +6,8 @@ import OmegaJournalCore
 // MARK: - Year in review
 
 struct YearReviewView: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
+    var vm: JournalViewModel
+    private let theme = ThemeManager.shared
     @Environment(\.dismiss) private var dismiss
     @State private var year: Int
 
@@ -58,7 +58,7 @@ struct YearReviewView: View {
 struct YearReviewPage: View {
     let review: YearReview
     var printable = false
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var text: Color { printable ? Color(red: 0.13, green: 0.10, blue: 0.22) : theme.titleTextColor }
     private var secondary: Color { printable ? Color(red: 0.42, green: 0.38, blue: 0.52) : theme.secondaryTextColor }

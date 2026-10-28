@@ -4,13 +4,13 @@ import OmegaJournalCore
 // MARK: - On This Day View
 
 struct OnThisDayView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     let onOpenEntry: (JournalEntry) -> Void
     /// Empty-state next steps: start today's entry, or browse past writing.
     var onWriteToday: (() -> Void)? = nil
     var onBrowseCalendar: (() -> Void)? = nil
-    @ObservedObject private var theme = ThemeManager.shared
-    @ObservedObject private var biometricAuth = BiometricAuth.shared
+    private let theme = ThemeManager.shared
+    private let biometricAuth = BiometricAuth.shared
 
     private var thisDay: [JournalEntry] { vm.reflectiveOnThisDay }
 

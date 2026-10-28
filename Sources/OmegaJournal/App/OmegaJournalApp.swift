@@ -9,7 +9,7 @@ struct OmegaJournalApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     // Not @AppStorage: see QuickCapturePresence for the launch hang this caused.
-    @StateObject private var quickCapture = QuickCapturePresence()
+    @State private var quickCapture = QuickCapturePresence()
 
     var body: some Scene {
         WindowGroup {
@@ -197,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Make sure any debounced autosave has landed before the process goes
         // away. ContentView owns the one-and-only JournalViewModel (a
-        // @StateObject), so ask it to flush via notification — the delegate has
+        // @LazyState), so ask it to flush via notification — the delegate has
         // no reference to the view-owned model. SwiftUI's onReceive handlers
         // run synchronously, so the save completes before DatabaseManager.shared
         // deinits and closes the database.

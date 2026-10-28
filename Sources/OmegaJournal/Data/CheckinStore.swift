@@ -7,16 +7,17 @@ import OmegaJournalCore
 /// Observable state for the daily check-in and habit strip. Backed by
 /// `DatabaseManager` (V12 tables). Values are plain numbers keyed by local day.
 @MainActor
-final class CheckinStore: ObservableObject {
+@Observable
+final class CheckinStore {
     static let shared = CheckinStore(db: DatabaseManager.shared)
 
     let db: DatabaseManager
-    @Published private(set) var metrics: [CheckinMetric] = []
-    @Published private(set) var habits: [Habit] = []
+    private(set) var metrics: [CheckinMetric] = []
+    private(set) var habits: [Habit] = []
     /// day key → metric id → value
-    @Published private(set) var values: [String: [String: Double]] = [:]
+    private(set) var values: [String: [String: Double]] = [:]
     /// habit id → completed day keys
-    @Published private(set) var habitLog: [String: Set<String>] = [:]
+    private(set) var habitLog: [String: Set<String>] = [:]
 
     /// How far back values/logs are loaded (covers a year-in-review).
     static let historyDays = 800

@@ -4,8 +4,8 @@ import Charts
 // MARK: - Insights Dashboard
 
 struct InsightsView: View {
-    @ObservedObject var vm: JournalViewModel
-    @ObservedObject private var theme = ThemeManager.shared
+    var vm: JournalViewModel
+    private let theme = ThemeManager.shared
 
     private let columns = [GridItem(.adaptive(minimum: 160), spacing: 14)]
 
@@ -86,7 +86,7 @@ struct InsightsView: View {
 
 struct InsightStat: View {
     let value: String, label: String, icon: String, color: Color
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var isDark: Bool { theme.colorScheme == .dark }
 
@@ -124,7 +124,7 @@ struct InsightStat: View {
 
 struct MetricCard<Content: View>: View {
     @ViewBuilder let content: Content
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var isDark: Bool { theme.colorScheme == .dark }
 
@@ -149,8 +149,8 @@ struct MetricCard<Content: View>: View {
 // MARK: - Insights Goal View
 
 struct InsightsGoalView: View {
-    @ObservedObject private var goals = GoalManager.shared
-    @ObservedObject private var theme = ThemeManager.shared
+    private let goals = GoalManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         HStack(spacing: 24) {

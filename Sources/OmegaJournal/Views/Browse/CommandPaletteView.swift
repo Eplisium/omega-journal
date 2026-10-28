@@ -6,9 +6,9 @@ import OmegaJournalCore
 // A single fuzzy-searchable surface for navigation, actions, and jumping to any entry.
 
 struct CommandPaletteView: View {
-    @ObservedObject var vm: JournalViewModel
+    var vm: JournalViewModel
     @Binding var selection: SidebarItem?
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     @State private var query = ""
     @State private var highlighted = 0

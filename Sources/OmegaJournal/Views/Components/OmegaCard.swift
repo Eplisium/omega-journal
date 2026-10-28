@@ -8,7 +8,7 @@ struct OmegaCard<Content: View>: View {
     var hoverable: Bool = false
     @ViewBuilder var content: () -> Content
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     private var fill: Color {
         switch level {

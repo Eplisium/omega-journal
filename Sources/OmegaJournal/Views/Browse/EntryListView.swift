@@ -5,10 +5,10 @@ import OmegaJournalCore
 // MARK: - Entry List
 
 struct EntryListView: View {
-    @ObservedObject var vm: JournalViewModel
+    @Bindable var vm: JournalViewModel
     @Binding var selection: SidebarItem?
-    @ObservedObject var theme = ThemeManager.shared
-    @ObservedObject var biometricAuth = BiometricAuth.shared
+    var theme = ThemeManager.shared
+    var biometricAuth = BiometricAuth.shared
 
     @FocusState var searchFocused: Bool
     @FocusState var listFocused: Bool

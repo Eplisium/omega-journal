@@ -73,14 +73,15 @@ struct WritingGoal: Identifiable {
 // MARK: - Goal Manager
 
 @MainActor
-final class GoalManager: ObservableObject {
+@Observable
+final class GoalManager {
     static let shared = GoalManager(db: .shared)
 
-    @Published var goals: [WritingGoal] = []
+    var goals: [WritingGoal] = []
     /// How streaks are counted. Persisted; defaults to the forgiving daily mode.
-    @Published private(set) var streakMode: StreakMode = .dailyWithRest
+    private(set) var streakMode: StreakMode = .dailyWithRest
     /// Writing days per week needed to keep a weekly streak (1...7).
-    @Published private(set) var weeklyStreakTarget: Int = 3
+    private(set) var weeklyStreakTarget: Int = 3
 
     static let streakModeKey = "streak_mode"
     static let weeklyStreakTargetKey = "streak_weeklyTarget"
@@ -109,8 +110,13 @@ final class GoalManager: ObservableObject {
     }
 
     func loadGoals() {
-        if let mode = StreakMode(rawValue: db.getSetting(Self.streakModeKey)) { streakMode = mode }
-        if let t = Int(db.getSetting(Self.weeklyStreakTargetKey)) { weeklyStreakTarget = max(1, min(t, 7)) }
+        // Runs after every autosave: skip redundant writes so readers of these
+        // settings are not invalidated each time (`@Observable` notifies on
+        // every set, equal or not).
+        if let mode = StreakMode(rawValue: db.getSetting(Self.streakModeKey)), mode != streakMode { streakMode = mode }
+        if let t = Int(db.getSetting(Self.weeklyStreakTargetKey)), max(1, min(t, 7)) != weeklyStreakTarget {
+            weeklyStreakTarget = max(1, min(t, 7))
+        }
         migrateLegacyGoalKeys()
         let dailyWordsTarget = savedTarget(for: .dailyWords)
         let dailyEntriesTarget = savedTarget(for: .dailyEntries)

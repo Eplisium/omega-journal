@@ -41,13 +41,14 @@ extension Notification.Name {
 // MARK: - Notification Manager
 
 @MainActor
-final class NotificationManager: ObservableObject {
+@Observable
+final class NotificationManager {
     static let shared = NotificationManager(db: .shared)
 
-    @Published var isAuthorized = false
-    @Published var reminderEnabled = false
-    @Published var reminderHour = 20
-    @Published var reminderMinute = 0
+    var isAuthorized = false
+    var reminderEnabled = false
+    var reminderHour = 20
+    var reminderMinute = 0
 
     private let db: DatabaseManager
     private let presenter = NotificationPresenter()
@@ -186,7 +187,7 @@ final class NotificationManager: ObservableObject {
     nonisolated static let reviewMonthlyPrefix = "reviewMonthly-"
     nonisolated static let upcomingReviewCount = 6
 
-    @Published var reviewSchedule = ReviewSchedule()
+    var reviewSchedule = ReviewSchedule()
 
     func loadReviewSchedule() {
         reviewSchedule = ReviewSchedule(

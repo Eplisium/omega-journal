@@ -8,7 +8,7 @@ struct OmegaEmptyState: View {
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
 
-    @ObservedObject private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     var body: some View {
         VStack(spacing: OmegaTheme.Spacing.m) {
