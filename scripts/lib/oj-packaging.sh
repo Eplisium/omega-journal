@@ -107,6 +107,12 @@ oj_build_binary() {
     local mode="${1:-host}"
     oj_swift_build_args "$mode"
     oj_note "Building release binaries ($mode)..."
+    # The compiler leaves an unchanged *.swiftconstvalues file untouched (old mtime)
+    # when a file without App Intents changes, which tripped the stale guard in
+    # oj_appintents_metadata. Removing the app module's release const values makes
+    # the build re-emit them, so the guard only fires on a real missed recompile.
+    find "$OJ_PROJECT_DIR/.build" -path '*/Release/*' -path "*/$OJ_EXECUTABLE-*" \
+        -name '*.swiftconstvalues' -delete 2>/dev/null || true
     swift build "${OJ_SWIFT_ARGS[@]}" || oj_die "swift build failed"
     local bin_dir bin
     bin_dir="$(swift build "${OJ_SWIFT_ARGS[@]}" --show-bin-path)"
