@@ -208,7 +208,7 @@ private struct OJGlassButtonStyle: ButtonStyle {
     let prominent: Bool
     let circle: Bool
     let height: CGFloat
-    private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
     @Environment(\.isEnabled) private var isEnabled
 
     init(prominent: Bool, circle: Bool, height: CGFloat) {
@@ -254,7 +254,7 @@ private struct OJGlassEffect<S: Shape>: ViewModifier {
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
-    private var theme = ThemeManager.shared
+    private let theme = ThemeManager.shared
 
     func body(content: Content) -> some View {
         let strength = GlassPolicy.tintOpacity(for: surface, reduceTransparency: reduceTransparency)
