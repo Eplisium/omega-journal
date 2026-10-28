@@ -8,8 +8,10 @@ import OmegaJournalCore
 final class OnboardingState {
     static let completedKey = "onboarding.completed"
     static let lastSeenVersionKey = "onboarding.lastSeenVersion"
-    /// Bump the user-facing version of the highlights below whenever they change.
-    static let whatsNewVersion = "2.0"
+    /// Revision of the highlights in `WhatsNewView`, compared against what the user last saw.
+    /// Bump it whenever the highlights change. It is an internal counter, not the app version
+    /// (1.x builds already stored "2.0", so it only ever moves up from there).
+    static let whatsNewVersion = "2.1"
 
     var isPresentingTour = false
     var isPresentingWhatsNew = false
@@ -112,16 +114,16 @@ struct WhatsNewView: View {
     private let theme = ThemeManager.shared
 
     private let items: [(String, String, String)] = [
-        ("book.closed", "Notebooks", "Keep Personal, Work and Dreams apart — switch from the sidebar."),
-        ("folder.badge.gearshape", "Smart folders", "Saved searches with live counts, built from tags, moods, dates and more."),
-        ("magnifyingglass", "Better search", "Highlighted snippets and operators like tag:, mood:, before:, has:image."),
-        ("point.3.connected.trianglepath.dotted", "Backlinks & graph", "See what links to an entry, and map your notes."),
-        ("tag", "Tag manager", "Colors, nested a/b tags, rename and merge."),
+        ("rectangle.3.group", "Widgets", "Today's words, your streak and a prompt on your desktop. Never your entries."),
+        ("square.stack.3d.up", "Shortcuts & Siri", "New entry, quick capture, Today and your progress from Shortcuts, Spotlight or Siri."),
+        ("drop", "A fresh look", "Toolbars, the command palette and buttons use Liquid Glass on macOS 26 and later."),
+        ("bolt", "Smoother in big journals", "Screens only redraw what changed, so typing and scrolling stay light."),
+        ("checkmark.shield", "Safer saving", "A failed save stays visible, keeps your text and retries. Quitting warns first."),
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: OmegaTheme.Spacing.l) {
-            Text("What's new in Omega Journal \(OnboardingState.whatsNewVersion)")
+            Text("What's new in Omega Journal")
                 .font(OmegaTheme.font(.title, .bold, design: .serif)).foregroundColor(theme.titleTextColor)
                 .accessibilityAddTraits(.isHeader)
             ForEach(items, id: \.1) { item in

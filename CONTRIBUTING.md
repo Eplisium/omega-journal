@@ -12,7 +12,7 @@ Comment on an issue before starting so nobody duplicates work.
 
 ## Getting set up (5 minutes)
 
-Requirements: macOS 14+ and a recent Xcode / Swift toolchain (Swift 6 or newer).
+Requirements: macOS 14+ and Xcode 26 or newer (Swift 6.2+). The package builds in the Swift 6 language mode, so data races are compile errors.
 There are **no third-party dependencies** — just SwiftUI, AppKit, CryptoKit and
 the system SQLite C API.
 

@@ -41,7 +41,8 @@ No account, no cloud, no tracking. Just open it and write in Markdown, then find
 - **Yours, locally.** Entries live in a SQLite database on your Mac. Entry text, attachments, and automatic backups are encrypted with a key kept in your Keychain. No sign-up, no servers.
 - **Find your way back.** Tags, notebooks, smart folders, full-text search with operators, linked entries (`[[like this]]`), a calendar, and On This Day.
 - **Notice patterns, without pressure.** Mood check-ins, writing rhythm, and insights that stay quiet and kind.
-- **Truly native.** SwiftUI + AppKit, keyboard-first, themes, Quick Capture from the menu bar, optional Spotlight title search, and zero third-party dependencies.
+- **Truly native.** SwiftUI + AppKit, keyboard-first, themes, Liquid Glass on macOS 26+, Quick Capture from the menu bar, optional Spotlight title search, and zero third-party dependencies.
+- **Around your Mac.** A desktop widget with today's words, your streak and a prompt (never your entries), plus Shortcuts, Spotlight and Siri actions for new entries, quick capture, Today and your progress.
 
 <table>
   <tr>
@@ -94,7 +95,7 @@ This README describes the current source implementation, not a claim that every 
 
 ## Build from source
 
-Requires macOS 14 Sonoma or later and a recent Xcode/Swift toolchain (Swift 6+, which includes Swift Testing). On-device AI infrastructure has separate macOS 26/Apple Intelligence requirements and is not yet a complete user workflow.
+Runs on macOS 14 Sonoma or later. Building needs Xcode 26 or later (Swift 6.2+, Swift 6 language mode; includes Swift Testing). On-device AI infrastructure has separate macOS 26/Apple Intelligence requirements and is not yet a complete user workflow.
 
 ```bash
 git clone https://github.com/Eplisium/omega-journal.git
@@ -117,6 +118,8 @@ All three entry points share `VERSION` (marketing version), `packaging/` (Info.p
 | `scripts/make_release.sh` | `dist/Omega-Journal-<version>.dmg` (universal) | ad-hoc by default; `OMEGA_JOURNAL_SIGN_IDENTITY="Developer ID Application: …"` + `OMEGA_JOURNAL_NOTARY_PROFILE` to notarize |
 | `scripts/make_mas.sh` | `dist/OmegaJournal-<version>-<build>.pkg` (universal, sandboxed) | Apple Distribution + Mac App Store profile (`OMEGA_JOURNAL_MAS_PROFILE`); `--validate` / `--upload` via `xcrun altool` |
 | `scripts/make_mas.sh --dev` | sandboxed smoke-test bundle, QA bundle id, no pkg | Apple Development; never touches the real journal |
+
+Every channel embeds the widget extension (`Contents/PlugIns/OmegaJournalWidgets.appex`, sandboxed, sharing an App Group with the app) and generates `Metadata.appintents` so the Shortcuts actions register. QA builds take `OMEGA_JOURNAL_BUNDLE_ID=com.eplisium.omega-journal.qa-<name>` and land in `.build/packaging/qa/`. The Mac App Store build also needs a provisioning profile for the widget (`OMEGA_JOURNAL_MAS_WIDGET_PROFILE`); `OMEGA_JOURNAL_MAS_SKIP_WIDGET=1` ships without it.
 
 App Store submission steps, metadata and review notes are in [`docs/app-store/`](docs/app-store/SUBMISSION.md).
 
@@ -386,7 +389,10 @@ The current schema is **V12**, tracked in the `schema_version` table, not `PRAGM
 ```text
 Sources/
 ├── OmegaJournalCore/     Testable parsing, policies, organization, export and analysis logic
-└── OmegaJournal/         SwiftUI/AppKit application, persistence and system integrations
+├── OmegaJournalShared/   Widget snapshot model, deep links and App Group plumbing (app + widget + tests)
+├── OmegaJournalWidgetUI/ Widget SwiftUI views
+├── OmegaJournalWidgets/  WidgetKit extension entry point (packaged as an .appex)
+└── OmegaJournal/         SwiftUI/AppKit application, persistence, App Intents and system integrations
 
 SQLite  ←→  JournalViewModel  ←→  SwiftUI
 ```
@@ -398,7 +404,7 @@ Key implementation areas:
 - [`EditorView.swift`](Sources/OmegaJournal/EditorView.swift), [`MarkdownTextEditor.swift`](Sources/OmegaJournal/MarkdownTextEditor.swift), and [`ReadView.swift`](Sources/OmegaJournal/ReadView.swift): writing and reading.
 - [`Encryption.swift`](Sources/OmegaJournal/Encryption.swift), [`BiometricAuth.swift`](Sources/OmegaJournal/BiometricAuth.swift), and [`BackupRestorePanel.swift`](Sources/OmegaJournal/BackupRestorePanel.swift): encryption, hidden authentication, safety/settings UI.
 - [`InsightsWorkspaceView.swift`](Sources/OmegaJournal/InsightsWorkspaceView.swift) and [`SmartInsightsSections.swift`](Sources/OmegaJournal/SmartInsightsSections.swift): active analytics dashboard.
-- [`Package.swift`](Package.swift): core library, app executable, and test target; no third-party package dependencies.
+- [`Package.swift`](Package.swift): libraries, app and widget executables, and test target; Swift 6 language mode with main-actor default isolation for the app; no third-party package dependencies.
 
 Apple frameworks provide SwiftUI/AppKit, SQLite3, CryptoKit/Security, LocalAuthentication, NaturalLanguage, and system integrations. FoundationModels is conditionally used by the unfinished on-device AI service.
 
