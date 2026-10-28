@@ -26,15 +26,42 @@ let package = Package(
             path: "Sources/OmegaJournalCore",
             swiftSettings: approachable
         ),
+        // Privacy-safe widget snapshot model, deep links and App Group plumbing,
+        // shared by the app, the widget extension and the tests. Foundation only.
+        .target(
+            name: "OmegaJournalShared",
+            dependencies: ["OmegaJournalCore"],
+            path: "Sources/OmegaJournalShared",
+            swiftSettings: approachable
+        ),
+        // Widget SwiftUI views, kept out of the extension executable so tests can
+        // render them (ImageRenderer) without linking an extension entry point.
+        .target(
+            name: "OmegaJournalWidgetUI",
+            dependencies: ["OmegaJournalShared"],
+            path: "Sources/OmegaJournalWidgetUI",
+            swiftSettings: approachable
+        ),
         .executableTarget(
             name: "OmegaJournal",
-            dependencies: ["OmegaJournalCore"],
+            dependencies: ["OmegaJournalCore", "OmegaJournalShared"],
             path: "Sources/OmegaJournal",
             swiftSettings: approachable + [.defaultIsolation(MainActor.self)]
         ),
+        // WidgetKit extension. The packaging scripts wrap this binary into
+        // Contents/PlugIns/OmegaJournalWidgets.appex. Linked like Xcode links
+        // app extensions: extension-safe API only, entry point NSExtensionMain.
+        .executableTarget(
+            name: "OmegaJournalWidgets",
+            dependencies: ["OmegaJournalShared", "OmegaJournalWidgetUI"],
+            path: "Sources/OmegaJournalWidgets",
+            swiftSettings: approachable + [.unsafeFlags(["-application-extension"])],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-application_extension",
+                                           "-Xlinker", "-e", "-Xlinker", "_NSExtensionMain"])]
+        ),
         .testTarget(
             name: "OmegaJournalTests",
-            dependencies: ["OmegaJournalCore", "OmegaJournal"],
+            dependencies: ["OmegaJournalCore", "OmegaJournal", "OmegaJournalShared", "OmegaJournalWidgetUI"],
             path: "Tests/OmegaJournalTests",
             // Tests drive the main-actor app types directly.
             swiftSettings: approachable + [.defaultIsolation(MainActor.self)]
