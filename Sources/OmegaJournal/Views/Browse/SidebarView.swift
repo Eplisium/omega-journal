@@ -412,26 +412,32 @@ struct SidebarView: View {
                 }
                 .foregroundColor(theme.onAccentColor)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(theme.accentColor)
-                )
+                .ojUnlessGlass(.primaryAction) { label in
+                    label
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(theme.accentColor)
+                        )
+                }
             }
-            .buttonStyle(.plain)
+            .ojGlassButtonStyle(prominent: true, height: 32)
             .omegaTooltip("New Entry (⌘N)")
 
             Button { settingsSection = .appearance; showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.secondaryTextColor)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(theme.cardColor.opacity(0.6))
-                    )
+                    .ojUnlessGlass(.toolbarControl) { icon in
+                        icon
+                            .frame(width: 28, height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(theme.cardColor.opacity(0.6))
+                            )
+                    }
             }
-            .buttonStyle(.plain)
+            .ojGlassButtonStyle(prominent: false, circle: true, height: 32)
             .accessibilityLabel("Settings")
             .omegaTooltip("Settings (⌘,)")
         }

@@ -38,6 +38,16 @@ struct ActionButton: View {
     var body: some View {
         TooltipContainer(tooltip: tooltip, color: isDestructive ? .red : color) {
             Button(action: action) {
+                if GlassSupport.usesGlass(.toolbarControl) {
+                    // Sits inside a glass capsule (`ojGlassCluster`): a soft
+                    // circular hover highlight instead of a bordered tile.
+                    Image(systemName: icon)
+                        .font(OmegaTheme.font(.bodyLarge, .medium))
+                        .foregroundColor(iconColor)
+                        .frame(width: OJGlassMetrics.clusterIcon, height: OJGlassMetrics.clusterIcon)
+                        .background(Circle().fill(hover ? (isDestructive || active ? hoverBackground : Color.primary.opacity(0.10)) : .clear))
+                        .contentShape(Circle())
+                } else {
                 Image(systemName: icon)
                     .font(OmegaTheme.font(.bodyLarge, .medium))
                     .foregroundColor(iconColor)
@@ -56,6 +66,7 @@ struct ActionButton: View {
                             )
                     )
                     .scaleEffect(hover && !reduceMotion ? 1.08 : 1.0)
+                }
             }
             .buttonStyle(.plain)
             .accessibilityLabel(tooltip.isEmpty ? icon : tooltip)

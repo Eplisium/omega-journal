@@ -15,6 +15,26 @@ struct OmegaHoverCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
+        if GlassSupport.usesGlass(.floatingPanel) {
+            // Always-dark glass: tooltip text is white and these cards also
+            // render in a separate panel that doesn't carry the theme's scheme.
+            content
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .ojGlass(.floatingPanel, in: RoundedRectangle(cornerRadius: OmegaHoverChrome.cornerRadius + 2, style: .continuous),
+                         tint: accent)
+                .background(
+                    RoundedRectangle(cornerRadius: OmegaHoverChrome.cornerRadius + 2, style: .continuous)
+                        .fill(OmegaHoverChrome.fill.opacity(0.55))
+                )
+                .environment(\.colorScheme, .dark)
+                .shadow(color: Color.black.opacity(0.25), radius: 10, x: 0, y: 4)
+        } else {
+            legacy
+        }
+    }
+
+    private var legacy: some View {
         content
             .padding(.horizontal, 12)
             .padding(.vertical, 9)

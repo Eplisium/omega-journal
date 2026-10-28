@@ -123,11 +123,9 @@ struct TodayView: View {
                     Label("Write entry", systemImage: "square.and.pencil")
                         .font(OmegaTheme.font(.body, .semibold))
                         .foregroundColor(theme.onAccentColor)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(theme.accentColor))
+                        .ojAccentCapsule(theme.accentColor, horizontal: 18, vertical: 10)
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: true, height: 40)
                 .accessibilityLabel("Write a new journal entry")
 
                 Button {
@@ -212,7 +210,11 @@ struct TodayView: View {
                             .foregroundColor(theme.onAccentColor)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(Capsule().fill(theme.accentColor))
+                            // The card is the button; its call to action
+                            // reads as a prominent glass capsule on macOS 26.
+                            .ojGlass(.primaryAction, in: Capsule(), tint: theme.accentColor) {
+                                $0.background(Capsule().fill(theme.accentColor))
+                            }
                         Text("\(entry.wordCount) words")
                             .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor)

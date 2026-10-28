@@ -239,13 +239,16 @@ private struct ToastView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(
-            Capsule()
-                .fill(theme.cardColor)
-                .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-        )
-        .overlay(
-            Capsule().strokeBorder(theme.accentColor.opacity(0.2), lineWidth: 1)
-        )
+        .ojGlass(.floatingPanel, in: Capsule(), tint: theme.accentColor) { toast in
+            toast
+                .background(
+                    Capsule()
+                        .fill(theme.cardColor)
+                        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
+                )
+                .overlay(
+                    Capsule().strokeBorder(theme.accentColor.opacity(0.2), lineWidth: 1)
+                )
+        }
     }
 }

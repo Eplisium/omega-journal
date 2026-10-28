@@ -311,11 +311,9 @@ struct EntryListView: View {
                             .font(OmegaTheme.font(.meta, .semibold))
                     }
                     .foregroundColor(theme.onAccentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(theme.accentColor))
+                    .ojAccentCapsule(theme.accentColor, horizontal: 10, vertical: 4)
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: true, height: 24)
                 .omegaTooltip("Lock hidden entries (⌘L)")
             } else {
                 Button {
@@ -328,11 +326,9 @@ struct EntryListView: View {
                             .font(OmegaTheme.font(.meta, .semibold))
                     }
                     .foregroundColor(theme.onAccentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(theme.accentColor))
+                    .ojAccentCapsule(theme.accentColor, horizontal: 10, vertical: 4)
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: true, height: 24)
             }
         }
         .foregroundColor(theme.secondaryTextColor)
@@ -449,11 +445,9 @@ struct EntryListView: View {
                     Text("Write your first entry")
                         .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.onAccentColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(theme.accentColor))
+                        .ojAccentCapsule(theme.accentColor, horizontal: 12, vertical: 6)
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: true, height: 30)
             }
             Spacer()
         }

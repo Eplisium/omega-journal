@@ -82,10 +82,9 @@ struct OnThisDayView: View {
                         Label("Write today's entry", systemImage: "square.and.pencil")
                             .font(OmegaTheme.font(.body, .semibold))
                             .foregroundColor(theme.onAccentColor)
-                            .padding(.horizontal, 16).padding(.vertical, 9)
-                            .background(Capsule().fill(theme.accentColor))
+                            .ojAccentCapsule(theme.accentColor, horizontal: 16, vertical: 9)
                     }
-                    .buttonStyle(.plain)
+                    .ojGlassButtonStyle(prominent: true, height: 38)
                 }
                 if let onBrowseCalendar {
                     Button(action: onBrowseCalendar) {

@@ -23,14 +23,8 @@ struct ReadView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
-            Divider().opacity(0.25)
-            // A failed save stays visible here after the editor (and its
-            // toast) are gone. Reason only — safe for locked hidden entries.
-            if let reason = vm.unsavedFailureReason(entryId: entry.id) {
-                UnsavedEntryBanner(reason: reason, onRetry: { vm.retryFailedSaves() })
-                Divider().opacity(0.25)
-            }
+            // macOS 26: the bar floats over the scrolling page (ojHeaderBar).
+            if !GlassSupport.usesGlass(.toolbarControl) { headerBar }
 
             ScrollViewReader { proxy in
             ScrollView {
@@ -78,6 +72,7 @@ struct ReadView: View {
             }
             .scrollContentBackground(.hidden)
             }
+            .ojHeaderBar { headerBar }
         }
         .sheet(isPresented: $showGraph) {
             GraphView(vm: vm) { vm.select($0) }
@@ -232,8 +227,25 @@ struct ReadView: View {
 
     // MARK: Toolbar
 
+    /// Toolbar plus the unsaved-changes banner. The hairline under the bar
+    /// is only drawn for the stacked (pre-glass) layout.
+    @ViewBuilder
+    private var headerBar: some View {
+        let glass = GlassSupport.usesGlass(.toolbarControl)
+        VStack(spacing: 0) {
+            OJGlassGroup(spacing: 4) { toolbar }
+            if !glass { Divider().opacity(0.25) }
+            // A failed save stays visible here after the editor (and its
+            // toast) are gone. Reason only — safe for locked hidden entries.
+            if let reason = vm.unsavedFailureReason(entryId: entry.id) {
+                UnsavedEntryBanner(reason: reason, onRetry: { vm.retryFailedSaves() })
+                Divider().opacity(0.25)
+            }
+        }
+    }
+
     private var toolbar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: GlassSupport.usesGlass(.toolbarControl) ? 10 : 4) {
             if isTrash {
                 Button {
                     vm.restoreFromTrash(entry)
@@ -241,11 +253,14 @@ struct ReadView: View {
                     Label("Restore", systemImage: "arrow.uturn.backward")
                         .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.accentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(theme.accentColor.opacity(0.15)))
+                        .ojUnlessGlass(.toolbarControl) { label in
+                            label
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(theme.accentColor.opacity(0.15)))
+                        }
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: false)
 
                 Spacer()
 
@@ -257,6 +272,7 @@ struct ReadView: View {
                     showPermanentDeleteConfirmation = true
                 }
                     .accessibilityLabel("Delete Forever")
+                    .ojGlassCluster()
             } else {
                 // Primary actions are labeled and few; everything else lives in
                 // one labeled "More" menu, with destructive actions separated.
@@ -266,25 +282,33 @@ struct ReadView: View {
                     Label("Edit", systemImage: "pencil")
                         .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.onAccentColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(theme.accentColor))
+                        .ojUnlessGlass(.primaryAction) { label in
+                            label
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(theme.accentColor))
+                        }
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: true)
                 .omegaTooltip("Edit (⌘E)")
                 .accessibilityLabel("Edit (⌘E)")
 
-                ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite, tooltip: entry.isFavorite ? "Unfavorite" : "Favorite") {
-                    vm.toggleFavorite(entry)
+                HStack(spacing: 4) {
+                    ActionButton(icon: entry.isFavorite ? "star.fill" : "star", color: .yellow, active: entry.isFavorite, tooltip: entry.isFavorite ? "Unfavorite" : "Favorite") {
+                        vm.toggleFavorite(entry)
+                    }
+                        .accessibilityLabel(entry.isFavorite ? "Unfavorite" : "Favorite")
+                    ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: theme.accentColor, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin" : "Pin") {
+                        vm.togglePin(entry)
+                    }
+                        .accessibilityLabel(entry.isPinned ? "Unpin" : "Pin")
                 }
-                    .accessibilityLabel(entry.isFavorite ? "Unfavorite" : "Favorite")
-                ActionButton(icon: entry.isPinned ? "pin.fill" : "pin", color: theme.accentColor, active: entry.isPinned, tooltip: entry.isPinned ? "Unpin" : "Pin") {
-                    vm.togglePin(entry)
-                }
-                    .accessibilityLabel(entry.isPinned ? "Unpin" : "Pin")
+                .ojGlassCluster()
 
                 Spacer()
 
+                // Mood, outline, lock and More share one trailing cluster.
+                HStack(spacing: 4) {
                 Menu {
                     ForEach(Mood.allCases) { mood in
                         Button {
@@ -302,8 +326,8 @@ struct ReadView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .padding(.leading, GlassSupport.usesGlass(.toolbarControl) ? 8 : 0)
                 .accessibilityLabel("Mood: \(entry.mood.label). Change mood")
-
                 if showsOutlineToggle {
                     ActionButton(icon: "list.bullet.indent", color: theme.accentColor, active: showOutline, tooltip: "Table of contents") {
                         showOutline.toggle()
@@ -318,6 +342,8 @@ struct ReadView: View {
                 }
 
                 moreMenu
+                }
+                .ojGlassCluster()
             }
         }
         // ⌘P keeps working even though Print moved into the More menu.
@@ -373,6 +399,7 @@ struct ReadView: View {
             Label("More", systemImage: "ellipsis.circle")
                 .font(OmegaTheme.font(.meta, .medium))
                 .foregroundColor(theme.secondaryTextColor)
+                .padding(.horizontal, GlassSupport.usesGlass(.toolbarControl) ? 6 : 0)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -470,11 +497,9 @@ struct ReadView: View {
                         .font(OmegaTheme.font(.caption, .semibold))
                 }
                 .foregroundColor(onAccentColor)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(theme.accentColor))
+                .ojAccentCapsule(theme.accentColor, horizontal: 20, vertical: 8)
             }
-            .buttonStyle(.plain)
+            .ojGlassButtonStyle(prominent: true, height: 36)
             .accessibilityLabel("Unlock entry with \(biometricAuth.biometricType)")
         }
         .frame(maxWidth: .infinity)
