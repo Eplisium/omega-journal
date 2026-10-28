@@ -82,7 +82,8 @@ final class QuickCapturePresence: ObservableObject {
     @Published private(set) var isInserted: Bool
 
     private let defaults: UserDefaults
-    private var observer: NSObjectProtocol?
+    /// Read by `deinit`, which is nonisolated; set once in `init`.
+    nonisolated(unsafe) private var observer: NSObjectProtocol?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

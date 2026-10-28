@@ -6,7 +6,8 @@ import OmegaJournalCore
 // MARK: - Foreground presentation
 
 /// Without a delegate macOS suppresses notifications while the app is frontmost.
-final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
+/// Nonisolated: the system may call these delegate methods off the main thread.
+nonisolated final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -78,22 +79,21 @@ final class NotificationManager: ObservableObject {
 
     func checkAuthorization() {
         guard Self.centerAvailable else { return }
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            DispatchQueue.main.async {
-                self.isAuthorized = settings.authorizationStatus == .authorized
-                self.refreshScheduleIfNeeded()
-            }
+        Task {
+            let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+            isAuthorized = status == .authorized
+            refreshScheduleIfNeeded()
         }
     }
 
     func requestPermission() {
         guard Self.centerAvailable else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
-            DispatchQueue.main.async {
-                self.isAuthorized = granted
-                if granted && self.reminderEnabled {
-                    self.scheduleReminder()
-                }
+        Task {
+            let granted = (try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .badge, .sound])) ?? false
+            isAuthorized = granted
+            if granted && reminderEnabled {
+                scheduleReminder()
             }
         }
     }
@@ -167,8 +167,8 @@ final class NotificationManager: ObservableObject {
         let center = UNUserNotificationCenter.current()
         cancelReminder()
         for request in Self.buildReminderRequests(after: Date(), hour: reminderHour, minute: reminderMinute) {
-            center.add(request) { error in
-                if let error = error { print("Failed to schedule reminder: \(error)") }
+            Task {
+                do { try await center.add(request) } catch { print("Failed to schedule reminder: \(error)") }
             }
         }
     }
@@ -235,8 +235,8 @@ final class NotificationManager: ObservableObject {
         guard isAuthorized else { return }
         let center = UNUserNotificationCenter.current()
         for request in Self.buildReviewRequests(schedule: reviewSchedule, after: Date()) {
-            center.add(request) { error in
-                if let error = error { print("Failed to schedule review: \(error)") }
+            Task {
+                do { try await center.add(request) } catch { print("Failed to schedule review: \(error)") }
             }
         }
     }

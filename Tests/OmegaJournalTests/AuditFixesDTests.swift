@@ -8,14 +8,14 @@ import Testing
 @Suite("Audit fixes D")
 @MainActor
 struct AuditFixesDTests {
-    nonisolated static func gregorian(_ tz: String = "UTC") -> Calendar {
+    static func gregorian(_ tz: String = "UTC") -> Calendar {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: tz)!
         c.locale = Locale(identifier: "en_US")
         return c
     }
 
-    nonisolated static func date(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12, cal: Calendar = gregorian()) -> Date {
+    static func date(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12, cal: Calendar = gregorian()) -> Date {
         cal.date(from: DateComponents(year: y, month: m, day: d, hour: hour))!
     }
 

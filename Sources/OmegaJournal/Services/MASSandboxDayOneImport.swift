@@ -50,7 +50,7 @@ enum MASSandboxDayOneImport {
     }
 
     /// Default check used by the app: the folder exists and can be listed.
-    static func folderIsReadable(_ url: URL) -> Bool {
+    nonisolated static func folderIsReadable(_ url: URL) -> Bool {
         (try? FileManager.default.contentsOfDirectory(atPath: url.path)) != nil
     }
 

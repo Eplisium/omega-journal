@@ -7,40 +7,37 @@ import OmegaJournalCore
 /// entries are never handed to Spotlight; turning the setting off removes everything we indexed.
 final class SpotlightIndexer {
     static let shared = SpotlightIndexer()
-    static let enabledKey = "spotlight.indexTitles"
-    static let domain = "com.eplisium.omega-journal.entries"
+    nonisolated static let enabledKey = "spotlight.indexTitles"
+    nonisolated static let domain = "com.eplisium.omega-journal.entries"
 
-    private var pending: DispatchWorkItem?
-    private let queue = DispatchQueue(label: "omega.spotlight", qos: .utility)
+    private var pending: Task<Void, Never>?
 
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
 
-    /// Debounced. The SQLite handle is single-threaded, so candidates are read on the main thread
-    /// (after the debounce) and only the CoreSpotlight calls run on the background queue.
+    /// Debounced. The SQLite handle is main-actor only, so candidates are read here
+    /// (after the debounce) and only the CoreSpotlight calls run in the background.
     func scheduleReindex(db: DatabaseManager) {
         guard Self.isEnabled else { return }
         pending?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, Self.isEnabled else { return }
-            let candidates = db.spotlightCandidates()
-            self.queue.async { self.index(candidates) }
+        pending = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, Self.isEnabled else { return }
+            await Self.index(db.spotlightCandidates())
         }
-        pending = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
-    func index(_ candidates: [SpotlightPolicy.Candidate]) {
+    @concurrent
+    nonisolated static func index(_ candidates: [SpotlightPolicy.Candidate]) async {
         let allowed = SpotlightPolicy.indexable(candidates)
         let items = allowed.map { c -> CSSearchableItem in
             let attrs = CSSearchableItemAttributeSet(contentType: .text)
             attrs.title = c.title
-            return CSSearchableItem(uniqueIdentifier: c.id, domainIdentifier: Self.domain, attributeSet: attrs)
+            return CSSearchableItem(uniqueIdentifier: c.id, domainIdentifier: domain, attributeSet: attrs)
         }
         let index = CSSearchableIndex.default()
-        index.deleteSearchableItems(withDomainIdentifiers: [Self.domain]) { _ in
-            guard !items.isEmpty else { return }
-            index.indexSearchableItems(items) { _ in }
-        }
+        try? await index.deleteSearchableItems(withDomainIdentifiers: [domain])
+        guard !items.isEmpty else { return }
+        try? await index.indexSearchableItems(items)
     }
 
     func removeAll() {

@@ -4,7 +4,7 @@ import OmegaJournalCore
 
 // MARK: - Entry revisions (version history)
 
-struct EntryRevision: Identifiable, Hashable {
+nonisolated struct EntryRevision: Identifiable, Hashable {
     let id: String
     let entryId: String
     let createdAt: Date

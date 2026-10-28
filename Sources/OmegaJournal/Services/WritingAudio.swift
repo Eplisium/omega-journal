@@ -53,8 +53,9 @@ final class AudioMemoRecorder: NSObject, ObservableObject, AVAudioRecorderDelega
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: begin()
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                Task { @MainActor in granted ? self.begin() : (self.state = .denied) }
+            Task {
+                let granted = await AVCaptureDevice.requestAccess(for: .audio)
+                granted ? begin() : (state = .denied)
             }
         default: state = .denied
         }

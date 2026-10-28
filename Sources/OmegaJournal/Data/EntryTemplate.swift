@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Entry Template
 
 /// A reusable skeleton for a new entry — a title-less body with pre-filled prompts and tags.
-struct EntryTemplate: Identifiable, Hashable {
+nonisolated struct EntryTemplate: Identifiable, Hashable {
     let id: String
     var name: String
     var body: String

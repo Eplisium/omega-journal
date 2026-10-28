@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Sort Order
 
-enum SortOrder: String, CaseIterable, Identifiable {
+nonisolated enum SortOrder: String, CaseIterable, Identifiable {
     case dateDesc = "Newest first"
     case dateAsc = "Oldest first"
     case updatedDesc = "Recently edited"

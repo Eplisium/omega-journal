@@ -107,7 +107,7 @@ struct EncryptionAtRestTests {
     @Test("attachments are encrypted on disk and decrypt to the original bytes")
     func attachmentsEncryptedAtRest() throws {
         let db = try Self.makeIsolatedDatabase()
-        var entry = JournalEntry.new()
+        let entry = JournalEntry.new()
         db.saveEntry(entry)
 
         let secret = Data("PNG-ish secret payload".utf8)

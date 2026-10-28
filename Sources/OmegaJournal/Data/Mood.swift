@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Mood
 
-enum Mood: Int, CaseIterable, Identifiable, Codable {
+nonisolated enum Mood: Int, CaseIterable, Identifiable, Codable {
     case awful = 1, bad = 2, neutral = 3, good = 4, great = 5
     var id: Int { rawValue }
 
@@ -38,25 +38,25 @@ enum Mood: Int, CaseIterable, Identifiable, Codable {
 
 // MARK: - Chart Data
 
-struct MoodPoint: Identifiable {
+nonisolated struct MoodPoint: Identifiable {
     let date: Date
     let avg: Double
     var id: Date { date }
 }
 
-struct MoodCount: Identifiable {
+nonisolated struct MoodCount: Identifiable {
     let mood: Mood
     let count: Int
     var id: Int { mood.rawValue }
 }
 
-struct WordPoint: Identifiable {
+nonisolated struct WordPoint: Identifiable {
     let date: Date
     let words: Int
     var id: Date { date }
 }
 
-struct WeekdayCount: Identifiable {
+nonisolated struct WeekdayCount: Identifiable {
     let weekday: Int
     let symbol: String
     let count: Int

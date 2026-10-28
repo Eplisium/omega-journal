@@ -64,7 +64,9 @@ final class DatabaseManager {
         return true
     }
 
-    var db: OpaquePointer?
+    /// The SQLite connection. Only touched on the main actor, except by `deinit`,
+    /// which runs once nothing else can reach this manager.
+    nonisolated(unsafe) var db: OpaquePointer?
     var dbPath: String
     var attachmentsDir: String
 
@@ -196,6 +198,9 @@ final class DatabaseManager {
 
     // MARK: - SQL Helpers
 
+    /// Failures are reported and flag the open transaction for rollback, so callers
+    /// only need the result when they branch on it.
+    @discardableResult
     func exec(_ sql: String) -> Bool {
         var err: UnsafeMutablePointer<CChar>?
         if sqlite3_exec(db, sql, nil, nil, &err) != SQLITE_OK {

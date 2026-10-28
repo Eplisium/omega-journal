@@ -15,7 +15,7 @@ struct AuditFixesATests {
 
     // MARK: Helpers
 
-    nonisolated static func tempRoot() -> URL {
+    static func tempRoot() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("omega-afa-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -23,7 +23,7 @@ struct AuditFixesATests {
     }
 
     /// Env-based isolation for the shared singleton (ephemeral key, no Keychain).
-    nonisolated static func isolate() {
+    static func isolate() {
         unsetenv("DATABASE_URL")
         if ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"]?.isEmpty ?? true {
             let root = tempRoot()
@@ -32,7 +32,7 @@ struct AuditFixesATests {
         }
     }
 
-    nonisolated static func makeDB() -> (root: URL, db: DatabaseManager) {
+    static func makeDB() -> (root: URL, db: DatabaseManager) {
         isolate()
         let root = tempRoot()
         let db = DatabaseManager(databasePath: root.appendingPathComponent("j.sqlite3").path,

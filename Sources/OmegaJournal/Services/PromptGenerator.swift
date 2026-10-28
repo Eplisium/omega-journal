@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Daily Prompt Generator
 
-enum PromptGenerator {
+nonisolated enum PromptGenerator {
     private static let prompts: [String] = [
         // Gratitude & positivity
         "What are you grateful for today?",

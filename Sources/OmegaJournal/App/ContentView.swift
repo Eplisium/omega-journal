@@ -58,7 +58,7 @@ struct ContentView: View {
             } else {
                 onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
             }
-            QuitGuard.check = { [weak vm] in vm?.quitDecision() ?? .terminate }
+            QuitGuard.check = { [weak vm = self.vm] in vm?.quitDecision() ?? .terminate }
         }
         .alert("Bring over your earlier journal?", isPresented: $showLegacyImportOffer) {
             Button("Choose Folder…") {

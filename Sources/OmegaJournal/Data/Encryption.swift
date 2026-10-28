@@ -15,13 +15,13 @@ import Security
 /// AES-GCM containers; auto-backup files are sealed whole.
 enum JournalCrypto {
 
-    private static let service = "com.omegajournal.encryption"
-    private static let account = "journal-content-key"
+    nonisolated private static let service = "com.omegajournal.encryption"
+    nonisolated private static let account = "journal-content-key"
     /// Keychain access group of the App Store build. Must match the
     /// `keychain-access-groups` entitlement (team ID + bundle id). Builds
     /// without that entitlement get errSecMissingEntitlement and fall back to
     /// the legacy login keychain.
-    static let dataProtectionAccessGroup = "WWC5HJN6AL.com.eplisium.omega-journal"
+    nonisolated static let dataProtectionAccessGroup = "WWC5HJN6AL.com.eplisium.omega-journal"
 
     /// The app's key resolver: data-protection keychain, then legacy login
     /// keychain. Pure value — safe to build on any thread.
@@ -55,14 +55,21 @@ enum JournalCrypto {
     /// Probes registered by open databases: each returns true when that
     /// database holds encrypted content. A missing key is only minted when no
     /// probe reports encrypted content.
-    private static var dataProbes: [ObjectIdentifier: () -> Bool] = [:]
-    static func registerEncryptedDataProbe(owner: AnyObject, _ probe: @escaping () -> Bool) {
-        dataProbes[ObjectIdentifier(owner)] = probe
+    ///
+    /// Guarded by `dataProbesLock`: a `DatabaseManager` unregisters from its
+    /// `deinit`, which can run on whatever thread drops the last reference.
+    nonisolated(unsafe) private static var dataProbes: [ObjectIdentifier: () -> Bool] = [:]
+    nonisolated private static let dataProbesLock = NSLock()
+    nonisolated static func registerEncryptedDataProbe(owner: AnyObject, _ probe: @escaping () -> Bool) {
+        dataProbesLock.withLock { dataProbes[ObjectIdentifier(owner)] = probe }
     }
-    static func unregisterEncryptedDataProbe(owner: AnyObject) {
-        dataProbes[ObjectIdentifier(owner)] = nil
+    nonisolated static func unregisterEncryptedDataProbe(owner: AnyObject) {
+        dataProbesLock.withLock { dataProbes[ObjectIdentifier(owner)] = nil }
     }
-    private static func encryptedDataExists() -> Bool { dataProbes.values.contains { $0() } }
+    private static func encryptedDataExists() -> Bool {
+        let probes = dataProbesLock.withLock { Array(dataProbes.values) }
+        return probes.contains { $0() }
+    }
 
     /// Loads the key from the Keychain, creating and storing it on first use
     /// ONLY when no encrypted data exists yet. Throws instead of trapping so
@@ -85,7 +92,7 @@ enum JournalCrypto {
 
     /// Resolver-based load (data-protection → legacy, copy forward, mint into
     /// the preferred store only when `allowCreate()`). Injectable for tests.
-    static func loadOrCreateKey(using resolver: MASDataKeyResolver, allowCreate: () -> Bool) throws -> SymmetricKey {
+    nonisolated static func loadOrCreateKey(using resolver: MASDataKeyResolver, allowCreate: () -> Bool) throws -> SymmetricKey {
         let resolved = try resolver.resolve(allowCreate: allowCreate)
         if case .legacyCopyFailed(let status) = resolved.origin {
             print("OmegaJournal: could not copy the encryption key to the data-protection keychain (status \(status)); using the login keychain copy.")
@@ -95,7 +102,7 @@ enum JournalCrypto {
 
     /// Legacy login-keychain logic with injectable identity so tests never
     /// touch the real key (throwaway service names only).
-    static func loadOrCreateKey(service: String, account: String, allowCreate: () -> Bool) throws -> SymmetricKey {
+    nonisolated static func loadOrCreateKey(service: String, account: String, allowCreate: () -> Bool) throws -> SymmetricKey {
         let resolver = MASDataKeyResolver(
             preferred: nil,
             legacy: MASDataKeychainStore(kind: .legacyLogin, service: service, account: account))
@@ -178,7 +185,7 @@ enum JournalCrypto {
 
     /// Private (0700) directory holding decrypted attachment copies handed to
     /// external apps. Swept on launch and at quit.
-    static var temporaryDirectory: URL {
+    nonisolated static var temporaryDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("omega-journal-open", isDirectory: true)
     }
 
@@ -204,7 +211,7 @@ enum JournalCrypto {
 
     /// Removes every decrypted temp copy, including legacy `omega-open-*`
     /// files that older builds left directly in the system temp directory.
-    static func cleanupTemporaryFiles() {
+    nonisolated static func cleanupTemporaryFiles() {
         let fm = FileManager.default
         try? fm.removeItem(at: temporaryDirectory)
         if let legacy = try? fm.contentsOfDirectory(at: fm.temporaryDirectory, includingPropertiesForKeys: nil) {

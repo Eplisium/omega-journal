@@ -14,7 +14,7 @@ import Security
 // `keychain-access-groups` entitlement (direct / dev builds).
 
 /// Result of a single keychain read.
-enum MASDataKeyRead: Equatable {
+nonisolated enum MASDataKeyRead: Equatable {
     case found(Data)
     case notFound
     /// Any other status, e.g. `errSecMissingEntitlement` (-34018) when the
@@ -24,14 +24,14 @@ enum MASDataKeyRead: Equatable {
 
 /// One place a content key can live. Tests use an in-memory fake; the app
 /// uses `MASDataKeychainStore`.
-protocol MASDataKeyStore {
+nonisolated protocol MASDataKeyStore {
     func readKey() -> MASDataKeyRead
     /// Adds the key. Returns the `SecItemAdd`-style status.
     func addKey(_ data: Data) -> OSStatus
 }
 
 /// Real Keychain backends.
-struct MASDataKeychainStore: MASDataKeyStore {
+nonisolated struct MASDataKeychainStore: MASDataKeyStore {
     enum Kind: Equatable {
         /// Modern data-protection keychain, scoped to an access group.
         case dataProtection(accessGroup: String)
@@ -84,7 +84,7 @@ struct MASDataKeychainStore: MASDataKeyStore {
 }
 
 /// Decides where the content key is read from and where a new one goes.
-struct MASDataKeyResolver {
+nonisolated struct MASDataKeyResolver {
     /// Where the returned key came from (diagnostics and tests).
     enum Origin: Equatable {
         /// Found in the data-protection keychain.

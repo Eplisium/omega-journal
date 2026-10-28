@@ -13,21 +13,21 @@ struct DataSafetyTests {
 
     // MARK: Helpers
 
-    nonisolated static func tempRoot() -> URL {
+    static func tempRoot() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("omega-datasafety-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
 
-    nonisolated static func makeDB(root: URL = tempRoot()) -> (root: URL, db: DatabaseManager) {
+    static func makeDB(root: URL = tempRoot()) -> (root: URL, db: DatabaseManager) {
         let db = DatabaseManager(
             databasePath: root.appendingPathComponent("j.sqlite3").path,
             attachmentsPath: root.appendingPathComponent("attachments").path)
         return (root, db)
     }
 
-    nonisolated static func run(_ path: String, _ sql: String) {
+    static func run(_ path: String, _ sql: String) {
         var h: OpaquePointer?
         precondition(sqlite3_open(path, &h) == SQLITE_OK)
         defer { sqlite3_close(h) }
@@ -38,7 +38,7 @@ struct DataSafetyTests {
     }
 
     /// Builds a schema-V7 database by hand (plaintext bodies, no body_enc).
-    nonisolated static func buildV7(at path: String, extraSchemaVersion: Int = 7) {
+    static func buildV7(at path: String, extraSchemaVersion: Int = 7) {
         run(path, """
         CREATE TABLE schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0);
         INSERT INTO schema_version VALUES (1, \(extraSchemaVersion));
@@ -348,7 +348,7 @@ struct DataSafetyTests {
         auth.activityThrottle = 0
         auth.setAuthenticatedForTesting(true)
         defer { auth.idleSecondsOverride = nil; auth.activityThrottle = 1; auth.lock() }
-        var fired = false
+        nonisolated(unsafe) var fired = false   // set on the main queue, read on the main actor
         let token = NotificationCenter.default.addObserver(forName: .lockHiddenEntries, object: nil, queue: .main) { _ in fired = true }
         defer { NotificationCenter.default.removeObserver(token) }
 

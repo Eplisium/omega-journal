@@ -3,7 +3,7 @@ import Foundation
 /// Central registry of keys stored in the SQLite `settings` table. Keep new keys here
 /// instead of scattering string literals. (View-only prefs backed by `@AppStorage` keep
 /// their keys in `ShellPrefs` / `ReadingPreferences`.)
-enum SettingKey {
+nonisolated enum SettingKey {
     static let themeName = "themeName"
     static let accentColor = "accentColor"
     static let backgroundColor = "backgroundColor"

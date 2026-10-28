@@ -5,7 +5,7 @@ import Foundation
 /// One removable chip describing an active facet of `EntryFilter`, shown under
 /// the search field so the user always sees what is narrowing the list and
 /// can clear any single constraint with one click.
-struct EntryFilterChip: Identifiable, Equatable {
+nonisolated struct EntryFilterChip: Identifiable, Equatable {
     enum Facet: Hashable {
         case mood(Mood)
         case tag(String)
@@ -21,7 +21,7 @@ struct EntryFilterChip: Identifiable, Equatable {
     var id: Facet { facet }
 }
 
-extension EntryFilter {
+nonisolated extension EntryFilter {
     /// Chips in a stable order: date, toggles, moods, tags, length.
     var chips: [EntryFilterChip] {
         var out: [EntryFilterChip] = []

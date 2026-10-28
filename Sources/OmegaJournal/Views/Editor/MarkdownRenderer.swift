@@ -12,7 +12,7 @@ import OmegaJournalCore
 // code blocks, nested bullet/ordered (`1.` and `1)`) lists, task lists, nested
 // blockquotes, simple tables, horizontal rules, links (validated) and bare-URL autolinks.
 
-struct MarkdownRenderStyle {
+nonisolated struct MarkdownRenderStyle {
     var linkColor: Color = .accentColor
     var codeColor: Color = .orange
     var mutedColor: Color = .secondary
@@ -37,7 +37,7 @@ struct MarkdownRenderStyle {
     }
 }
 
-enum MarkdownRenderer {
+nonisolated enum MarkdownRenderer {
     static func render(_ markdown: String, style: MarkdownRenderStyle = .default) -> AttributedString {
         var result = AttributedString()
         var first = true

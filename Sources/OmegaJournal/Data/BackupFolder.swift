@@ -4,7 +4,7 @@ import OmegaJournalCore
 
 // MARK: - Backup UX support (chosen folder, verification, integrity)
 
-struct BackupInfo: Identifiable, Equatable {
+nonisolated struct BackupInfo: Identifiable, Equatable {
     var id: String { url.path }
     let url: URL
     let date: Date
@@ -18,7 +18,7 @@ struct BackupInfo: Identifiable, Equatable {
     }
 }
 
-struct BackupVerification: Equatable {
+nonisolated struct BackupVerification: Equatable {
     let entryCount: Int
     let schemaVersion: Int
 }

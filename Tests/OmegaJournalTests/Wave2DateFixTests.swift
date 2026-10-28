@@ -12,14 +12,14 @@ import Testing
 @Suite("Wave 2 DateFix — future-dated entries", .serialized)
 @MainActor
 struct Wave2DateFixTests {
-    nonisolated static func utc() -> Calendar {
+    static func utc() -> Calendar {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: "UTC")!
         c.locale = Locale(identifier: "en_US")
         return c
     }
 
-    nonisolated static func date(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12) -> Date {
+    static func date(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12) -> Date {
         utc().date(from: DateComponents(year: y, month: m, day: d, hour: hour))!
     }
 

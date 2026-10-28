@@ -4,7 +4,7 @@ import OmegaJournalCore
 
 // MARK: - Attachment
 
-struct Attachment: Identifiable, Hashable {
+nonisolated struct Attachment: Identifiable, Hashable {
     let id: String
     let entryId: String
     let filename: String
@@ -18,7 +18,7 @@ struct Attachment: Identifiable, Hashable {
 
 // MARK: - Journal Entry
 
-struct JournalEntry: Identifiable, Hashable {
+nonisolated struct JournalEntry: Identifiable, Hashable {
     let id: String
     var title: String
     var body: String
@@ -91,7 +91,7 @@ struct JournalEntry: Identifiable, Hashable {
 // MARK: - Entry Filter
 
 /// Declarative description of everything the entry list is currently filtering on.
-struct EntryFilter: Equatable, Codable {
+nonisolated struct EntryFilter: Equatable, Codable {
     enum DateRange: String, CaseIterable, Identifiable, Codable {
         case any = "Any time"
         case today = "Today"

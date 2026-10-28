@@ -22,7 +22,7 @@ struct ErrorPropagationTests {
     @MainActor
     @Test("failed writes are reported through onError")
     func failedWritesReportThroughOnError() throws {
-        let (root, db) = try Self.makeIsolatedDatabase()
+        let (_, db) = try Self.makeIsolatedDatabase()
 
         defer { db.onError = nil }
         var reported: [String] = []
@@ -57,7 +57,7 @@ struct ErrorPropagationTests {
     @MainActor
     @Test("error reports buffer until a listener is installed")
     func errorReportsBufferUntilListenerInstalls() throws {
-        let (root, db) = try Self.makeIsolatedDatabase()
+        let (_, db) = try Self.makeIsolatedDatabase()
         db.onError = nil // no listener yet — the whole point of this test
 
         // Sabotage the schema so saveEntry's upsert fails, with no listener
@@ -77,9 +77,9 @@ struct ErrorPropagationTests {
     @MainActor
     @Test("attachment file is removed when the row insert fails")
     func attachmentFileRemovedWhenRowInsertFails() throws {
-        let (root, db) = try Self.makeIsolatedDatabase()
+        let (_, db) = try Self.makeIsolatedDatabase()
 
-        var entry = JournalEntry.new()
+        let entry = JournalEntry.new()
         db.saveEntry(entry)
 
         // Point the attachments directory at an unwritable location so the
@@ -151,7 +151,7 @@ struct ErrorPropagationTests {
     @MainActor
     @Test("corrupt JSON import fails gracefully with no entries added")
     func corruptJSONImportFailsGracefully() throws {
-        let (root, db) = try Self.makeIsolatedDatabase()
+        let (_, db) = try Self.makeIsolatedDatabase()
         let vm = JournalViewModel()
         let before = db.fetchAllEntries(scope: .all).count
 

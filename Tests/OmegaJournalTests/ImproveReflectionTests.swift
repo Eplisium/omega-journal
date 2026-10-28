@@ -9,14 +9,14 @@ import Testing
 @Suite("Improve Reflection")
 @MainActor
 struct ImproveReflectionTests {
-    nonisolated static func utc() -> Calendar {
+    static func utc() -> Calendar {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: "UTC")!
         c.locale = Locale(identifier: "en_US")
         return c
     }
 
-    nonisolated static func date(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12, minute: Int = 0) -> Date {
+    static func date(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12, minute: Int = 0) -> Date {
         utc().date(from: DateComponents(year: y, month: m, day: d, hour: hour, minute: minute))!
     }
 
