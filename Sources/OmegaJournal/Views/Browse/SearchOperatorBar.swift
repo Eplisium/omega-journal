@@ -38,12 +38,14 @@ struct SearchOperatorBar: View {
         .padding(.top, floating ? 6 : 0)
         .padding(.bottom, floating ? 6 : 4)
         .background {
-            if floating {
+            if floating && !GlassSupport.usesGlass(.floatingPanel) {
                 theme.backgroundColor
                     .overlay(alignment: .bottom) { Divider().opacity(0.5) }
                     .shadow(color: .black.opacity(theme.isDark ? 0.35 : 0.12), radius: 6, y: 3)
             }
         }
+        // macOS 26: the floating strip is a glass panel inset over the list.
+        .modifier(FloatingGlassStrip(enabled: floating, tint: theme.accentColor))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search operators")
     }
@@ -53,5 +55,22 @@ struct SearchOperatorBar: View {
         if !t.isEmpty && !t.hasSuffix(" ") { t += " " }
         vm.searchText = t + op
         vm.searchTextChanged()
+    }
+}
+
+/// Floating search helper as an inset glass panel (macOS 26 only).
+private struct FloatingGlassStrip: ViewModifier {
+    let enabled: Bool
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        if enabled && GlassSupport.usesGlass(.floatingPanel) {
+            content
+                .ojGlass(.floatingPanel, in: RoundedRectangle(cornerRadius: 14, style: .continuous), tint: tint)
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+        } else {
+            content
+        }
     }
 }

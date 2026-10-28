@@ -14,6 +14,7 @@ struct CommandPaletteView: View {
     @State private var highlighted = 0
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     // MARK: Command model
 
@@ -187,7 +188,8 @@ struct CommandPaletteView: View {
         // count and the key handlers below.
         let rows = results
         ZStack(alignment: .top) {
-            Color.black.opacity(0.35)
+            Color.black.opacity(GlassPolicy.modalDimOpacity(glass: GlassSupport.usesGlass(.floatingPanel),
+                                                            reduceTransparency: reduceTransparency))
                 .ignoresSafeArea()
                 .onTapGesture { vm.showCommandPalette = false }
 
@@ -197,7 +199,19 @@ struct CommandPaletteView: View {
                     Image(systemName: "command")
                         .font(OmegaTheme.font(.body, .medium))
                         .foregroundColor(theme.accentColor)
-                    TextField("Type a command or search entries…", text: $query)
+                    // Placeholder drawn by SwiftUI: on glass AppKit's placeholder
+                    // color fell to near-invisible against the dark wash.
+                    TextField("", text: $query, prompt: Text(""))
+                        .accessibilityLabel("Type a command or search entries")
+                        .background(alignment: .leading) {
+                            if query.isEmpty {
+                                Text("Type a command or search entries…")
+                                    .font(OmegaTheme.font(.bodyLarge))
+                                    .foregroundColor(theme.secondaryTextColor)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                         .textFieldStyle(.plain)
                         .font(OmegaTheme.font(.bodyLarge))
                         .foregroundColor(theme.titleTextColor)
@@ -255,15 +269,28 @@ struct CommandPaletteView: View {
                 .padding(.vertical, 7)
             }
             .frame(width: 620)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(theme.cardColor)
-                    .shadow(color: .black.opacity(0.4), radius: 30, y: 12)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(theme.accentColor.opacity(0.25), lineWidth: 1)
-            )
+            // A dense list of text: a partly opaque theme wash under the
+            // rows keeps them legible over busy content behind the glass.
+            .background {
+                if GlassSupport.usesGlass(.floatingPanel) {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(theme.cardColor.opacity(reduceTransparency ? 0.9 : 0.6))
+                }
+            }
+            // Floating layer: Liquid Glass on macOS 26, the solid card before.
+            .ojGlass(.floatingPanel, in: RoundedRectangle(cornerRadius: 18, style: .continuous),
+                     tint: theme.accentColor) { panel in
+                panel
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(theme.cardColor)
+                            .shadow(color: .black.opacity(0.4), radius: 30, y: 12)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(theme.accentColor.opacity(0.25), lineWidth: 1)
+                    )
+            }
             .padding(.top, 90)
         }
         .onAppear { focused = true; highlighted = 0 }
@@ -315,7 +342,8 @@ struct CommandPaletteView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                // Concentric with the glass panel's larger corners.
+                RoundedRectangle(cornerRadius: GlassSupport.usesGlass(.floatingPanel) ? 12 : 7, style: .continuous)
                     .fill(isOn ? theme.accentColor.opacity(0.18) : .clear)
             )
             .contentShape(Rectangle())

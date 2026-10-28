@@ -210,7 +210,7 @@ struct EditorView: View {
             topBarRow(compactMood: true, iconModes: true)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.vertical, GlassSupport.usesGlass(.toolbarControl) ? 7 : 9)
         // Popovers/sheets live outside ViewThatFits so they're attached once,
         // anchored at the trailing tools.
         .overlay(alignment: .trailing) {
@@ -243,19 +243,21 @@ struct EditorView: View {
                 .foregroundColor(theme.accentColor)
                 .fixedSize()
             }
-            .buttonStyle(.plain)
+            .ojGlassButtonStyle(prominent: false)
             .layoutPriority(2)
             .accessibilityLabel("Done editing")
             .help("Done (⌘↩)")
 
-            Divider().frame(height: 16).opacity(0.25)
+            if !GlassSupport.usesGlass(.toolbarControl) { Divider().frame(height: 16).opacity(0.25) }
 
-            if compactMood { moodMenu } else { moodRow }
+            Group { if compactMood { moodMenu } else { moodRow } }
+                .ojGlassCluster(horizontal: compactMood ? 10 : 4, vertical: compactMood ? 7 : 4)
 
             Spacer(minLength: 4)
 
             modePicker(iconOnly: iconModes)
 
+            HStack(spacing: 4) {
             ActionButton(icon: "text.alignleft", color: theme.accentColor, active: isTypewriter || dimOthers || columnWidth > 0, tooltip: "Focus & typography") {
                 showFocusPopover.toggle()
             }
@@ -267,6 +269,8 @@ struct EditorView: View {
             .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
 
             moreMenu
+            }
+            .ojGlassCluster()
         }
         .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: mood)
     }
@@ -323,6 +327,8 @@ struct EditorView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+        // Match the height of the glass controls beside it on macOS 26.
+        .controlSize(GlassSupport.usesGlass(.toolbarControl) ? .large : .regular)
         .fixedSize()
         .omegaTooltip("Write, split view, or preview")
         .accessibilityLabel("Editor mode")

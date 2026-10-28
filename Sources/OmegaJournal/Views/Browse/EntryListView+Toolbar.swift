@@ -28,15 +28,18 @@ extension EntryListView {
                     .accessibilityLabel("Clear search")
                 }
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(theme.cardColor.opacity(0.7))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(searchFocused ? theme.accentColor.opacity(0.5) : .clear, lineWidth: 1)
-                    )
+            .padding(.horizontal, GlassSupport.usesGlass(.toolbarControl) ? 11 : 9)
+            .padding(.vertical, GlassSupport.usesGlass(.toolbarControl) ? 7 : 6)
+            // macOS 26: a glass search capsule like the system search field.
+            .ojGlass(.toolbarControl, in: Capsule()) { field in
+                field.background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(theme.cardColor.opacity(0.7))
+                )
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: GlassSupport.usesGlass(.toolbarControl) ? 100 : 7, style: .continuous)
+                    .strokeBorder(searchFocused ? theme.accentColor.opacity(0.5) : .clear, lineWidth: 1)
             )
 
             HStack(spacing: 6) {

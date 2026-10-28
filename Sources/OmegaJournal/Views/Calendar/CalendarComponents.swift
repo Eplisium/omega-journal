@@ -56,7 +56,10 @@ struct PillActionButton: View {
                 .fixedSize()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
-                .background(Capsule().fill(theme.accentColor.opacity(isHovered ? 0.22 : 0.14)))
+                .ojGlass(.toolbarControl, in: Capsule(), interactive: true) {
+                    $0.background(Capsule().fill(theme.accentColor.opacity(isHovered ? 0.22 : 0.14)))
+                }
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

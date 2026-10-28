@@ -181,6 +181,7 @@ struct CalendarView: View {
     }
 
     private var workspaceControls: some View {
+        OJGlassGroup(spacing: 12) {
         HStack(spacing: 12) {
             Picker("Calendar display", selection: $displayMode) {
                 ForEach(DisplayMode.allCases) { mode in
@@ -189,6 +190,7 @@ struct CalendarView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .controlSize(GlassSupport.usesGlass(.toolbarControl) ? .large : .regular)
             .frame(width: 150)
             .accessibilityLabel("Calendar display")
 
@@ -209,6 +211,7 @@ struct CalendarView: View {
             .labelsHidden()
             .frame(width: 126)
             .accessibilityLabel("Jump to date")
+        }
         }
         // Never let the controls squeeze: with the labels locked to their ideal
         // size, ViewThatFits falls back to the stacked header instead of
@@ -236,14 +239,17 @@ struct CalendarView: View {
                 shiftMonth(1)
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(theme.accentColor.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(theme.accentColor.opacity(0.16), lineWidth: 1)
-        )
+        .ojGlass(.toolbarControl, in: Capsule()) { navigator in
+            navigator
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(theme.accentColor.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(theme.accentColor.opacity(0.16), lineWidth: 1)
+                )
+        }
     }
 
     private func reflectiveScopeControl(_ snap: CalendarMonthSnapshot) -> some View {
@@ -545,11 +551,9 @@ struct CalendarView: View {
                     Label("New Entry", systemImage: "square.and.pencil")
                         .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.onAccentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(theme.accentColor))
+                        .ojAccentCapsule(theme.accentColor, horizontal: 10, vertical: 7)
                 }
-                .buttonStyle(.plain)
+                .ojGlassButtonStyle(prominent: true, height: 30)
                 .omegaTooltip("Create an entry for \(dateTitle)")
                 .accessibilityLabel("New entry for \(dateTitle)")
             }

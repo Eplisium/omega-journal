@@ -106,6 +106,7 @@ struct ContentView: View {
                 .frame(minWidth: ShellListColumn.paneMinWidth)
         }
         .navigationSplitViewStyle(.balanced)
+        .ojGlassWindowToolbar()
     }
 
     /// What sits right of the sidebar for the current destination.
