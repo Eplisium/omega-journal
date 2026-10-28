@@ -27,5 +27,15 @@
     <key>NSMicrophoneUsageDescription</key><string>Omega Journal uses the microphone only when you record a voice memo to attach to an entry. Recordings are stored encrypted on this Mac.</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>OJDistributionChannel</key><string>@CHANNEL@</string>
+    <key>OJAppGroupIdentifier</key><string>@APP_GROUP@</string>
+    <key>OJURLScheme</key><string>@URL_SCHEME@</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>@BUNDLE_ID@</string>
+            <key>CFBundleURLSchemes</key><array><string>@URL_SCHEME@</string></array>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+        </dict>
+    </array>
 </dict>
 </plist>

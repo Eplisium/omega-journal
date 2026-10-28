@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist of Contents/PlugIns/OmegaJournalWidgets.appex (WidgetKit extension).
+  scripts/lib/oj-packaging.sh (oj_assemble_widget) replaces the tokens; the bundle id is
+  always <app bundle id>.widgets and the version always matches the app.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>OmegaJournalWidgets</string>
+    <key>CFBundleDisplayName</key><string>Omega Journal</string>
+    <key>CFBundleIdentifier</key><string>@WIDGET_BUNDLE_ID@</string>
+    <key>CFBundleVersion</key><string>@BUILD_NUMBER@</string>
+    <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+    <key>CFBundlePackageType</key><string>XPC!</string>
+    <key>CFBundleExecutable</key><string>OmegaJournalWidgets</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHumanReadableCopyright</key><string>Copyright © @YEAR@ Zach Gladfelter. All rights reserved.</string>
+    <key>OJAppGroupIdentifier</key><string>@APP_GROUP@</string>
+    <key>OJURLScheme</key><string>@URL_SCHEME@</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string>
+    </dict>
+</dict>
+</plist>

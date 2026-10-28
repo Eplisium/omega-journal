@@ -15,6 +15,7 @@ struct OmegaJournalApp: App {
         WindowGroup {
             LaunchGateView()
                 .frame(minWidth: 940, minHeight: 620)
+                .modifier(AppURLHandling()) // omegajournal:// links (widget); queued until unlocked
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)

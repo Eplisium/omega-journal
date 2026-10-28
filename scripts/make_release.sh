@@ -12,7 +12,14 @@
 #   - universal binary (arm64 + x86_64)
 #   - channel "direct", bundle id com.eplisium.omega-journal, NOT sandboxed
 #   - hardened runtime + packaging/OmegaJournal-Direct.entitlements (microphone for
-#     voice memos; the 1.0.2 DMG lacked it, so recording silently failed)
+#     voice memos; the 1.0.2 DMG lacked it, so recording silently failed) + the App Group
+#   - Contents/PlugIns/OmegaJournalWidgets.appex: WidgetKit extension, sandboxed,
+#     packaging/OmegaJournalWidgets.entitlements, signed before the app (no --deep)
+#   - Contents/Resources/Metadata.appintents: App Intents / App Shortcuts metadata
+#
+# The App Group (WWC5HJN6AL.com.eplisium.omega-journal) is team-prefixed, which
+# Developer ID apps may use without a provisioning profile. Ad-hoc DMGs carry the same
+# entitlements but have no team, so the widget may not see the app's snapshot there.
 #
 # Ad-hoc signed by default (users need "Open Anyway" on first launch).
 #
@@ -45,6 +52,7 @@ IDENTITY="${OMEGA_JOURNAL_SIGN_IDENTITY:--}"
 ARCHS="${OMEGA_JOURNAL_ARCHS:-universal}"
 DIST="${OMEGA_JOURNAL_DIST_DIR:-$PROJECT_DIR/dist}"
 ENTITLEMENTS="$OJ_PACKAGING_DIR/OmegaJournal-Direct.entitlements"
+WIDGET_ENTITLEMENTS="$OJ_PACKAGING_DIR/OmegaJournalWidgets.entitlements"
 
 oj_build_binary "$ARCHS"
 oj_check_binary_sdk "$OJ_BINARY" warn
@@ -56,10 +64,10 @@ oj_assemble_bundle "$APP" "$OJ_BINARY" direct "$OJ_PRODUCTION_BUNDLE_ID" "$VERSI
 
 if [ "$IDENTITY" = "-" ]; then
     # No secure timestamp for ad-hoc signatures.
-    oj_sign_app "$APP" - "$ENTITLEMENTS" --runtime
+    oj_sign_app "$APP" - "$ENTITLEMENTS" --runtime --widget-entitlements "$WIDGET_ENTITLEMENTS"
 else
-    # Notarization requires the hardened runtime and a secure timestamp.
-    oj_sign_app "$APP" "$IDENTITY" "$ENTITLEMENTS" --runtime --timestamp
+    # Notarization requires the hardened runtime and a secure timestamp (app and appex).
+    oj_sign_app "$APP" "$IDENTITY" "$ENTITLEMENTS" --runtime --timestamp --widget-entitlements "$WIDGET_ENTITLEMENTS"
 fi
 
 # Guard the shipped bug: the hardened runtime must come with the microphone entitlement.
@@ -69,6 +77,11 @@ fi
     || oj_die "direct build must not be sandboxed"
 [[ "$(codesign -d --verbose=2 "$APP" 2>&1)" == *"flags="*"runtime"* ]] \
     || oj_die "hardened runtime flag missing from signature"
+# Widget extension: present, WidgetKit, sandboxed, same App Group as the app, hardened
+# runtime; App Intents metadata present and complete.
+oj_verify_widget "$APP" "$OJ_PRODUCTION_BUNDLE_ID" runtime
+[ -z "$(oj_entitlement "$APP/Contents/PlugIns/$OJ_WIDGET_APPEX" ':com.apple.security.device.audio-input')" ] \
+    || oj_die "widget extension must not carry the app's entitlements (was it signed with --deep?)"
 
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/oj-dmg.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT

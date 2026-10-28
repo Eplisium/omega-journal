@@ -10,6 +10,7 @@
   - application-identifier / team-identifier / keychain-access-groups must match the
     embedded Mac App Store provisioning profile (WWC5HJN6AL.com.eplisium.omega-journal).
     make_mas.sh's dev/dry-run mode strips these three keys because they need a profile.
+  - application-groups: shared container with the widget extension (team-prefixed group).
 
   Deliberately NO network entitlements: the app never talks to a server.
 -->
@@ -30,6 +31,10 @@
     <key>com.apple.developer.team-identifier</key>
     <string>WWC5HJN6AL</string>
     <key>keychain-access-groups</key>
+    <array>
+        <string>WWC5HJN6AL.com.eplisium.omega-journal</string>
+    </array>
+    <key>com.apple.security.application-groups</key>
     <array>
         <string>WWC5HJN6AL.com.eplisium.omega-journal</string>
     </array>

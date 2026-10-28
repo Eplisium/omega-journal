@@ -114,7 +114,12 @@ nonisolated enum PromptGenerator {
     ]
 
     static func today() -> String {
-        let day = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 1
+        prompt(for: Date())
+    }
+
+    /// The prompt shown on a given day (the widget precomputes upcoming days).
+    static func prompt(for date: Date) -> String {
+        let day = Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 1
         return prompts[(day - 1) % prompts.count]
     }
 
