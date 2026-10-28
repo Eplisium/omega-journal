@@ -11,6 +11,13 @@
 # Production mode needs (see docs/app-store/SUBMISSION.md for how to create them):
 #   OMEGA_JOURNAL_MAS_PROFILE              path to the "Mac App Store Connect" .provisionprofile
 #                                          for com.eplisium.omega-journal
+#   OMEGA_JOURNAL_MAS_WIDGET_PROFILE       path to the "Mac App Store Connect" .provisionprofile
+#                                          for the widget extension, App ID
+#                                          com.eplisium.omega-journal.widgets (App Groups
+#                                          capability). App Store extensions need their own
+#                                          profile, embedded in the .appex.
+#   (or OMEGA_JOURNAL_MAS_SKIP_WIDGET=1    ship without the widget extension until that
+#                                          profile exists; App Intents are unaffected)
 #   OMEGA_JOURNAL_MAS_APP_IDENTITY         default: first "Apple Distribution: …" or
 #                                          "3rd Party Mac Developer Application: …" identity
 #   OMEGA_JOURNAL_MAS_INSTALLER_IDENTITY   default: first "3rd Party Mac Developer Installer: …" or
@@ -82,7 +89,7 @@ print_missing_and_exit() {
 
 PROFILE_PLIST="$WORK/profile.plist"
 check_profile() {
-    local profile="$1" identity_sha1="$2"
+    local profile="$1" identity_sha1="$2" want_id="${3:-$OJ_PRODUCTION_BUNDLE_ID}"
     if ! security cms -D -i "$profile" > "$PROFILE_PLIST" 2>/dev/null; then
         need "OMEGA_JOURNAL_MAS_PROFILE ($profile) is not a readable provisioning profile."
         return
@@ -93,8 +100,8 @@ check_profile() {
     [ -n "$appid" ] || appid="$($pb -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST" 2>/dev/null || true)"
     team="$($pb -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST" 2>/dev/null || true)"
     platform="$($pb -c 'Print :Platform:0' "$PROFILE_PLIST" 2>/dev/null || true)"
-    if [ "$appid" != "$OJ_TEAM_ID.$OJ_PRODUCTION_BUNDLE_ID" ]; then
-        need "Provisioning profile is for '$appid'; it must be for the explicit App ID $OJ_TEAM_ID.$OJ_PRODUCTION_BUNDLE_ID."
+    if [ "$appid" != "$OJ_TEAM_ID.$want_id" ]; then
+        need "Provisioning profile $(basename "$profile") is for '$appid'; it must be for the explicit App ID $OJ_TEAM_ID.$want_id."
     fi
     [ "$team" = "$OJ_TEAM_ID" ] || need "Provisioning profile team is '$team'; expected $OJ_TEAM_ID."
     [ "$platform" = "OSX" ] || need "Provisioning profile platform is '$platform'; it must be a macOS profile."
@@ -161,6 +168,16 @@ else
     else
         check_profile "$PROFILE" "$APP_SHA1"
     fi
+    WIDGET_PROFILE="${OMEGA_JOURNAL_MAS_WIDGET_PROFILE:-}"
+    if [ "${OMEGA_JOURNAL_MAS_SKIP_WIDGET:-0}" = "1" ]; then
+        oj_warn "OMEGA_JOURNAL_MAS_SKIP_WIDGET=1: this package will not contain the widget extension."
+    elif [ -z "$WIDGET_PROFILE" ]; then
+        need "OMEGA_JOURNAL_MAS_WIDGET_PROFILE=/path/to/OmegaJournalWidgets_MAS.provisionprofile (Identifiers → + → App IDs → $(oj_widget_bundle_id "$OJ_PRODUCTION_BUNDLE_ID") with the App Groups capability; then Profiles → + → Mac App Store Connect → that App ID → your Apple Distribution certificate). Or set OMEGA_JOURNAL_MAS_SKIP_WIDGET=1 to ship without the widget."
+    elif [ ! -f "$WIDGET_PROFILE" ]; then
+        need "OMEGA_JOURNAL_MAS_WIDGET_PROFILE points to '$WIDGET_PROFILE', which doesn't exist."
+    else
+        check_profile "$WIDGET_PROFILE" "$APP_SHA1" "$(oj_widget_bundle_id "$OJ_PRODUCTION_BUNDLE_ID")"
+    fi
     if [ "$VALIDATE" = "1" ]; then
         [ -n "${ASC_KEY_ID:-}" ] || need "ASC_KEY_ID (App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys; role App Manager)."
         [ -n "${ASC_ISSUER_ID:-}" ] || need "ASC_ISSUER_ID (shown above the keys list on the same page)."
@@ -195,7 +212,17 @@ APP="$STAGE_DIR/$OJ_APP_NAME.app"
 
 MIGRATION="$OJ_PACKAGING_DIR/container-migration.plist"
 ENTITLEMENTS="$WORK/OmegaJournal-AppStore.entitlements"
-cp "$ENT_SRC" "$ENTITLEMENTS"
+oj_prepare_entitlements "$ENT_SRC" "$ENTITLEMENTS" "$BUNDLE_ID"
+# Widget extension: sandbox + App Group; production adds the identifiers its own
+# provisioning profile grants (application-identifier must match <app id>.widgets).
+WIDGET_ENTITLEMENTS="$WORK/OmegaJournalWidgets.entitlements"
+oj_prepare_entitlements "$OJ_PACKAGING_DIR/OmegaJournalWidgets.entitlements" "$WIDGET_ENTITLEMENTS" "$BUNDLE_ID"
+SKIP_WIDGET="${OMEGA_JOURNAL_MAS_SKIP_WIDGET:-0}"
+if [ "$DEV" = "0" ] && [ "$SKIP_WIDGET" != "1" ]; then
+    /usr/libexec/PlistBuddy \
+        -c "Add :com.apple.application-identifier string $OJ_TEAM_ID.$(oj_widget_bundle_id "$BUNDLE_ID")" \
+        -c "Add :com.apple.developer.team-identifier string $OJ_TEAM_ID" "$WIDGET_ENTITLEMENTS" >/dev/null
+fi
 if [ "$DEV" = "1" ]; then
     # The real manifest would MOVE the real journal into the QA container. Dev builds
     # embed either nothing or a probe manifest for a fake folder.
@@ -219,17 +246,23 @@ if [ "$DEV" = "1" ]; then
 fi
 
 oj_assemble_bundle "$APP" "$OJ_BINARY" appstore "$BUNDLE_ID" "$VERSION" "$BUILD_NUMBER" "$MIGRATION"
+APPEX="$APP/Contents/PlugIns/$OJ_WIDGET_APPEX"
+if [ "$SKIP_WIDGET" = "1" ]; then
+    rm -rf "$APP/Contents/PlugIns"
+fi
 if [ "$DEV" = "1" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Omega Journal (QA)" "$APP/Contents/Info.plist"
 else
     cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
+    [ ! -d "$APPEX" ] || cp "$WIDGET_PROFILE" "$APPEX/Contents/embedded.provisionprofile"
 fi
 
 # Hardened runtime is optional for the Mac App Store but harmless; keep parity with the DMG.
+# oj_sign_app signs the widget extension first, then the app (no --deep).
 if [ "$DEV" = "1" ]; then
-    oj_sign_app "$APP" "$APP_IDENTITY" "$ENTITLEMENTS" --runtime
+    oj_sign_app "$APP" "$APP_IDENTITY" "$ENTITLEMENTS" --runtime --widget-entitlements "$WIDGET_ENTITLEMENTS"
 else
-    oj_sign_app "$APP" "$APP_IDENTITY" "$ENTITLEMENTS" --runtime --timestamp
+    oj_sign_app "$APP" "$APP_IDENTITY" "$ENTITLEMENTS" --runtime --timestamp --widget-entitlements "$WIDGET_ENTITLEMENTS"
 fi
 
 # ---------------------------------------------------------------------------
@@ -246,6 +279,13 @@ plist="$APP/Contents/Info.plist"
 [ "$(oj_entitlement "$APP" ':com.apple.security.device.audio-input')" = "true" ] || oj_die "audio-input entitlement missing"
 ENT_XML="$(oj_dump_entitlements "$APP")"
 case "$ENT_XML" in *com.apple.security.network.*) oj_die "network entitlement present; the app must not have one";; esac
+if [ "$SKIP_WIDGET" = "1" ]; then
+    [ ! -d "$APPEX" ] || oj_die "OMEGA_JOURNAL_MAS_SKIP_WIDGET=1 but $OJ_WIDGET_APPEX is present"
+    oj_verify_appintents_metadata "$APP"
+else
+    oj_verify_widget "$APP" "$BUNDLE_ID" runtime
+    case "$(oj_dump_entitlements "$APPEX")" in *com.apple.security.network.*) oj_die "widget extension has a network entitlement";; esac
+fi
 
 if [ "$DEV" = "1" ]; then
     echo ""
@@ -253,6 +293,10 @@ if [ "$DEV" = "1" ]; then
     echo "App:        $APP"
     echo "Bundle id:  $BUNDLE_ID   (container: ~/Library/Containers/$BUNDLE_ID)"
     echo "Signed by:  $APP_IDENTITY"
+    if [ -d "$APPEX" ]; then
+        echo "Widget:     $OJ_WIDGET_APPEX ($(oj_widget_bundle_id "$BUNDLE_ID"), sandboxed, App Group $(oj_app_group "$BUNDLE_ID"))"
+        echo "            no provisioning profile in dev mode; an App Store upload needs OMEGA_JOURNAL_MAS_WIDGET_PROFILE"
+    fi
     if [ -n "$PROBE" ]; then
         echo "Migration:  probe manifest: ~/Library/Application Support/$PROBE and"
         echo "            ~/Library/Preferences/$BUNDLE_ID.plist move into the container on first launch"
@@ -278,6 +322,14 @@ security cms -D -i "$APP/Contents/embedded.provisionprofile" > "$WORK/embedded.p
     || oj_die "embedded.provisionprofile is unreadable"
 [ "$($pb -c 'Print :Entitlements:com.apple.application-identifier' "$WORK/embedded.plist")" = "$OJ_TEAM_ID.$OJ_PRODUCTION_BUNDLE_ID" ] \
     || oj_die "embedded profile app id does not match the entitlements"
+if [ -d "$APPEX" ]; then
+    [ "$(oj_entitlement "$APPEX" ':com.apple.application-identifier')" = "$OJ_TEAM_ID.$(oj_widget_bundle_id "$OJ_PRODUCTION_BUNDLE_ID")" ] \
+        || oj_die "widget application-identifier entitlement does not match its App ID"
+    security cms -D -i "$APPEX/Contents/embedded.provisionprofile" > "$WORK/widget-embedded.plist" 2>/dev/null \
+        || oj_die "widget embedded.provisionprofile is unreadable"
+    [ "$($pb -c 'Print :Entitlements:com.apple.application-identifier' "$WORK/widget-embedded.plist")" = "$OJ_TEAM_ID.$(oj_widget_bundle_id "$OJ_PRODUCTION_BUNDLE_ID")" ] \
+        || oj_die "widget embedded profile app id does not match its entitlements"
+fi
 oj_note "Entitlements:"
 printf '%s\n' "$ENT_XML" | plutil -p - 2>/dev/null || printf '%s\n' "$ENT_XML"
 
