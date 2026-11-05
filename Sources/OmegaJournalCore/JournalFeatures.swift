@@ -175,8 +175,10 @@ public enum ReviewGenerator {
     public static func draft(period: ReviewPeriod, entries: [ReviewEntry], reference: Date = Date(),
                              includeHidden: Bool = false, calendar: Calendar = .current) -> ReviewDraft {
         let range = interval(for: period, containing: reference, calendar: calendar)
+        // Half-open [start, end): `DateInterval.contains` includes `end`, which is
+        // the next period's first instant, so a midnight entry landed in two reviews.
         let inRange = entries
-            .filter { range.contains($0.createdAt) && (includeHidden || !$0.isHidden) }
+            .filter { $0.createdAt >= range.start && $0.createdAt < range.end && (includeHidden || !$0.isHidden) }
             .sorted { $0.createdAt < $1.createdAt }
 
         let titleFmt = DateFormatter()
