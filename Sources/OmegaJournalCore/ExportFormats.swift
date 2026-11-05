@@ -118,14 +118,23 @@ public enum ExportFormats {
         return "\(day) \(String(cleaned.prefix(60)))"
     }
 
-    /// Makes names unique by appending " 2", " 3"… (case-insensitive).
+    /// Makes names unique by appending " 2", " 3"… Never returns a name already
+    /// taken by an earlier stem or suffix (`Note`, `Note 2`, `Note` →
+    /// `Note`, `Note 2`, `Note 3`). Compared case-insensitively and in NFC, as
+    /// the default macOS (APFS) volume does, so two names never land on one file.
     public static func uniqueNames(_ stems: [String]) -> [String] {
-        var seen: [String: Int] = [:]
+        func key(_ name: String) -> String {
+            name.precomposedStringWithCanonicalMapping.lowercased()
+        }
+        var taken = Set<String>()
+        var nextSuffix: [String: Int] = [:]
         return stems.map { stem in
-            let key = stem.lowercased()
-            let n = (seen[key] ?? 0) + 1
-            seen[key] = n
-            return n == 1 ? stem : "\(stem) \(n)"
+            let base = key(stem)
+            if taken.insert(base).inserted { return stem }
+            var n = nextSuffix[base] ?? 2
+            while !taken.insert(key("\(stem) \(n)")).inserted { n += 1 }
+            nextSuffix[base] = n + 1
+            return "\(stem) \(n)"
         }
     }
 
