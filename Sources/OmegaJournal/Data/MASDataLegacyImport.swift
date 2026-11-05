@@ -82,6 +82,8 @@ extension DatabaseManager {
             throw LegacyImportError.sameFolder
         }
         guard isJournalEmptyForImport() else { throw LegacyImportError.journalNotEmpty }
+        // An explicit user action: retry the Keychain even if a lookup just failed.
+        JournalCrypto.resetKeyFailureCache()
 
         // 1. Stage a copy of the source database next to ours and fold its WAL
         //    in, so the source folder is only ever read.
@@ -180,6 +182,7 @@ extension DatabaseManager {
         // The aside file is the live copy of what `snapshotURL` preserves.
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
         encryptionKeyError = nil
+        JournalCrypto.resetKeyFailureCache()
         reconcileTagStorage()
         summary.entries = Int(scalarInt("SELECT COUNT(*) FROM entries WHERE deleted_at IS NULL;"))
         return summary

@@ -148,6 +148,8 @@ extension DatabaseManager {
         guard !openFailed else { throw RestoreError.failed("The database is not open.") }
         guard transactionDepth == 0 else { throw RestoreError.failed("A write is in progress.") }
         let fm = FileManager.default
+        // An explicit user action: retry the Keychain even if a lookup just failed.
+        JournalCrypto.resetKeyFailureCache()
 
         // 1. Decrypt + stage.
         let raw: Data
@@ -214,6 +216,7 @@ extension DatabaseManager {
         }
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
         encryptionKeyError = nil
+        JournalCrypto.resetKeyFailureCache()
         reconcileTagStorage()
     }
 

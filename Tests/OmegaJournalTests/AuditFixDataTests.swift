@@ -498,3 +498,65 @@ struct AuditFixDataKeyMirrorTests {
     }
 }
 
+// MARK: - DATA-6
+
+@Suite("Audit fix data: failed key lookups are remembered briefly (DATA-6)")
+struct AuditFixDataKeyFailureCacheTests {
+    struct Locked: Error {}
+
+    @Test("a failed lookup is not retried on every row, and is retried after the interval")
+    func failureCachedThenRetried() throws {
+        var cache = JournalCrypto.KeyFailureCache(retryInterval: 5)
+        var calls = 0
+        var keychainUnlocked = false
+        let key = SymmetricKey(size: .bits256)
+        func load() throws -> SymmetricKey {
+            calls += 1
+            guard keychainUnlocked else { throw Locked() }
+            return key
+        }
+        // Launch with the keychain locked: first row asks, the next 999 don't.
+        for _ in 0..<1000 {
+            #expect(throws: Locked.self) { try JournalCrypto.resolveKey(failures: &cache, now: 100, load: load) }
+        }
+        #expect(calls == 1)
+        // Still within the window a moment later.
+        #expect(throws: Locked.self) { try JournalCrypto.resolveKey(failures: &cache, now: 104.9, load: load) }
+        #expect(calls == 1)
+        // The user unlocks the keychain; once the window passes the session recovers.
+        keychainUnlocked = true
+        let got = try JournalCrypto.resolveKey(failures: &cache, now: 105, load: load)
+        #expect(calls == 2)
+        #expect(got.withUnsafeBytes { Data($0) } == key.withUnsafeBytes { Data($0) })
+        #expect(cache.activeFailure(now: 105) == nil)
+    }
+
+    @Test("an explicit retry clears the remembered failure immediately")
+    func explicitRetryClears() throws {
+        var cache = JournalCrypto.KeyFailureCache(retryInterval: 5)
+        var calls = 0
+        var fail = true
+        func load() throws -> SymmetricKey {
+            calls += 1
+            if fail { throw JournalCrypto.KeyError.keyMissing }
+            return SymmetricKey(size: .bits256)
+        }
+        #expect(throws: JournalCrypto.KeyError.keyMissing) { try JournalCrypto.resolveKey(failures: &cache, now: 0, load: load) }
+        fail = false
+        cache.clear()  // what restore/verify/import and adoptPrefetchedKey do
+        _ = try JournalCrypto.resolveKey(failures: &cache, now: 1, load: load)
+        #expect(calls == 2)
+    }
+
+    @Test("a clock that moves backwards never pins the failure")
+    func backwardsClockDoesNotPin() throws {
+        var cache = JournalCrypto.KeyFailureCache(retryInterval: 5)
+        var calls = 0
+        func load() throws -> SymmetricKey { calls += 1; throw Locked() }
+        _ = try? JournalCrypto.resolveKey(failures: &cache, now: 50, load: load)
+        _ = try? JournalCrypto.resolveKey(failures: &cache, now: 10, load: load)
+        #expect(calls == 2)
+        #expect(JournalCrypto.keyFailureRetryInterval > 0 && JournalCrypto.keyFailureRetryInterval <= 10)
+    }
+}
+

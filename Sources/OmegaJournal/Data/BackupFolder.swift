@@ -144,6 +144,8 @@ extension DatabaseManager {
     /// Decrypts and validates a backup without touching the live database.
     func verifyBackup(at url: URL) throws -> BackupVerification {
         let fm = FileManager.default
+        // An explicit user action: retry the Keychain even if a lookup just failed.
+        JournalCrypto.resetKeyFailureCache()
         let raw: Data
         do { raw = try readBackupFile(at: url) } catch { throw RestoreError.invalid("Could not read the backup file.") }
         let plain: Data

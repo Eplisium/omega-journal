@@ -85,10 +85,63 @@ enum JournalCrypto {
             cachedKey = key
             return key
         }
-        let key = try loadOrCreateKey(using: appKeyResolver(), allowCreate: { !encryptedDataExists() })
+        let key = try resolveKey(failures: &keyFailures, now: ProcessInfo.processInfo.systemUptime) {
+            try loadOrCreateKey(using: appKeyResolver(), allowCreate: { !encryptedDataExists() })
+        }
         cachedKey = key
         return key
     }
+
+    // MARK: - Failed lookups (negative cache)
+
+    /// How long a failed key lookup is remembered. Every row decrypt asks for
+    /// the key, so without this a missing key, a locked keychain or a denied
+    /// access prompt cost two `SecItemCopyMatching` calls per row — thousands
+    /// of synchronous main-thread Keychain queries per reload. Kept short so
+    /// a keychain the user unlocks later in the session is picked up on its own.
+    nonisolated static let keyFailureRetryInterval: TimeInterval = 5
+
+    /// The last failed lookup and when it happened (monotonic uptime).
+    nonisolated struct KeyFailureCache {
+        let retryInterval: TimeInterval
+        private(set) var lastFailure: (error: any Error, at: TimeInterval)?
+
+        init(retryInterval: TimeInterval = JournalCrypto.keyFailureRetryInterval) {
+            self.retryInterval = retryInterval
+            lastFailure = nil
+        }
+
+        /// The remembered error while it is still fresh.
+        func activeFailure(now: TimeInterval) -> (any Error)? {
+            guard let lastFailure, now >= lastFailure.at, now - lastFailure.at < retryInterval else { return nil }
+            return lastFailure.error
+        }
+
+        mutating func record(_ error: any Error, now: TimeInterval) { lastFailure = (error, now) }
+        mutating func clear() { lastFailure = nil }
+    }
+
+    private static var keyFailures = KeyFailureCache()
+
+    /// Runs `load` unless a recent failure is remembered, in which case that
+    /// error is rethrown without touching the Keychain. Success forgets any
+    /// failure; a new failure is remembered for `retryInterval`.
+    nonisolated static func resolveKey(failures: inout KeyFailureCache, now: TimeInterval,
+                                       load: () throws -> SymmetricKey) throws -> SymmetricKey {
+        if let error = failures.activeFailure(now: now) { throw error }
+        do {
+            let key = try load()
+            failures.clear()
+            return key
+        } catch {
+            failures.record(error, now: now)
+            throw error
+        }
+    }
+
+    /// Explicit retries (backup restore/verify, journal import) go back to the
+    /// Keychain immediately instead of waiting out a remembered failure.
+    static func resetKeyFailureCache() { keyFailures.clear() }
 
     /// Resolver-based load (data-protection → legacy, copy forward, mint into
     /// the preferred store only when `allowCreate()`). Injectable for tests.
@@ -154,6 +207,7 @@ enum JournalCrypto {
     @MainActor static func adoptPrefetchedKey(_ key: SymmetricKey?) {
         guard cachedKey == nil, let key else { return }
         cachedKey = key
+        keyFailures.clear()
     }
 
     // MARK: - Seal / open
