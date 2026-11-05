@@ -156,7 +156,8 @@ oj_make_icon() {
     local dest="$1" tmp
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/oj-icon.XXXXXX")"
     mkdir -p "$tmp/$OJ_APP_NAME.app/Contents/Resources"
-    OMEGA_JOURNAL_PROJECT_DIR="$tmp" swift "$OJ_PROJECT_DIR/make_icon.swift" >/dev/null \
+    OMEGA_JOURNAL_PROJECT_DIR="$tmp" OMEGA_JOURNAL_ICON_SOURCE="$OJ_PROJECT_DIR/packaging/AppIcon-1024.png" \
+        swift "$OJ_PROJECT_DIR/make_icon.swift" >/dev/null \
         || { rm -rf "$tmp"; oj_die "icon generation (make_icon.swift) failed"; }
     [ -f "$tmp/$OJ_APP_NAME.app/Contents/Resources/AppIcon.icns" ] \
         || { rm -rf "$tmp"; oj_die "make_icon.swift did not produce AppIcon.icns"; }

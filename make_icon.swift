@@ -1,71 +1,55 @@
 import AppKit
 
-let size = CGSize(width: 1024, height: 1024)
-let img = NSImage(size: size)
-img.lockFocus()
+// Builds AppIcon.icns from the master artwork `packaging/AppIcon-1024.png`
+// (1024×1024, transparent, icon body on the macOS 824px grid with its shadow).
+// The master is the "Ω book + ribbon" mark from the 2026-11 rebrand; replace
+// that PNG to change the icon. Nothing is drawn here.
+//
+// Env:
+//   OMEGA_JOURNAL_ICON_SOURCE   master PNG (default: <repo>/packaging/AppIcon-1024.png)
+//   OMEGA_JOURNAL_PROJECT_DIR   where "Omega Journal.app/Contents/Resources" lives
+//                               (oj_make_icon points it at a temp dir)
 
-// Deep gradient background (indigo to dark purple)
-let bg = NSGradient(colors: [
-    NSColor(srgbRed: 0.25, green: 0.30, blue: 0.55, alpha: 1.0),
-    NSColor(srgbRed: 0.12, green: 0.15, blue: 0.35, alpha: 1.0),
-    NSColor(srgbRed: 0.06, green: 0.08, blue: 0.20, alpha: 1.0)
-])
-bg?.draw(in: NSRect(origin: .zero, size: size), angle: -90)
+let env = ProcessInfo.processInfo.environment
+let repoDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+let sourceURL = URL(fileURLWithPath: env["OMEGA_JOURNAL_ICON_SOURCE"]
+    ?? repoDir.appendingPathComponent("packaging/AppIcon-1024.png").path)
+let projectDir = URL(fileURLWithPath: env["OMEGA_JOURNAL_PROJECT_DIR"] ?? repoDir.path)
 
-// Subtle radial glow
-let glow = NSBezierPath(ovalIn: NSRect(x: 200, y: 200, width: 624, height: 624))
-NSColor(srgbRed: 0.35, green: 0.40, blue: 0.70, alpha: 0.15).setFill()
-glow.fill()
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("make_icon: \(message)\n".utf8))
+    exit(1)
+}
 
-// Draw large Omega symbol (Ω)
-let omegaFont = NSFont(name: "Georgia-Bold", size: 580) ?? NSFont.systemFont(ofSize: 580, weight: .bold)
-let omegaAttr: [NSAttributedString.Key: Any] = [
-    .font: omegaFont,
-    .foregroundColor: NSColor.white,
-    .shadow: {
-        let s = NSShadow()
-        s.shadowColor = NSColor(srgbRed: 0.20, green: 0.25, blue: 0.50, alpha: 0.6)
-        s.shadowBlurRadius = 20
-        s.shadowOffset = NSSize(width: 0, height: -4)
-        return s
-    }()
-]
-let omegaStr = NSAttributedString(string: "Ω", attributes: omegaAttr)
-let omegaSize = omegaStr.size()
-let omegaRect = NSRect(
-    x: (size.width - omegaSize.width) / 2,
-    y: (size.height - omegaSize.height) / 2 - 20,
-    width: omegaSize.width,
-    height: omegaSize.height
-)
-omegaStr.draw(with: omegaRect, options: [.usesLineFragmentOrigin], context: nil)
+guard let source = NSImage(contentsOf: sourceURL),
+      let master = source.cgImage(forProposedRect: nil, context: nil, hints: nil)
+else { fail("can't read icon master at \(sourceURL.path)") }
+guard master.width >= 1024, master.height >= 1024 else {
+    fail("icon master must be at least 1024×1024 (got \(master.width)×\(master.height))")
+}
 
-// Small "JOURNAL" text at bottom
-let labelFont = NSFont(name: "HelveticaNeue-Light", size: 36) ?? NSFont.systemFont(ofSize: 36, weight: .light)
-let labelAttr: [NSAttributedString.Key: Any] = [
-    .font: labelFont,
-    .foregroundColor: NSColor.white.withAlphaComponent(0.5)
-]
-let labelStr = NSAttributedString(string: "JOURNAL", attributes: labelAttr)
-let labelSize = labelStr.size()
-let labelRect = NSRect(
-    x: (size.width - labelSize.width) / 2,
-    y: 100,
-    width: labelSize.width,
-    height: labelSize.height
-)
-labelStr.draw(with: labelRect, options: [.usesLineFragmentOrigin], context: nil)
+/// Exact-pixel PNG. (NSImage.lockFocus renders at the screen's backing scale,
+/// so a "16×16" file could come out 32×32.)
+func png(_ image: CGImage, pixels: Int) -> Data {
+    guard let ctx = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { fail("can't create a \(pixels)px bitmap") }
+    ctx.interpolationQuality = .high
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+    guard let scaled = ctx.makeImage(),
+          let data = NSBitmapImageRep(cgImage: scaled).representation(using: .png, properties: [:])
+    else { fail("can't encode the \(pixels)px PNG") }
+    return data
+}
 
-img.unlockFocus()
-
-// Build iconset
-let projectDir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["OMEGA_JOURNAL_PROJECT_DIR"]
-    ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("OmegaJournal").path)
 let iconsetPath = projectDir.appendingPathComponent("AppIcon.iconset")
 try? FileManager.default.removeItem(at: iconsetPath)
-try! FileManager.default.createDirectory(at: iconsetPath, withIntermediateDirectories: true)
+do {
+    try FileManager.default.createDirectory(at: iconsetPath, withIntermediateDirectories: true)
+} catch { fail("can't create \(iconsetPath.path): \(error)") }
 
-let sizes: [(String, CGFloat)] = [
+let sizes: [(String, Int)] = [
     ("icon_16x16", 16), ("icon_16x16@2x", 32),
     ("icon_32x32", 32), ("icon_32x32@2x", 64),
     ("icon_128x128", 128), ("icon_128x128@2x", 256),
@@ -73,18 +57,18 @@ let sizes: [(String, CGFloat)] = [
     ("icon_512x512", 512), ("icon_512x512@2x", 1024),
 ]
 for (name, px) in sizes {
-    let s = NSImage(size: CGSize(width: px, height: px))
-    s.lockFocus()
-    img.draw(in: NSRect(origin: .zero, size: CGSize(width: px, height: px)))
-    s.unlockFocus()
-    let data = NSBitmapImageRep(data: s.tiffRepresentation!)!.representation(using: .png, properties: [:])!
-    try! data.write(to: iconsetPath.appendingPathComponent("\(name).png"))
+    do {
+        try png(master, pixels: px).write(to: iconsetPath.appendingPathComponent("\(name).png"))
+    } catch { fail("can't write \(name).png: \(error)") }
 }
 
-let icnsPath = projectDir
-    .appendingPathComponent("Omega Journal.app/Contents/Resources/AppIcon.icns")
-let p = Process(); p.launchPath = "/usr/bin/iconutil"
+let icnsPath = projectDir.appendingPathComponent("Omega Journal.app/Contents/Resources/AppIcon.icns")
+try? FileManager.default.createDirectory(at: icnsPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+let p = Process()
+p.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 p.arguments = ["-c", "icns", iconsetPath.path, "-o", icnsPath.path]
-p.launch(); p.waitUntilExit()
+do { try p.run() } catch { fail("can't run iconutil: \(error)") }
+p.waitUntilExit()
 try? FileManager.default.removeItem(at: iconsetPath)
+guard p.terminationStatus == 0 else { fail("iconutil failed (\(p.terminationStatus))") }
 print("Icon generated: \(icnsPath.path)")

@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/icon.png" width="168" alt="Omega Journal">
+  <img src="docs/banner.jpg" width="900" alt="Omega Journal — a private journal for your Mac">
 </p>
-
-<h1 align="center">Omega Journal</h1>
 
 <p align="center">
   <strong>A native, local-first journal for macOS.</strong><br>
@@ -10,11 +8,11 @@
 </p>
 
 <p align="center">
-  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-7C83DB?style=flat-square">
-  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-native-7C83DB?style=flat-square">
-  <img alt="SQLite" src="https://img.shields.io/badge/storage-SQLite-7C83DB?style=flat-square">
-  <img alt="No built-in sync" src="https://img.shields.io/badge/sync-local_only-7C83DB?style=flat-square">
-  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-7C83DB?style=flat-square">
+  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-9D6BFF?style=flat-square">
+  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-native-9D6BFF?style=flat-square">
+  <img alt="SQLite" src="https://img.shields.io/badge/storage-SQLite-9D6BFF?style=flat-square">
+  <img alt="No built-in sync" src="https://img.shields.io/badge/sync-local_only-9D6BFF?style=flat-square">
+  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-9D6BFF?style=flat-square">
   <a href="https://github.com/Eplisium/omega-journal/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Eplisium/omega-journal/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
