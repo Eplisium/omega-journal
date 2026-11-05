@@ -151,7 +151,12 @@ struct OmegaJournalApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        // Only a raw `.build` binary run from a shell needs this; a bundled
+        // app launched in the background (Shortcuts/Siri intents) must not
+        // steal focus. See `LaunchActivation`.
+        if LaunchActivation.shouldForceActivateThisLaunch {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         GlobalHotkey.shared.syncRegistration()
     }
 
