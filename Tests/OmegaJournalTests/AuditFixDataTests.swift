@@ -38,6 +38,156 @@ enum AuditFixDataEnv {
     }
 }
 
+// MARK: - DATA-1
+
+@Suite("Audit fix data: FTS plaintext purge (DATA-1)", .serialized)
+@MainActor
+struct AuditFixDataFTSTests {
+    init() { MASDataTestEnv.ensureIsolated() }
+
+    /// Writes the FTS state a pre-V8 build left behind: the body text was
+    /// indexed, then deleted with a plain DELETE (what V8/V9 did).
+    static func plantLegacyFTSResidue(_ db: DatabaseManager, id: String, title: String, secret: String) {
+        // Journals from those builds never had FTS5 secure-delete on.
+        #expect(db.exec("INSERT INTO entries_fts(entries_fts, rank) VALUES('secure-delete', 0);"))
+        #expect(db.exec("DELETE FROM entries_fts;"))
+        #expect(db.exec("DELETE FROM entries_fts_map;"))
+        #expect(db.exec("INSERT INTO entries_fts(entry_id, title, body, tags) VALUES ('\(id)', '\(title)', '\(secret)', '');"))
+    }
+
+    @Test("upgrading a pre-V8 journal leaves no plaintext body words in the database file")
+    func preV8FTSPlaintextPurged() throws {
+        let (root, path, first) = AuditFixDataEnv.tempDB("fts-v7")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let secret = "quokkasecretalpha zebrasecretbeta"
+        var id = ""
+        do {
+            let db = first
+            var e = JournalEntry.new()
+            e.title = "Upgrade probe"
+            e.body = "placeholder"
+            #expect(db.saveEntry(e))
+            id = e.id
+            db.legacyPlaintextForTesting(id: id, body: secret)
+            Self.plantLegacyFTSResidue(db, id: id, title: "Upgrade probe", secret: secret)
+            #expect(db.exec("UPDATE schema_version SET version = 7 WHERE id = 1;"))
+            db.checkpointForTesting()
+            #expect(try AuditFixDataEnv.fileContains(path, "quokkasecretalpha"), "setup: the old index should hold the body")
+        }
+        let db2 = AuditFixDataEnv.reopen(root)
+        #expect(db2.isReadOnly == false)
+        #expect(db2.getSchemaVersion() == DatabaseManager.currentSchemaVersion)
+        #expect(db2.fetchEntry(id: id)?.body == secret)
+        db2.checkpointForTesting()
+        #expect(try !AuditFixDataEnv.fileContains(path, "quokkasecretalpha"), "plaintext body token still in DB file")
+        #expect(try !AuditFixDataEnv.fileContains(path, "zebrasecretbeta"), "plaintext body token still in DB file")
+        // Title search still works after the rebuild.
+        #expect(db2.fullTextSearch("Upgrade").contains { $0.id == id })
+    }
+
+    @Test("a journal already on V12 that carries old body postings is purged by the next migration")
+    func alreadyUpgradedJournalPurged() throws {
+        let (root, path, first) = AuditFixDataEnv.tempDB("fts-v12")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var id = ""
+        do {
+            let db = first
+            var e = JournalEntry.new()
+            e.title = "Residue probe"
+            e.body = "encrypted at rest"
+            e.tags = ["keepme"]
+            #expect(db.saveEntry(e))
+            id = e.id
+            // A V12 journal whose index still holds a body token from before V8,
+            // followed by the V9-style DELETE + title/tags-only reinsert.
+            Self.plantLegacyFTSResidue(db, id: id, title: "Residue probe", secret: "wombatsecretgamma")
+            // V9's rebuild exactly: DELETE, then reinsert title/tags with body ''.
+            #expect(db.exec("DELETE FROM entries_fts;"))
+            #expect(db.exec("INSERT INTO entries_fts_map (entry_id) SELECT id FROM entries;"))
+            #expect(db.exec("""
+                INSERT INTO entries_fts(rowid, entry_id, title, body, tags)
+                SELECT m.fts_rowid, e.id, e.title, '', e.tags FROM entries e JOIN entries_fts_map m ON m.entry_id = e.id;
+                """))
+            #expect(db.exec("UPDATE schema_version SET version = 12 WHERE id = 1;"))
+            db.checkpointForTesting()
+            #expect(try AuditFixDataEnv.fileContains(path, "wombatsecretgamma"), "setup: residue should be on disk")
+        }
+        let db2 = AuditFixDataEnv.reopen(root)
+        #expect(db2.getSchemaVersion() == DatabaseManager.currentSchemaVersion)
+        db2.checkpointForTesting()
+        #expect(try !AuditFixDataEnv.fileContains(path, "wombatsecretgamma"), "old FTS postings survived the purge migration")
+        #expect(db2.fetchEntry(id: id)?.body == "encrypted at rest")
+        #expect(db2.fullTextSearch("Residue").contains { $0.id == id })
+        #expect(db2.fullTextSearch("keepme").contains { $0.id == id })
+    }
+
+    @Test("rebuilding the index (tag rename) also purges old postings, and still works mid-transaction")
+    func reindexPurgesAndToleratesOpenStatements() throws {
+        let (root, path, db) = AuditFixDataEnv.tempDB("fts-rename")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var e = JournalEntry.new()
+        e.title = "Rename probe"
+        e.tags = ["oldtagname"]
+        #expect(db.saveEntry(e))
+        Self.plantLegacyFTSResidue(db, id: e.id, title: "Rename probe", secret: "dingosecretdelta")
+        #expect(db.exec("DELETE FROM entries_fts;"))
+        db.checkpointForTesting()
+        #expect(try AuditFixDataEnv.fileContains(path, "dingosecretdelta"), "setup: residue should be on disk")
+        // renameTag holds stepped statements while it rebuilds the index.
+        db.renameTag(from: "oldtagname", to: "newtagname")
+        #expect(db.fetchEntry(id: e.id)?.tags == ["newtagname"])
+        #expect(db.fullTextSearch("newtagname").contains { $0.id == e.id })
+        #expect(db.fullTextSearch("Rename").contains { $0.id == e.id })
+        db.vacuumForTesting()
+        db.checkpointForTesting()
+        #expect(try !AuditFixDataEnv.fileContains(path, "dingosecretdelta"))
+    }
+
+    @Test("FTS5 secure-delete is on exactly when this system's SQLite supports it, and search keeps working")
+    func secureDeleteMatchesSystemSupport() throws {
+        let (root, _, db) = AuditFixDataEnv.tempDB("fts-secure")
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(db.ftsSecureDeleteEnabled == DatabaseManager.systemSupportsFTSSecureDelete)
+        // A journal whose option was off (older OS, or before this fix) gets it at the next launch.
+        #expect(db.exec("INSERT INTO entries_fts(entries_fts, rank) VALUES('secure-delete', 0);"))
+        #expect(!db.ftsSecureDeleteEnabled)
+        let reopened = AuditFixDataEnv.reopen(root)
+        #expect(reopened.ftsSecureDeleteEnabled == DatabaseManager.systemSupportsFTSSecureDelete)
+        var e = JournalEntry.new()
+        e.title = "Ocelot evening"
+        #expect(reopened.saveEntry(e))
+        e.title = "Lynx morning"
+        #expect(reopened.saveEntry(e))
+        #expect(reopened.fullTextSearch("Lynx").map(\.id) == [e.id])
+        #expect(reopened.fullTextSearch("Ocelot").isEmpty)
+        reopened.hardDeleteEntry(id: e.id)
+        #expect(reopened.fullTextSearch("Lynx").isEmpty)
+        #expect(reopened.scalarIntForTesting("SELECT COUNT(*) FROM entries_fts;") == 0)
+    }
+
+    @Test("the purge migration is idempotent and keeps every entry searchable")
+    func purgeMigrationIdempotent() throws {
+        let (root, _, db) = AuditFixDataEnv.tempDB("fts-idem")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var ids: [String] = []
+        for i in 0..<5 {
+            var e = JournalEntry.new()
+            e.title = "Idem \(i)"
+            e.tags = ["batch"]
+            #expect(db.saveEntry(e))
+            ids.append(e.id)
+        }
+        for _ in 0..<2 {
+            db.beginTransaction()
+            #expect(db.migrateToV13())
+            #expect(db.endTransaction())
+        }
+        #expect(Set(db.fullTextSearch("batch").map(\.id)) == Set(ids))
+        #expect(db.scalarIntForTesting("SELECT COUNT(*) FROM entries_fts;") == 5)
+        #expect(db.scalarIntForTesting("SELECT COUNT(*) FROM entries_fts_map;") == 5)
+    }
+}
+
 // MARK: - DATA-2 / browse-3
 
 @Suite("Audit fix data: writing goals mask hidden and future entries (DATA-2, browse-3)", .serialized)
@@ -164,6 +314,55 @@ struct AuditFixDataGoalTests {
         let end = DatabaseManager.endOfToday()
         #expect(end > Date())
         #expect(end == Calendar.current.date(byAdding: .day, value: 1, to: today))
+    }
+}
+
+// MARK: - DATA-3
+
+@Suite("Audit fix data: stored word counts match the editor (DATA-3)", .serialized)
+@MainActor
+struct AuditFixDataWordCountTests {
+    init() { MASDataTestEnv.ensureIsolated() }
+
+    static func stampedBody(_ rest: String) -> String {
+        EntryStampCodec.join(stamp: EntryStamp(location: "New York, NY", weather: "Sunny 21°"), rest: rest)
+    }
+
+    @Test("stored word_count matches the displayed word count for a stamped entry")
+    func storedWordCountExcludesStamp() throws {
+        let (root, _, db) = AuditFixDataEnv.tempDB("words")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var e = JournalEntry.new()
+        e.body = Self.stampedBody("hello world")
+        #expect(e.wordCount == 2)
+        #expect(db.saveEntry(e))
+        #expect(db.scalarIntForTesting("SELECT word_count FROM entries WHERE id = '\(e.id)';") == 2)
+        #expect(db.wordCountSum(since: Calendar.current.startOfDay(for: Date()), includeHidden: false) == e.wordCount)
+    }
+
+    @Test("existing rows saved with the old count are corrected once by a migration")
+    func existingRowsBackfilled() throws {
+        let (root, _, first) = AuditFixDataEnv.tempDB("words-backfill")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var stamped = JournalEntry.new()
+        stamped.body = Self.stampedBody("one two three")
+        var plain = JournalEntry.new()
+        plain.body = "four five"
+        do {
+            let db = first
+            #expect(db.saveEntry(stamped))
+            #expect(db.saveEntry(plain))
+            // What every earlier build stored: raw whitespace tokens, stamp included.
+            let old = stamped.body.split(whereSeparator: { $0.isWhitespace }).count
+            #expect(old > 3)
+            #expect(db.exec("UPDATE entries SET word_count = \(old) WHERE id = '\(stamped.id)';"))
+            #expect(db.exec("UPDATE schema_version SET version = 12 WHERE id = 1;"))
+        }
+        let db2 = AuditFixDataEnv.reopen(root)
+        #expect(db2.getSchemaVersion() == DatabaseManager.currentSchemaVersion)
+        #expect(db2.scalarIntForTesting("SELECT word_count FROM entries WHERE id = '\(stamped.id)';") == 3)
+        #expect(db2.scalarIntForTesting("SELECT word_count FROM entries WHERE id = '\(plain.id)';") == 2)
+        #expect(db2.fetchEntry(id: stamped.id)?.body == stamped.body)
     }
 }
 

@@ -71,7 +71,7 @@ final class DatabaseManager {
     var attachmentsDir: String
 
     // Current schema version — bump when adding migrations
-    static let currentSchemaVersion = 12
+    static let currentSchemaVersion = 14
 
     /// Entries stay in the trash this long before `purgeExpiredTrash()` removes them.
     static let trashRetentionDays = 30
@@ -142,6 +142,7 @@ final class DatabaseManager {
         JournalCrypto.registerEncryptedDataProbe(owner: self) { [weak self] in self?.hasEncryptedRows() ?? false }
         runMigrations()
         guard !isReadOnly else { return }
+        enableFTSSecureDeleteIfSupported()
         reconcileTagStorage()
         purgeExpiredTrash()
         autoBackup()

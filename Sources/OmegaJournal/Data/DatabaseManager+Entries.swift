@@ -293,7 +293,9 @@ extension DatabaseManager {
     }
 
     func performSave(_ entry: JournalEntry) {
-        let wordCount = entry.body.isEmpty ? 0 : entry.body.split(whereSeparator: { $0.isWhitespace }).count
+        // The editor's count (stamp stripped, markdown word rules), so goals,
+        // the goal ring and "sort by words" agree with what the user sees.
+        let wordCount = JournalEntry.countWords(entry.body)
         let existing = existingBodyState(id: entry.id)
         // Never replace ciphertext we cannot read: an unreadable body loads as
         // "" and re-saving that would destroy the only copy. Metadata changes

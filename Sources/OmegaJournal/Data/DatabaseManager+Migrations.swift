@@ -51,6 +51,8 @@ extension DatabaseManager {
             (9, migrateToV9), (10, migrateToV10),
             (11, migrateToV11),
             (12, migrateToV12),
+            (13, migrateToV13),
+            (14, migrateToV14),
         ]
 
         // Snapshot existing user data before any change. A brand-new database
@@ -64,7 +66,7 @@ extension DatabaseManager {
             }
         }
 
-        var ranV8 = false
+        var needsVacuum = false
         for m in migrations where current < m.version {
             beginTransaction()
             var ok = m.run()
@@ -75,13 +77,17 @@ extension DatabaseManager {
                 enterReadOnlyMode("Upgrading the journal to schema V\(m.version) failed and was rolled back; your data is unchanged. The journal opened read-only. A pre-upgrade snapshot is in the backups folder.")
                 return
             }
-            if m.version == 8 { ranV8 = true }
+            // V8 (bodies encrypted) and V13 (stale FTS postings purged) leave
+            // the old plaintext in free pages until the file is rewritten.
+            if m.version == 8 || m.version == 13 { needsVacuum = true }
         }
-        if ranV8 {
-            // The pre-migration plaintext pages stay in the file as free space
-            // after the UPDATEs — VACUUM rewrites the database so the old bodies
-            // are physically gone. VACUUM cannot run inside a transaction.
+        if needsVacuum {
+            // VACUUM rewrites the database so the old bodies are physically
+            // gone; the TRUNCATE checkpoint then folds the rewrite into the
+            // main file and empties the -wal (whose stale frames could still
+            // hold old pages). Neither can run inside a transaction.
             exec("VACUUM;")
+            exec("PRAGMA wal_checkpoint(TRUNCATE);")
         }
     }
 
@@ -277,6 +283,49 @@ extension DatabaseManager {
             );
         """) else { return false }
         return reindexFTS()
+    }
+
+    /// V13: purge body words that builds before V8 indexed in `entries_fts`.
+    /// V8 encrypted the bodies and V9 rebuilt the index with `body = ''`, but
+    /// a DELETE on an FTS5 table leaves the old postings in its segment
+    /// b-tree, so the words stayed readable in the file (and VACUUM copied
+    /// them forward). This affects every journal that predates V8, including
+    /// ones already on V12. `reindexFTS` now merges the segments away; the
+    /// VACUUM after commit (`runMigrations`) removes the freed pages.
+    /// Idempotent: the index is rebuilt from `entries` every time.
+    func migrateToV13() -> Bool {
+        reindexFTS()
+    }
+
+    /// V14: `word_count` = the count the editor shows
+    /// (`JournalEntry.countWords`: location/weather stamp stripped, markdown
+    /// word rules). Earlier saves and the V6 backfill counted raw whitespace
+    /// tokens, so stamped entries inflated goals and "sort by words". Rows
+    /// whose body can't be decrypted keep their stored count (never guessed).
+    /// Idempotent: only rows whose count differs are rewritten.
+    func migrateToV14() -> Bool {
+        guard let stmt = try? prepare("SELECT id, body_enc, body, word_count FROM entries;") else { return false }
+        var corrections: [(id: String, count: Int)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(stmt, 0))
+            let body: String
+            if let sealed = blobAt(stmt, index: 1) {
+                guard case .success(let text) = decryptBody(sealed) else { continue }
+                body = text
+            } else {
+                body = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+            }
+            let count = JournalEntry.countWords(body)
+            if count != Int(sqlite3_column_int64(stmt, 3)) { corrections.append((id, count)) }
+        }
+        sqlite3_finalize(stmt)
+        for c in corrections {
+            execChecked("UPDATE entries SET word_count = ? WHERE id = ?;", context: "Word count backfill failed") { s in
+                sqlite3_bind_int64(s, 1, Int64(c.count))
+                bindText(s, index: 2, value: c.id)
+            }
+        }
+        return !transactionFailed
     }
 
     /// Encrypts every entry whose `body_enc` is NULL and whose plaintext

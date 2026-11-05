@@ -51,6 +51,15 @@ extension DatabaseManager {
 
     /// Rebuilds the whole index (and the id→rowid map) from `entries`.
     /// Returns false if any step failed (caller's transaction is flagged).
+    ///
+    /// On a regular FTS5 table `DELETE` only appends delete markers: the old
+    /// postings stay readable in the `entries_fts_data` segments until a merge
+    /// that may never come. Builds before V8 indexed the plaintext body, so a
+    /// DELETE-and-reinsert alone left those body words in the file (DATA-1).
+    /// `optimize` merges every segment into one and drops the deleted
+    /// postings (their pages are zeroed by `PRAGMA secure_delete`). It is used
+    /// instead of DROP TABLE, which fails with SQLITE_LOCKED while a caller
+    /// (renameTag) still holds a stepped statement.
     @discardableResult
     func reindexFTS() -> Bool {
         beginTransaction()
@@ -62,11 +71,41 @@ extension DatabaseManager {
                 INSERT INTO entries_fts(rowid, entry_id, title, body, tags)
                 SELECT m.fts_rowid, e.id, e.title, '', e.tags
                 FROM entries e JOIN entries_fts_map m ON m.entry_id = e.id;
-              """)
+              """),
+              exec("INSERT INTO entries_fts(entries_fts) VALUES('optimize');")
         else {
             reportError("FTS rebuild failed")
             return false
         }
+        enableFTSSecureDeleteIfSupported()
         return true
+    }
+
+    /// FTS5 `secure-delete` (SQLite 3.42+) removes a row's postings on
+    /// update/delete instead of leaving them for a later merge, so edited or
+    /// deleted titles and tags don't linger in the index. Once a row is
+    /// written with it on, FTS5 older than 3.42 can no longer read the table,
+    /// so it is only enabled when this system's SQLite is comfortably newer
+    /// (3.44+). Best effort: the option is persistent, and failure to set it
+    /// changes nothing else (raw exec — never poisons the caller's transaction).
+    static let ftsSecureDeleteMinimumVersion: Int32 = 3_044_000
+
+    static var systemSupportsFTSSecureDelete: Bool {
+        sqlite3_libversion_number() >= ftsSecureDeleteMinimumVersion
+    }
+
+    /// True when the persistent FTS5 `secure-delete` option is on.
+    var ftsSecureDeleteEnabled: Bool {
+        guard tableExists("entries_fts_config"),
+              let stmt = try? prepare("SELECT v FROM entries_fts_config WHERE k = 'secure-delete';") else { return false }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1
+    }
+
+    func enableFTSSecureDeleteIfSupported() {
+        guard Self.systemSupportsFTSSecureDelete, !isReadOnly, !ftsSecureDeleteEnabled else { return }
+        if sqlite3_exec(db, "INSERT INTO entries_fts(entries_fts, rank) VALUES('secure-delete', 1);", nil, nil, nil) != SQLITE_OK {
+            print("OmegaJournal: FTS secure-delete not enabled: \(String(cString: sqlite3_errmsg(db)))")
+        }
     }
 }
