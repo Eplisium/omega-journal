@@ -14,6 +14,7 @@ nonisolated struct BackupInfo: Identifiable, Equatable {
         let n = url.lastPathComponent
         if n.hasPrefix("pre-migration_") { return "Before upgrade" }
         if n.hasPrefix("pre-restore_") { return "Before restore" }
+        if n.hasPrefix(DatabaseManager.preImportBackupPrefix) { return "Before import" }
         return "Daily backup"
     }
 }

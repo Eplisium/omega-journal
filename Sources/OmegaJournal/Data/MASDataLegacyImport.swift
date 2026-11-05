@@ -45,7 +45,13 @@ extension DatabaseManager {
         var entries: Int
         var attachments: Int
         var backups: Int
+        /// Sealed copy of the journal the import replaced (its notebooks,
+        /// templates and settings), kept in the backups folder as a
+        /// "Before import" backup the user can restore.
+        var preImportSnapshot: URL? = nil
     }
+
+    nonisolated static let preImportBackupPrefix = "pre-import_"
 
     /// True when the journal holds no entries (active, archived, hidden or
     /// trashed) and no check-in data. Any failure to count counts as
@@ -103,7 +109,17 @@ extension DatabaseManager {
                 : "The journal in that folder couldn't be opened — it may be damaged. Nothing was imported.")
         }
 
-        // 2. Swap: put the empty journal aside, move the staged one in.
+        // 2. "Empty" only means no entries or check-ins: the journal may still
+        //    hold notebooks, templates and settings the user made here. Keep a
+        //    sealed copy as a "Before import" backup (never deleted by the
+        //    import) before anything is replaced, like restoreBackup does.
+        let snapshotURL = backupsDirectory.appendingPathComponent("\(Self.preImportBackupPrefix)\(Self.fileStamp(Date())).sqlite3")
+        guard snapshotDatabase(to: snapshotURL) else {
+            throw LegacyImportError.failed("Couldn't save a copy of the current journal first.")
+        }
+        cleanupOldBackups(in: backupsDirectory, prefix: Self.preImportBackupPrefix, keep: 3)
+
+        // 3. Swap: put the empty journal aside, move the staged one in.
         let aside = dbPath + ".pre-import"
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
         sqlite3_close(db)
@@ -138,18 +154,18 @@ extension DatabaseManager {
         do { try fm.moveItem(atPath: stagedDB.path, toPath: dbPath) }
         catch { throw rollback(.failed("Couldn't put the imported journal in place.")) }
 
-        // 3. Reopen + migrate, exactly like a backup restore.
+        // 4. Reopen + migrate, exactly like a backup restore.
         openDatabase()
         if openFailed { throw rollback(.failed("The imported journal couldn't be opened.")) }
         runMigrations()
         if isReadOnly { throw rollback(.failed("The imported journal couldn't be upgraded.")) }
 
-        // 4. The entries must decrypt with this Mac's key, or the import would
+        // 5. The entries must decrypt with this Mac's key, or the import would
         //    show an unreadable journal (and its backups/attachments too).
         guard encryptedBodiesDecrypt() else { throw rollback(.undecryptable) }
 
-        // 5. Attachments and backups. Never overwrite anything already here.
-        var summary = LegacyImportSummary(entries: 0, attachments: 0, backups: 0)
+        // 6. Attachments and backups. Never overwrite anything already here.
+        var summary = LegacyImportSummary(entries: 0, attachments: 0, backups: 0, preImportSnapshot: snapshotURL)
         do {
             summary.attachments = try Self.copyMissingItems(
                 from: source.appendingPathComponent(MASDataJournalLocation.attachmentsFolderName, isDirectory: true),
@@ -161,6 +177,7 @@ extension DatabaseManager {
             throw rollback(.failed("Copying attachments or backups failed."))
         }
 
+        // The aside file is the live copy of what `snapshotURL` preserves.
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
         encryptionKeyError = nil
         reconcileTagStorage()

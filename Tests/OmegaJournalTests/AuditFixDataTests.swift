@@ -366,3 +366,67 @@ struct AuditFixDataWordCountTests {
     }
 }
 
+// MARK: - DATA-4
+
+@Suite("Audit fix data: legacy import keeps a pre-import snapshot (DATA-4)", .serialized)
+@MainActor
+struct AuditFixDataLegacyImportTests {
+    init() { MASDataTestEnv.ensureIsolated() }
+
+    /// Decrypts a sealed backup and returns the ids in `table`.
+    static func ids(in table: String, ofSealedBackup url: URL) throws -> Set<String> {
+        let plain = try JournalCrypto.decrypt(Data(contentsOf: url))
+        let tmp = MASDataTestEnv.tempDir("auditfix-data-snapcheck")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let file = tmp.appendingPathComponent("snap.sqlite3")
+        try plain.write(to: file)
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let h = handle else {
+            sqlite3_close(handle); return []
+        }
+        defer { sqlite3_close(h) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(h, "SELECT id FROM \(table);", -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out = Set<String>()
+        while sqlite3_step(stmt) == SQLITE_ROW { out.insert(String(cString: sqlite3_column_text(stmt, 0))) }
+        return out
+    }
+
+    @Test("the import summary names the kept snapshot, which lists as a restorable 'Before import' backup")
+    func summaryReportsSnapshot() throws {
+        let (source, _) = MASDataLegacyImportTests.makeSourceJournal(entries: 1)
+        let (root, db) = MASDataLegacyImportTests.makeTarget()
+        defer { MASDataLegacyImportTests.cleanup(source.deletingLastPathComponent(), root) }
+        let summary = try db.importLegacyJournal(from: source)
+        let snapshot = try #require(summary.preImportSnapshot)
+        #expect(FileManager.default.fileExists(atPath: snapshot.path))
+        #expect(snapshot.deletingLastPathComponent().standardizedFileURL == db.backupsDirectory.standardizedFileURL)
+        #expect(snapshot.lastPathComponent.hasPrefix(DatabaseManager.preImportBackupPrefix))
+        // Sealed with the journal key, not plaintext SQLite.
+        let raw = try Data(contentsOf: snapshot)
+        #expect(!raw.starts(with: Data("SQLite format 3\0".utf8)))
+        // The imported entry is present; the snapshot itself holds no entries.
+        #expect(db.fetchAllEntries().count == 1)
+        #expect(try Self.ids(in: "entries", ofSealedBackup: snapshot).isEmpty)
+        #expect(BackupInfo(url: snapshot, date: Date(), bytes: 0, isExternal: false).kind == "Before import")
+    }
+
+    @Test("legacy import keeps the replaced journal's notebooks and templates in a backup")
+    func legacyImportKeepsTargetOrganization() throws {
+        let (source, _) = MASDataLegacyImportTests.makeSourceJournal(entries: 1)
+        let (root, db) = MASDataLegacyImportTests.makeTarget()
+        defer { MASDataLegacyImportTests.cleanup(source.deletingLastPathComponent(), root) }
+        let notebook = try #require(db.createJournal(name: "Work notebook"))
+        let template = EntryTemplate(id: UUID().uuidString, name: "My custom template", body: "## Wins", tags: [], icon: "doc.text", sortOrder: 99)
+        #expect(db.saveTemplate(template))
+        #expect(db.isJournalEmptyForImport())
+        _ = try db.importLegacyJournal(from: source)
+        let snapshots = try FileManager.default.contentsOfDirectory(at: db.backupsDirectory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("pre-import_") }
+        let snapshot = try #require(snapshots.first, "no pre-import snapshot of the replaced journal was kept")
+        #expect(try Self.ids(in: "journals", ofSealedBackup: snapshot).contains(notebook.id))
+        #expect(try Self.ids(in: "templates", ofSealedBackup: snapshot).contains(template.id))
+    }
+}
+
