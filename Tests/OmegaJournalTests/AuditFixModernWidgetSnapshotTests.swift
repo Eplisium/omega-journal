@@ -15,8 +15,7 @@ import OmegaJournalShared
 private func makeModernVM() -> (JournalViewModel, DatabaseManager) {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oj-fix-modern-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", dir.appendingPathComponent("shared.sqlite3").path, 1)
-    setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", dir.appendingPathComponent("shared-att").path, 1)
+    TestSharedEnvironment.pin()
     let db = DatabaseManager(databasePath: dir.appendingPathComponent("private.sqlite3").path,
                              attachmentsPath: dir.appendingPathComponent("private-att").path)
     return (JournalViewModel(database: db), db)

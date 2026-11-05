@@ -17,8 +17,7 @@ struct AuditFixVMTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("omega-auditfix-vm-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         let db = DatabaseManager(databasePath: root.appendingPathComponent("private.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("private-att", isDirectory: true).path)
         // BiometricAuth.shared is process-global: only the two lock tests

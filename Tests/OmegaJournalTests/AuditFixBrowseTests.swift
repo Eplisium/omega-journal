@@ -16,8 +16,7 @@ enum AuditFixBrowseSupport {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("oj-fix-browse-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("shared.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("shared-att").path, 1)
+        TestSharedEnvironment.pin()
         let db = DatabaseManager(databasePath: root.appendingPathComponent("private.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("private-att").path)
         return (JournalViewModel(database: db), root)

@@ -220,9 +220,15 @@ struct AuditFixesBTests {
         secret.journalId = journal.id
         vm.db.saveEntry(secret)
         vm.reload()
-        BiometricAuth.shared.setAuthenticatedForTesting(true)
-
-        let copy = try #require(await vm.duplicate(secret).value)
+        // BiometricAuth.shared is process-global; a parallel suite can lock it
+        // between our unlock and duplicate's check (the prompt then refuses in
+        // tests), so retry a few times instead of depending on the timing.
+        var duplicated: JournalEntry?
+        for _ in 0..<20 where duplicated == nil {
+            BiometricAuth.shared.setAuthenticatedForTesting(true)
+            duplicated = await vm.duplicate(secret).value
+        }
+        let copy = try #require(duplicated)
         let stored = try #require(vm.db.fetchEntry(id: copy.id))
         #expect(stored.isHidden)
         #expect(stored.journalId == journal.id)

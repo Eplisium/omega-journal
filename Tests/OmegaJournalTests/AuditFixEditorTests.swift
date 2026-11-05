@@ -14,8 +14,7 @@ private func makeIsolatedVM() -> (JournalViewModel, URL) {
     _ = NSApplication.shared
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oj-fix-editor-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", dir.appendingPathComponent("shared.sqlite3").path, 1)
-    setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", dir.appendingPathComponent("shared-att").path, 1)
+    TestSharedEnvironment.pin()
     let db = DatabaseManager(databasePath: dir.appendingPathComponent("db.sqlite3").path,
                              attachmentsPath: dir.appendingPathComponent("att").path)
     return (JournalViewModel(database: db), dir)

@@ -15,8 +15,9 @@ struct ObservationMigrationTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("omega-observation-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        // Not into `root`: it is deleted after each test, and a `.shared`
+        // opened by another suite in between would point at a deleted file.
+        TestSharedEnvironment.pin()
         let db = DatabaseManager(databasePath: root.appendingPathComponent("private.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("private-att", isDirectory: true).path)
         return (JournalViewModel(database: db), root)
@@ -72,17 +73,21 @@ struct ObservationMigrationTests {
         #expect(vm.allTags.contains { $0.tag == "obs-secret" })
 
         // Locking without going through the VM still re-derives counts.
-        // BiometricAuth.shared is process-global and parallel suites reset it
-        // while this test waits, so each poll re-asserts the wanted state (a
-        // redundant set is not a change and notifies nobody).
+        // BiometricAuth.shared is process-global and parallel suites flip it
+        // while this test waits, so a poll that doesn't see the wanted counts
+        // makes a real change into the wanted state again (a redundant set is
+        // not a change and notifies nobody). Only the session observer
+        // re-derives the counts; the test never calls refreshTagCounts here.
         #expect(await Self.waitUntil {
-            BiometricAuth.shared.setAuthenticatedForTesting(false)
-            return !vm.allTags.contains { $0.tag == "obs-secret" }
+            if !vm.allTags.contains(where: { $0.tag == "obs-secret" }) { return true }
+            Self.changeSession(to: false)
+            return false
         })
 
         #expect(await Self.waitUntil {
-            BiometricAuth.shared.setAuthenticatedForTesting(true)
-            return vm.allTags.contains { $0.tag == "obs-secret" }
+            if vm.allTags.contains(where: { $0.tag == "obs-secret" }) { return true }
+            Self.changeSession(to: true)
+            return false
         })
         vm.db.hardDeleteEntry(id: entry.id)
     }
@@ -96,6 +101,12 @@ struct ObservationMigrationTests {
         vm.applyTagRewriteToUnsavedSnapshots(.delete("obs-gone"))
         #expect(vm.tagRewriteGeneration == start + 2)
         #expect(vm.lastTagRewrite == .delete("obs-gone"))
+    }
+
+    /// Forces a real lock-state change that ends in `authenticated`.
+    private static func changeSession(to authenticated: Bool) {
+        BiometricAuth.shared.setAuthenticatedForTesting(!authenticated)
+        BiometricAuth.shared.setAuthenticatedForTesting(authenticated)
     }
 
     private static func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
