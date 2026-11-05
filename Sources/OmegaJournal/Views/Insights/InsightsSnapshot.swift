@@ -137,7 +137,10 @@ struct InsightsSnapshot {
         var cursor = calendar.startOfDay(for: chartStart)
         while cursor <= today {
             points.append(WordPoint(date: cursor, words: wordsByDay[cursor] ?? 0))
-            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            // Re-anchor on each day's start: adding a day to a DST 01:00 start
+            // would stay at 01:00 and miss every later `startOfDay` key.
+            let next = DayStep.startOfDay(byAdding: 1, to: cursor, calendar: calendar)
+            guard next > cursor else { break }
             cursor = next
         }
         writingPoints = points

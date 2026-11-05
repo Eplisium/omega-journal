@@ -42,11 +42,12 @@ public enum ActivityStats {
     public static func wordsPerDay(_ samples: [ActivitySample], days: Int, now: Date = Date(),
                                    calendar: Calendar = .current) -> [ActivitySample] {
         guard days > 0 else { return [] }
-        let today = calendar.startOfDay(for: now)
         var map: [Date: Int] = [:]
         for s in samples { map[calendar.startOfDay(for: s.date), default: 0] += s.words }
-        return (0..<days).compactMap { i in
-            guard let day = calendar.date(byAdding: .day, value: -(days - 1 - i), to: today) else { return nil }
+        return (0..<days).map { i in
+            // DST-safe: each day is re-normalised to its own start (`DayStep`),
+            // never `today - n days`, which keeps a DST 01:00 start on every day.
+            let day = DayStep.startOfDay(byAdding: -(days - 1 - i), to: now, calendar: calendar)
             return ActivitySample(date: day, words: map[day] ?? 0)
         }
     }

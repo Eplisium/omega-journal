@@ -354,7 +354,9 @@ public enum StreakCalculator {
                 if let last = lastMissOffset, step - last < graceWindow { break }
                 lastMissOffset = step
             }
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: date) else { break }
+            // DST-safe step: re-anchor on the previous day's start (`DayStep`).
+            let prev = DayStep.startOfDay(byAdding: -1, to: date, calendar: calendar)
+            guard prev < date else { break }
             date = prev
             step += 1
         }
@@ -384,7 +386,8 @@ public enum StreakCalculator {
                     sinceMiss = 0
                 }
             }
-            guard let next = calendar.date(byAdding: .day, value: 1, to: date) else { break }
+            let next = DayStep.startOfDay(byAdding: 1, to: date, calendar: calendar)
+            guard next > date else { break }
             date = next
         }
         return best
@@ -405,7 +408,9 @@ public enum StreakCalculator {
         var week = currentWeek
         var streak = 0
         if (counts[week] ?? 0) >= target { streak += 1 }
-        while let prev = calendar.date(byAdding: .weekOfYear, value: -1, to: week), prev >= earliest {
+        // Week keys are `dateInterval(of: .weekOfYear)` starts; step to the
+        // previous week's start, never `week - 7 days` (DST-safe, `DayStep`).
+        while let prev = DayStep.startOfWeek(byAdding: -1, to: week, calendar: calendar), prev >= earliest, prev < week {
             week = prev
             if (counts[week] ?? 0) >= target { streak += 1 } else { break }
         }
@@ -422,7 +427,7 @@ public enum StreakCalculator {
         var week = first, run = 0, best = 0
         while week <= last {
             if (counts[week] ?? 0) >= target { run += 1; best = max(best, run) } else { run = 0 }
-            guard let next = calendar.date(byAdding: .weekOfYear, value: 1, to: week) else { break }
+            guard let next = DayStep.startOfWeek(byAdding: 1, to: week, calendar: calendar), next > week else { break }
             week = next
         }
         return best

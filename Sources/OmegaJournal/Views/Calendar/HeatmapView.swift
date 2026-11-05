@@ -53,7 +53,7 @@ struct HeatmapView: View {
     /// First day shown in the grid: the start of the week 25 weeks before this one.
     nonisolated static func gridStart(today: Date, calendar cal: Calendar) -> Date? {
         guard let thisWeekStart = cal.dateInterval(of: .weekOfYear, for: today)?.start else { return nil }
-        return cal.date(byAdding: .weekOfYear, value: -25, to: thisWeekStart)
+        return DayStep.startOfWeek(byAdding: -25, to: thisWeekStart, calendar: cal)
     }
 
     struct WindowStats: Equatable {
@@ -82,6 +82,9 @@ struct HeatmapView: View {
     /// Built ONCE per render: it used to be a computed property read by the
     /// grid, the stats row, the month-label row and once per month label,
     /// so every hover re-ran it ~10 times.
+    /// Every day is a `startOfDay` (the `info` / habit lookup key): after a
+    /// week whose first day starts at 01:00 (DST at local midnight), adding
+    /// days or weeks to that 01:00 would keep it on every later cell.
     nonisolated static func gridWeeks(today rawToday: Date, calendar cal: Calendar) -> [WeekColumn] {
         let today = cal.startOfDay(for: rawToday)
         guard let rangeStart = Self.gridStart(today: today, calendar: cal) else { return [] }
@@ -92,12 +95,13 @@ struct HeatmapView: View {
         while weekStart <= today {
             var days: [Date?] = []
             for d in 0..<7 {
-                let date = cal.date(byAdding: .day, value: d, to: weekStart)!
+                let date = DayStep.startOfDay(byAdding: d, to: weekStart, calendar: cal)
                 days.append(date <= today ? date : nil)
             }
             result.append(WeekColumn(id: idx, startDate: weekStart, days: days))
             idx += 1
-            weekStart = cal.date(byAdding: .weekOfYear, value: 1, to: weekStart)!
+            guard let next = DayStep.startOfWeek(byAdding: 1, to: weekStart, calendar: cal), next > weekStart else { break }
+            weekStart = next
         }
         return result
     }

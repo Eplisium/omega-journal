@@ -27,10 +27,12 @@ extension JournalViewModel {
             map[cal.startOfDay(for: entry.createdAt), default: 0] += entry.wordCount
         }
         var points: [WordPoint] = []
-        var cursor = start
+        var cursor = cal.startOfDay(for: start)
         while cursor <= today {
             points.append(WordPoint(date: cursor, words: map[cursor] ?? 0))
-            guard let next = cal.date(byAdding: .day, value: 1, to: cursor) else { break }
+            // DST-safe: re-anchor on the next day's start (see `DayStep`).
+            let next = DayStep.startOfDay(byAdding: 1, to: cursor, calendar: cal)
+            guard next > cursor else { break }
             cursor = next
         }
         return points
