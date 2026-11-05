@@ -72,11 +72,18 @@ struct ObservationMigrationTests {
         #expect(vm.allTags.contains { $0.tag == "obs-secret" })
 
         // Locking without going through the VM still re-derives counts.
-        BiometricAuth.shared.setAuthenticatedForTesting(false)
-        #expect(await Self.waitUntil { !vm.allTags.contains { $0.tag == "obs-secret" } })
+        // BiometricAuth.shared is process-global and parallel suites reset it
+        // while this test waits, so each poll re-asserts the wanted state (a
+        // redundant set is not a change and notifies nobody).
+        #expect(await Self.waitUntil {
+            BiometricAuth.shared.setAuthenticatedForTesting(false)
+            return !vm.allTags.contains { $0.tag == "obs-secret" }
+        })
 
-        BiometricAuth.shared.setAuthenticatedForTesting(true)
-        #expect(await Self.waitUntil { vm.allTags.contains { $0.tag == "obs-secret" } })
+        #expect(await Self.waitUntil {
+            BiometricAuth.shared.setAuthenticatedForTesting(true)
+            return vm.allTags.contains { $0.tag == "obs-secret" }
+        })
         vm.db.hardDeleteEntry(id: entry.id)
     }
 
