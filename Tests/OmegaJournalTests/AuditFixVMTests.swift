@@ -225,6 +225,47 @@ struct AuditFixVMTests {
         #expect(vm.libraryEntries.map(\.id) == [h.id])
     }
 
+    // MARK: vm-5 — deleteJournal flushes first
+
+    @Test("deleting a notebook with a pending edit leaves no entry in a deleted notebook")
+    func deleteJournalFlushesFirst() throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        let nb = try #require(vm.createJournal(name: "Work VM", colorHex: "#336699"))
+        vm.setActiveJournal(nb.id)
+        let e = vm.createEntry(title: "in work", body: "draft")
+        var edited = try #require(vm.editingEntry)
+        edited.body = "draft plus last keystrokes"
+        vm.autoSave(edited)                       // debounce pending (journalId = Work)
+        vm.deleteJournal(nb)                      // within 700 ms
+        vm.flushPendingSave()
+        let stored = try #require(vm.db.fetchEntry(id: e.id))
+        #expect(stored.body == "draft plus last keystrokes")
+        #expect(stored.journalId == JournalDefaults.defaultJournalId)
+        #expect(vm.db.fetchJournals().contains { $0.id == stored.journalId })
+    }
+
+    @Test("an unsaved snapshot filed in a deleted notebook is re-filed to the default journal")
+    func deleteJournalRewritesUnsavedSnapshots() throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        let nb = try #require(vm.createJournal(name: "Gone VM", colorHex: "#663399"))
+        vm.setActiveJournal(nb.id)
+        let e = vm.createEntry(title: "in gone", body: "text")
+        vm.saveWriterOverride = { _ in throw SQLiteError.message("disk I/O error") }
+        var edited = try #require(vm.editingEntry); edited.body = "text that failed to save"
+        vm.autoSave(edited)
+        vm.flushPendingSave()
+        #expect(vm.unsavedSnapshots[e.id]?.journalId == nb.id)
+        vm.deleteJournal(nb)
+        #expect(vm.unsavedSnapshots[e.id]?.journalId == JournalDefaults.defaultJournalId)
+        vm.saveWriterOverride = nil
+        vm.flushPendingSave()
+        let stored = try #require(vm.db.fetchEntry(id: e.id))
+        #expect(stored.body == "text that failed to save")
+        #expect(stored.journalId == JournalDefaults.defaultJournalId)
+    }
+
     // MARK: vm-6 — reload reconciles dangling editor/selection ids
 
     @Test("moving the edited entry out of the active notebook closes the editor for good")

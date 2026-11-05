@@ -135,7 +135,15 @@ extension JournalViewModel {
     }
 
     func deleteJournal(_ journal: Journal) {
+        // A queued autosave still carries this notebook's id; landing it after
+        // the delete would re-file the entry into a notebook that no longer
+        // exists (visible only under "All notebooks").
+        flushBeforeImmediateMutation()
         guard db.deleteJournal(id: journal.id) else { return }
+        // Failed snapshots are retried later; re-file them with their rows.
+        for id in Array(unsavedSnapshots.keys) where unsavedSnapshots[id]?.journalId == journal.id {
+            unsavedSnapshots[id]?.journalId = JournalDefaults.defaultJournalId
+        }
         journals = db.fetchJournals()
         if activeJournalId == journal.id {
             activeJournalId = nil
