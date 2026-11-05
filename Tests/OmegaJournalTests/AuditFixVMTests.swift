@@ -21,7 +21,9 @@ struct AuditFixVMTests {
         setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
         let db = DatabaseManager(databasePath: root.appendingPathComponent("private.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("private-att", isDirectory: true).path)
-        BiometricAuth.shared.setAuthenticatedForTesting(false)
+        // BiometricAuth.shared is process-global: only the two lock tests
+        // change it (and restore it), so this suite never flips another
+        // suite's lock state mid-test under parallel runs.
         return (JournalViewModel(database: db), root)
     }
 
@@ -29,7 +31,6 @@ struct AuditFixVMTests {
         vm.saveDebounce?.cancel()
         vm.saveWriterOverride = nil
         vm.searchText = ""
-        BiometricAuth.shared.setAuthenticatedForTesting(false)
         try? FileManager.default.removeItem(at: root)
     }
 
@@ -195,7 +196,10 @@ struct AuditFixVMTests {
     @Test("locking re-runs the active search so hidden body matches disappear")
     func lockRefreshesSearchResults() throws {
         let (vm, root) = try Self.makeVM()
-        defer { Self.tearDown(vm, root) }
+        defer {
+            BiometricAuth.shared.setAuthenticatedForTesting(false)
+            Self.tearDown(vm, root)
+        }
         BiometricAuth.shared.setAuthenticatedForTesting(true)
         let h = vm.createEntry(title: "Ordinary title", body: "the zebrafish secret", isHidden: true)
         vm.stopEditing()
@@ -210,7 +214,10 @@ struct AuditFixVMTests {
     @Test("a lock that bypasses lockHiddenEntries (idle relock, App Lock) re-masks search; unlock re-reveals")
     func sessionChangeRefreshesSearch() throws {
         let (vm, root) = try Self.makeVM()
-        defer { Self.tearDown(vm, root) }
+        defer {
+            BiometricAuth.shared.setAuthenticatedForTesting(false)
+            Self.tearDown(vm, root)
+        }
         BiometricAuth.shared.setAuthenticatedForTesting(true)
         let h = vm.createEntry(title: "Plain", body: "quokkacodeword appointment", isHidden: true)
         vm.stopEditing()
