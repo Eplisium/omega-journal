@@ -173,4 +173,21 @@ nonisolated struct MASDataKeyResolver {
         guard status == errSecSuccess else { throw JournalCrypto.KeyError.keyStoreFailed(status) }
         return (newKey, .mintedLegacy)
     }
+
+    /// Best-effort copy of a key just minted into the data-protection
+    /// keychain (`.mintedPreferred`) into the legacy login keychain — the
+    /// mirror of the legacy→preferred copy-forward. An unsandboxed direct/DMG
+    /// build deliberately opens the App Store container's journal when its own
+    /// folder has none, but it can only read the login keychain; without this
+    /// copy every body there would be unreadable. Never throws and never
+    /// replaces an existing item (`SecItemAdd` reports a duplicate instead).
+    /// Returns the add status (diagnostics and tests).
+    @discardableResult
+    func mirrorMintedKeyToLegacy(_ key: SymmetricKey) -> OSStatus {
+        switch legacy.readKey() {
+        case .notFound: return legacy.addKey(key.withUnsafeBytes { Data($0) })
+        case .found: return errSecDuplicateItem
+        case .unavailable(let status): return status
+        }
+    }
 }

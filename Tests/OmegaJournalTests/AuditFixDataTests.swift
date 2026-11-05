@@ -430,3 +430,71 @@ struct AuditFixDataLegacyImportTests {
     }
 }
 
+// MARK: - DATA-5
+
+@Suite("Audit fix data: a minted App Store key is mirrored to the login keychain (DATA-5)")
+struct AuditFixDataKeyMirrorTests {
+    static func bytes(_ key: SymmetricKey) -> Data { key.withUnsafeBytes { Data($0) } }
+
+    @Test("a direct build that adopts the App Store journal can read its key")
+    func directBuildCanReadMASMintedKey() throws {
+        let sharedLogin = MASDataFakeKeyStore()                    // login keychain (both builds)
+        let masDataProtection = MASDataFakeKeyStore()              // App Store build's access group
+        // 1. Fresh App Store install: empty journal → key minted (the app's path).
+        let minted = try JournalCrypto.loadOrCreateKey(
+            using: MASDataKeyResolver(preferred: masDataProtection, legacy: sharedLogin), allowCreate: { true })
+        #expect(masDataProtection.stored == Self.bytes(minted))
+        // 2. Later the user runs the direct build: the legacy folder has no DB, the container does.
+        let legacyDir = URL(fileURLWithPath: "/tmp/legacy/OmegaJournal")
+        let containerDir = URL(fileURLWithPath: "/tmp/container/OmegaJournal")
+        let dir = MASDataJournalLocation.resolveDirectory(isSandboxed: false, legacyDir: legacyDir, containerDir: containerDir,
+                                                          fileExists: { $0.hasPrefix(containerDir.path) })
+        #expect(dir == containerDir)
+        // 3. Direct build: data-protection keychain unavailable (no entitlement), encrypted rows exist.
+        let direct = MASDataKeyResolver(preferred: MASDataFakeKeyStore(readStatus: -34018, addStatus: -34018), legacy: sharedLogin)
+        let key = try? direct.resolve(allowCreate: { false })
+        #expect(key.map { Self.bytes($0.key) } == Self.bytes(minted),
+                "direct build opens the App Store journal but the key is unreachable")
+        #expect(key?.origin == .legacyOnly)
+    }
+
+    @Test("a failing login-keychain mirror never fails the mint")
+    func mirrorFailureDoesNotFailMint() throws {
+        let preferred = MASDataFakeKeyStore()
+        let legacy = MASDataFakeKeyStore(addStatus: errSecInteractionNotAllowed)
+        let key = try JournalCrypto.loadOrCreateKey(using: MASDataKeyResolver(preferred: preferred, legacy: legacy), allowCreate: { true })
+        #expect(preferred.stored == Self.bytes(key))
+        #expect(legacy.stored == nil)
+        // An unreadable login keychain: the mirror reports it and writes nothing.
+        // (The resolver itself already refuses to mint in that state.)
+        let lockedLegacy = MASDataFakeKeyStore(readStatus: errSecInteractionNotAllowed)
+        let resolver = MASDataKeyResolver(preferred: MASDataFakeKeyStore(), legacy: lockedLegacy)
+        #expect(resolver.mirrorMintedKeyToLegacy(SymmetricKey(size: .bits256)) == errSecInteractionNotAllowed)
+        #expect(lockedLegacy.adds == 0)
+    }
+
+    @Test("the mirror never overwrites an existing login-keychain item")
+    func mirrorNeverOverwrites() throws {
+        let other = Data(repeating: 7, count: 32)
+        let legacy = MASDataFakeKeyStore(stored: other)
+        let resolver = MASDataKeyResolver(preferred: MASDataFakeKeyStore(), legacy: legacy)
+        #expect(resolver.mirrorMintedKeyToLegacy(SymmetricKey(size: .bits256)) == errSecDuplicateItem)
+        #expect(legacy.stored == other)
+        #expect(legacy.adds == 0)
+    }
+
+    @Test("only a key minted into the data-protection keychain is mirrored")
+    func onlyPreferredMintsAreMirrored() throws {
+        // Unentitled build: minted straight into the login keychain — one add, no mirror.
+        let legacy = MASDataFakeKeyStore()
+        let unentitled = MASDataKeyResolver(preferred: MASDataFakeKeyStore(readStatus: -34018, addStatus: -34018), legacy: legacy)
+        _ = try JournalCrypto.loadOrCreateKey(using: unentitled, allowCreate: { true })
+        #expect(legacy.adds == 1)
+        // Existing preferred key: found, nothing minted, nothing mirrored.
+        let found = MASDataFakeKeyStore()
+        let existing = MASDataKeyResolver(preferred: MASDataFakeKeyStore(stored: Data(repeating: 1, count: 32)), legacy: found)
+        _ = try JournalCrypto.loadOrCreateKey(using: existing, allowCreate: { true })
+        #expect(found.adds == 0)
+    }
+}
+

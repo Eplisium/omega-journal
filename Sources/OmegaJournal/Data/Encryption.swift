@@ -94,8 +94,18 @@ enum JournalCrypto {
     /// the preferred store only when `allowCreate()`). Injectable for tests.
     nonisolated static func loadOrCreateKey(using resolver: MASDataKeyResolver, allowCreate: () -> Bool) throws -> SymmetricKey {
         let resolved = try resolver.resolve(allowCreate: allowCreate)
-        if case .legacyCopyFailed(let status) = resolved.origin {
+        switch resolved.origin {
+        case .legacyCopyFailed(let status):
             print("OmegaJournal: could not copy the encryption key to the data-protection keychain (status \(status)); using the login keychain copy.")
+        case .mintedPreferred:
+            // A direct build may later open this journal; it can only read the
+            // login keychain. Failure never fails the mint.
+            let status = resolver.mirrorMintedKeyToLegacy(resolved.key)
+            if status != errSecSuccess {
+                print("OmegaJournal: could not mirror the new encryption key to the login keychain (status \(status)).")
+            }
+        default:
+            break
         }
         return resolved.key
     }
