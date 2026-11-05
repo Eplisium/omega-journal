@@ -355,6 +355,50 @@ struct AuditFixVMTests {
         #expect(shown == ["Alpha archived", "Zulu archived"])
     }
 
+    // MARK: browse-1 — Empty Trash deletes only the trash the user was shown
+
+    @Test("Empty Trash inside a notebook scope deletes only that notebook's trash")
+    func emptyTrashRespectsNotebookScope() throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        let other = try #require(vm.createJournal(name: "VM Other", colorHex: TagColors.palette[1]))
+        let a = vm.createEntry(title: "VM default nb", body: "a"); vm.stopEditing()
+        let b = vm.createEntry(title: "VM other nb", body: "b", journalId: other.id); vm.stopEditing()
+        let b2 = vm.createEntry(title: "VM other nb 2", body: "b2", journalId: other.id); vm.stopEditing()
+        vm.addAttachment(to: try #require(vm.entry(id: a.id)), data: Data("keep".utf8), filename: "keep.pdf", mimeType: "application/pdf")
+        vm.deleteEntry(try #require(vm.entry(id: a.id)))
+        vm.deleteEntry(try #require(vm.entry(id: b.id)))
+        vm.deleteEntry(try #require(vm.entry(id: b2.id)))
+        vm.setActiveJournal(other.id)
+        #expect(Set(vm.trashedEntries.map(\.id)) == [b.id, b2.id])   // "Delete 2 entries Forever"
+        vm.emptyTrash()
+        #expect(vm.db.fetchEntry(id: b.id) == nil)
+        #expect(vm.db.fetchEntry(id: b2.id) == nil)
+        #expect(vm.db.fetchEntry(id: a.id)?.isTrashed == true, "another notebook's trash was hard-deleted")
+        #expect(vm.db.fetchAttachments(entryId: a.id).count == 1)
+        #expect(vm.trashedEntries.isEmpty)
+        #expect(vm.toast?.message == "Emptied Trash (2 entries)")
+
+        vm.setActiveJournal(nil)                                       // "All notebooks"
+        #expect(vm.trashedEntries.map(\.id) == [a.id])
+        vm.emptyTrash()
+        #expect(vm.db.fetchEntry(id: a.id) == nil)
+        #expect(vm.toast?.message == "Emptied Trash (1 entry)")
+    }
+
+    @Test("Empty Trash never deletes a stale in-memory row that has left Trash")
+    func emptyTrashSkipsRestoredRows() throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        let e = vm.createEntry(title: "VM restored elsewhere", body: "x"); vm.stopEditing()
+        vm.deleteEntry(try #require(vm.entry(id: e.id)))
+        vm.db.restoreEntry(id: e.id)                 // out-of-band restore; trashedEntries is stale
+        #expect(vm.trashedEntries.contains { $0.id == e.id })
+        vm.emptyTrash()
+        #expect(vm.db.fetchEntry(id: e.id)?.isTrashed == false)
+        #expect(vm.toast?.message == "Emptied Trash (0 entries)")
+    }
+
     // MARK: browse-8 (VM half) — trashing an already-trashed entry is a no-op
 
     @Test("Move to Trash on an entry already in Trash keeps its retention and pushes no Undo")

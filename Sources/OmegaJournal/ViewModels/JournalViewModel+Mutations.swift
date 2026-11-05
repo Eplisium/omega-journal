@@ -89,18 +89,18 @@ extension JournalViewModel {
         showToast("Deleted permanently", isError: true)
     }
 
+    /// Permanently deletes the Trash the user is looking at. `trashedEntries`
+    /// is scoped to the active notebook — so are the confirmation's count and
+    /// the toast — and other notebooks' Trash is never touched.
     func emptyTrash() {
         flushBeforeImmediateMutation()
-        let count = trashedEntries.count
-        db.emptyTrash()
-        trashedEntries = []
-        if let selected = selectedEntryId, !entries.contains(where: { $0.id == selected }) {
-            selectedEntryId = nil
+        guard let count = db.hardDeleteTrashedEntries(ids: trashedEntries.map(\.id)) else {
+            showToast("Couldn't empty Trash — nothing was deleted", isError: true)
+            reload()
+            return
         }
-        if let editing = editingEntryId, entry(id: editing) == nil {
-            editingEntryId = nil
-        }
-        refreshTagCounts()
+        // Re-read every scope (also drops a selection/editor on a deleted row).
+        reload()
         showToast("Emptied Trash (\(count) \(count == 1 ? "entry" : "entries"))", isError: true)
     }
 
