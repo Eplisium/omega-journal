@@ -101,6 +101,9 @@ struct SettingsView: View {
         // most theme cards and data controls below the fold).
         .frame(width: sheetSize.width, height: sheetSize.height)
         .background(theme.backgroundColor)
+        // The sheet covers the window's toast; results of Settings actions
+        // (export, import, Empty Trash) and their errors show here instead.
+        .modifier(WindowToastHost(vm: vm))
         .confirmationDialog(
             "Empty Trash?",
             isPresented: $showEmptyTrashConfirmation,

@@ -16,19 +16,10 @@ struct DetailView: View {
         ZStack(alignment: .top) {
             theme.backgroundColor.ignoresSafeArea()
 
+            // Toasts are drawn by the window (`WindowToastHost` in
+            // ContentView), so they also show outside the Journal workspace.
             content
-
-            if let toast = vm.toast {
-                ToastView(toast: toast) {
-                    if toast.actionLabel != nil { vm.performUndo() }
-                    vm.toast = nil
-                }
-                .padding(.top, 14)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(5)
-            }
         }
-        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: vm.toast)
         .animation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion), value: vm.selectedEntryId)
         .animation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion), value: vm.editingEntryId)
     }
@@ -212,43 +203,5 @@ struct DetailView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Toast
-
-private struct ToastView: View {
-    let toast: JournalViewModel.Toast
-    let onAction: () -> Void
-    private let theme = ThemeManager.shared
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: toast.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                .font(OmegaTheme.font(.caption))
-                .foregroundColor(toast.isError ? .orange : .green)
-            Text(toast.message)
-                .font(OmegaTheme.font(.caption, .medium))
-                .foregroundColor(theme.titleTextColor)
-            if let label = toast.actionLabel {
-                Button(label, action: onAction)
-                    .buttonStyle(.plain)
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .foregroundColor(theme.accentColor)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .ojGlass(.floatingPanel, in: Capsule(), tint: theme.accentColor) { toast in
-            toast
-                .background(
-                    Capsule()
-                        .fill(theme.cardColor)
-                        .shadow(color: .black.opacity(0.3), radius: 12, y: 4)
-                )
-                .overlay(
-                    Capsule().strokeBorder(theme.accentColor.opacity(0.2), lineWidth: 1)
-                )
-        }
     }
 }

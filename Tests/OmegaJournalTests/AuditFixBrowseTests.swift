@@ -66,6 +66,65 @@ struct AuditFixBrowseTodayHeroTests {
     }
 }
 
+// MARK: - browse-5
+
+@Suite("Audit fix browse: toasts are hosted at the window level", .serialized)
+@MainActor
+struct AuditFixBrowseToastHostTests {
+    @Test("the detail pane no longer hosts its own toast (it would show twice)")
+    func detailViewHasNoToast() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        var selection: SidebarItem? = .all
+        let detail = DetailView(vm: vm, selection: Binding(get: { selection }, set: { selection = $0 }))
+        let typeName = String(describing: type(of: detail.body))
+        #expect(!typeName.contains("ToastView"))
+        #expect(!typeName.contains("WindowToastHost"))
+    }
+
+    @Test("the window and the Settings sheet both host the toast")
+    func windowAndSettingsHostToast() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        let content = ContentView(viewModel: vm)
+        #expect(String(describing: type(of: content.body)).contains("WindowToastHost"))
+        let settings = SettingsView(vm: vm)
+        #expect(String(describing: type(of: settings.body)).contains("WindowToastHost"))
+    }
+
+    @Test("only the frontmost host for a window draws the toast")
+    func frontmostHostOnly() {
+        let stack = ToastHostStack()
+        let windowVM = NSObject(), otherWindowVM = NSObject()
+        let window = UUID(), settings = UUID(), other = UUID()
+        stack.push(window, owner: ObjectIdentifier(windowVM))
+        stack.push(other, owner: ObjectIdentifier(otherWindowVM))
+        #expect(stack.isFrontmost(window, owner: ObjectIdentifier(windowVM)))
+        // Settings sheet opens over the window: it takes over, nothing twice.
+        stack.push(settings, owner: ObjectIdentifier(windowVM))
+        #expect(stack.isFrontmost(settings, owner: ObjectIdentifier(windowVM)))
+        #expect(!stack.isFrontmost(window, owner: ObjectIdentifier(windowVM)))
+        // Another window's own host is unaffected.
+        #expect(stack.isFrontmost(other, owner: ObjectIdentifier(otherWindowVM)))
+        // Sheet closes: the window host draws again.
+        stack.remove(settings, owner: ObjectIdentifier(windowVM))
+        #expect(stack.isFrontmost(window, owner: ObjectIdentifier(windowVM)))
+        stack.remove(window, owner: ObjectIdentifier(windowVM))
+        #expect(!stack.isFrontmost(window, owner: ObjectIdentifier(windowVM)))
+    }
+
+    @Test("dismissing a toast with an action runs Undo")
+    func undoStaysWired() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        let e = vm.createEntry(title: "BRF undo", body: "x")
+        vm.stopEditing()
+        vm.deleteEntry(e)
+        let toast = try #require(vm.toast)
+        #expect(toast.actionLabel == "Undo")
+        WindowToastHost.handleAction(toast, vm: vm)
+        #expect(vm.db.fetchEntry(id: e.id)?.isTrashed == false)
+        #expect(vm.toast?.id != toast.id)
+    }
+}
+
 // MARK: - browse-11
 
 @Suite("Audit fix browse: Today rolls over")

@@ -4,7 +4,7 @@ import OmegaJournalCore
 // MARK: - Content View
 
 struct ContentView: View {
-    @LazyState private var vm = JournalViewModel()
+    @LazyState private var vm: JournalViewModel
     private let theme = ThemeManager.shared
     @State private var sidebarSelection: SidebarItem? = .today
     @State private var showTemplatePicker = false
@@ -13,6 +13,12 @@ struct ContentView: View {
     @State private var didRestoreSelection = false
     @State private var showLegacyImportOffer = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The model is built lazily, once per window (see `LazyState`); tests
+    /// pass one on a private database.
+    init(viewModel: @autoclosure @escaping () -> JournalViewModel = JournalViewModel()) {
+        _vm = LazyState(wrappedValue: viewModel())
+    }
 
     var body: some View {
         ZStack {
@@ -30,6 +36,9 @@ struct ContentView: View {
                     .zIndex(10)
             }
         }
+        // One toast surface for the whole window — every workspace, zen mode
+        // and above the palette (the detail pane used to be the only host).
+        .modifier(WindowToastHost(vm: vm))
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: vm.isZenMode)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: vm.showCommandPalette)
         .tint(theme.accentColor)

@@ -118,7 +118,9 @@ struct SidebarView: View {
             }
         }
         .sheet(isPresented: $showTagManager) {
+            // Rename/merge/delete results toast while the manager stays open.
             TagManagerView(vm: vm)
+                .modifier(WindowToastHost(vm: vm))
         }
         .sheet(item: $journalDraft) { draft in
             NotebookEditor(vm: vm, journal: draft.journal)
