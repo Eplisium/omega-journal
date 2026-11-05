@@ -102,9 +102,9 @@ nonisolated struct EntryFilter: Equatable, Codable {
         var id: String { rawValue }
 
         /// Inclusive lower bound, or nil for "any time".
-        var startDate: Date? {
-            let cal = Calendar.current
-            let now = Date()
+        var startDate: Date? { startDate(now: Date(), calendar: .current) }
+
+        func startDate(now: Date, calendar cal: Calendar) -> Date? {
             switch self {
             case .any: return nil
             case .today: return cal.startOfDay(for: now)
@@ -113,6 +113,19 @@ nonisolated struct EntryFilter: Equatable, Codable {
             case .last30: return cal.date(byAdding: .day, value: -29, to: cal.startOfDay(for: now))
             case .thisMonth: return cal.dateInterval(of: .month, for: now)?.start
             case .thisYear: return cal.dateInterval(of: .year, for: now)?.start
+            }
+        }
+
+        /// Exclusive upper bound, or nil for "any time": the start of tomorrow
+        /// for the day windows, the end of the month / year otherwise, so an
+        /// entry planned on a future day (Calendar) never matches "Today" or
+        /// "Last 7 days" (same rule as `SmartFolder.DateRange.end`).
+        func endDate(now: Date, calendar cal: Calendar) -> Date? {
+            switch self {
+            case .any: return nil
+            case .today, .last7, .last30: return cal.dateInterval(of: .day, for: now)?.end
+            case .thisMonth: return cal.dateInterval(of: .month, for: now)?.end
+            case .thisYear: return cal.dateInterval(of: .year, for: now)?.end
             }
         }
     }
@@ -144,12 +157,13 @@ nonisolated struct EntryFilter: Equatable, Codable {
     /// Privacy: while `hiddenLocked`, a hidden entry exposes only title, mood
     /// and date (its masked card). Content-derived facets — tags, word count,
     /// attachments — must never match it, or the filter would leak them.
-    func matches(_ entry: JournalEntry, hiddenLocked: Bool) -> Bool {
+    func matches(_ entry: JournalEntry, hiddenLocked: Bool, now: Date = Date(), calendar: Calendar = .current) -> Bool {
         let masked = !ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked)
         if masked && (!tags.isEmpty || withAttachmentsOnly || minWords > 0) { return false }
         if !moods.isEmpty && !moods.contains(entry.mood) { return false }
         if !tags.isEmpty && tags.isDisjoint(with: Set(entry.tags)) { return false }
-        if let start = dateRange.startDate, entry.createdAt < start { return false }
+        if let start = dateRange.startDate(now: now, calendar: calendar), entry.createdAt < start { return false }
+        if let end = dateRange.endDate(now: now, calendar: calendar), entry.createdAt >= end { return false }
         if favoritesOnly && !entry.isFavorite { return false }
         if pinnedOnly && !entry.isPinned { return false }
         if withAttachmentsOnly && entry.attachments.isEmpty { return false }

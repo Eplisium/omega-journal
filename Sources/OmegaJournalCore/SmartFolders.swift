@@ -25,6 +25,19 @@ public struct SmartFolder: Codable, Identifiable, Equatable, Sendable {
             case .thisYear: return calendar.dateInterval(of: .year, for: now)?.start
             }
         }
+
+        /// Exclusive upper bound, or nil for "any time": the start of tomorrow
+        /// for the day windows, the end of the month / year otherwise. Calendar
+        /// lets you plan entries on future days; those must not land in "Today"
+        /// or "Last 7 days", nor next year's in "This month" / "This year".
+        public func end(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+            switch self {
+            case .any: return nil
+            case .today, .last7, .last30: return calendar.dateInterval(of: .day, for: now)?.end
+            case .thisMonth: return calendar.dateInterval(of: .month, for: now)?.end
+            case .thisYear: return calendar.dateInterval(of: .year, for: now)?.end
+            }
+        }
     }
 
     public let id: String
@@ -82,6 +95,7 @@ public struct SmartFolder: Codable, Identifiable, Equatable, Sendable {
         if !tags.isEmpty, !tags.contains(where: { want in r.tags.contains { TagPath.isSameOrDescendant($0, of: want) } }) { return false }
         if !moods.isEmpty, !moods.contains(r.moodValue) { return false }
         if let start = dateRange.start(now: now, calendar: calendar), r.createdAt < start { return false }
+        if let end = dateRange.end(now: now, calendar: calendar), r.createdAt >= end { return false }
         if hasAttachment, r.attachmentCount == 0 { return false }
         if minWords > 0, r.wordCount < minWords { return false }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
