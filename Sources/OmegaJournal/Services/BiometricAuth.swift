@@ -65,6 +65,14 @@ final class BiometricAuth {
         }
     }
 
+    /// True inside `swift test` / XCTest. Not true for QA builds of the app,
+    /// which use the test database but still need the real unlock prompt.
+    nonisolated static let isTestRunnerProcess: Bool = {
+        let info = ProcessInfo.processInfo
+        return ["swiftpm-testing-helper", "xctest"].contains(info.processName)
+            || info.environment["XCTestConfigurationFilePath"] != nil
+    }()
+
     /// Test seam: replaces the system prompt.
     @ObservationIgnored var evaluateOverride: (() async -> Bool)?
     /// The single in-flight prompt. Concurrent callers await it instead of
@@ -79,7 +87,10 @@ final class BiometricAuth {
         if let inFlight { return await inFlight.value }
 
         isAuthenticating = true
-        let override = evaluateOverride
+        // Inside a test runner there is nobody to answer a system prompt, and
+        // `evaluatePolicy` would block the run forever (it did, in parallel
+        // `swift test` runs where another suite re-locked the shared session).
+        let override = evaluateOverride ?? (Self.isTestRunnerProcess ? { false } : nil)
         let task = Task { @MainActor () -> Bool in
             if let override { return await override() }
             let context = LAContext()

@@ -32,6 +32,20 @@ struct AuditFixParentTests {
         #expect(!EditorView.countsTowardToday(createdAt: nextWeek, now: now, calendar: cal))
     }
 
+    /// A real `evaluatePolicy` inside the test runner never returns (nobody can
+    /// answer it), which hung parallel runs. Without an override it refuses.
+    @MainActor
+    @Test("in the test runner an unanswered unlock prompt refuses instead of hanging")
+    func promptRefusesInTestRunner() async {
+        #expect(BiometricAuth.isTestRunnerProcess)
+        let auth = BiometricAuth(forTesting: ())
+        #expect(await auth.authenticate() == false)
+        #expect(!auth.isAuthenticated && !auth.isAuthenticating)
+        auth.evaluateOverride = { true }
+        #expect(await auth.authenticate())
+        auth.lock()
+    }
+
     /// `TagPath.renamed` now matches case-insensitively, so the "beneath
     /// itself" guard must too: `work` -> `Work/sub` would otherwise re-root
     /// the tag under itself and the result would depend on tag order.
@@ -41,8 +55,7 @@ struct AuditFixParentTests {
             .appendingPathComponent("oj-fixparent-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("shared.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("shared-att").path, 1)
+        TestSharedEnvironment.pin()
         let db = DatabaseManager(databasePath: root.appendingPathComponent("j.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("att").path)
         var a = JournalEntry.new(); a.title = "A"; a.tags = ["work"]
