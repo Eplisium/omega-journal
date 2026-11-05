@@ -313,3 +313,18 @@ struct AuditFixBrowseTodayRolloverTests {
     }
 }
 
+// MARK: - Settings Danger Zone (browse-1 wording)
+
+@Suite("Audit fix browse: Empty Trash wording names the notebook scope")
+struct AuditFixBrowseEmptyTrashCopyTests {
+    @Test("all notebooks vs one notebook")
+    func scopeWording() {
+        #expect(EmptyTrashCopy.cardSubtitle(count: 1, notebookName: nil) == "Permanently delete 1 entry and its attachments.")
+        #expect(EmptyTrashCopy.cardSubtitle(count: 3, notebookName: nil) == "Permanently delete 3 entries and their attachments.")
+        let scoped = EmptyTrashCopy.cardSubtitle(count: 2, notebookName: "Work")
+        #expect(scoped.contains("“Work”") && scoped.contains("Other notebooks"))
+        #expect(EmptyTrashCopy.dialogMessage(notebookName: nil).contains("every entry currently in Trash"))
+        let message = EmptyTrashCopy.dialogMessage(notebookName: "Work")
+        #expect(message.contains("“Work”") && message.contains("other notebooks"))
+    }
+}

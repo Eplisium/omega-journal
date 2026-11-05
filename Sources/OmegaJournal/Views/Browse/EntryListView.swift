@@ -238,7 +238,7 @@ struct EntryListView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently removes every entry currently in Trash, including attachments.")
+            Text(EmptyTrashCopy.dialogMessage(notebookName: vm.activeJournal?.name))
         }
     }
 

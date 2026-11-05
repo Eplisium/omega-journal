@@ -114,7 +114,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently removes every entry currently in Trash, including attachments.")
+            Text(EmptyTrashCopy.dialogMessage(notebookName: vm.activeJournal?.name))
         }
     }
 
@@ -675,7 +675,7 @@ struct SettingsView: View {
         SettingsCard(title: card.title, icon: card.icon) {
             SettingsRow(
                 title: "Empty Trash",
-                subtitle: "Permanently delete \(vm.trashedEntries.count) \(vm.trashedEntries.count == 1 ? "entry" : "entries") and their attachments."
+                subtitle: EmptyTrashCopy.cardSubtitle(count: vm.trashedEntries.count, notebookName: vm.activeJournal?.name)
             ) {
                 SettingsPillButton(title: "Empty Trash", icon: "trash", destructive: true) {
                     showEmptyTrashConfirmation = true
@@ -760,5 +760,26 @@ struct SettingsView: View {
 
     private var appVersion: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "1.0"
+    }
+}
+
+// MARK: - Empty Trash wording
+
+/// Empty Trash empties the Trash of the notebook scope in use (every notebook
+/// when none is picked). The Settings card and both confirmation dialogs say
+/// which, so the count shown is the count deleted.
+enum EmptyTrashCopy {
+    nonisolated static func cardSubtitle(count: Int, notebookName: String?) -> String {
+        let entries = "\(count) \(count == 1 ? "entry" : "entries")"
+        let attachments = count == 1 ? "its attachments" : "their attachments"
+        guard let notebookName else { return "Permanently delete \(entries) and \(attachments)." }
+        return "Permanently delete \(entries) in “\(notebookName)” and \(attachments). Other notebooks' Trash is kept."
+    }
+
+    nonisolated static func dialogMessage(notebookName: String?) -> String {
+        guard let notebookName else {
+            return "This permanently removes every entry currently in Trash, including attachments."
+        }
+        return "This permanently removes every entry in “\(notebookName)”'s Trash, including attachments. Trash in other notebooks is kept."
     }
 }
