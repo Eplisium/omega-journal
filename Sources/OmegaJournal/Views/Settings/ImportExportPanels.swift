@@ -16,12 +16,12 @@ enum ImportExportPanels {
     static func exportMarkdown(vm: JournalViewModel) {
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
-            guard !entries.isEmpty else {
+            guard !readingExportEntries(entries).isEmpty else {
                 vm.showToast("Nothing to export — the journal is empty", isError: true)
                 return
             }
             save(vm: vm, suggested: "OmegaJournal-\(stamp()).md", type: .plainText, omittedHidden: omitted) { url in
-                try ExportManager.exportMarkdown(entries, to: url)
+                try writeMarkdownExport(entries, to: url)
             }
         }
     }
@@ -44,10 +44,30 @@ enum ImportExportPanels {
     static func exportPDF(vm: JournalViewModel) {
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
+            guard !readingExportEntries(entries).isEmpty else {
+                vm.showToast("Nothing to export — the journal is empty", isError: true)
+                return
+            }
             save(vm: vm, suggested: "OmegaJournal-\(stamp()).pdf", type: .pdf, omittedHidden: omitted) { url in
-                try ExportManager.exportPDF(entries, to: url)
+                try writePDFExport(entries, to: url)
             }
         }
+    }
+
+    /// Reading/sharing copies (single Markdown file, PDF book, Markdown folder,
+    /// HTML site) leave Trash out: a user who trashed an entry to keep it out
+    /// of what they share must not find it printed. Only the backups (JSON,
+    /// encrypted) carry the full set, Trash included (`fullExportEntries`).
+    static func readingExportEntries(_ entries: [JournalEntry]) -> [JournalEntry] {
+        entries.filter { !$0.isTrashed }
+    }
+
+    static func writeMarkdownExport(_ entries: [JournalEntry], to url: URL) throws {
+        try ExportManager.exportMarkdown(readingExportEntries(entries), to: url)
+    }
+
+    static func writePDFExport(_ entries: [JournalEntry], to url: URL) throws {
+        try ExportManager.exportPDF(readingExportEntries(entries), to: url)
     }
 
     /// Unlocks hidden entries for a full export; if auth is cancelled, hidden
@@ -110,7 +130,7 @@ enum ImportExportPanels {
     static func exportMarkdownFolder(vm: JournalViewModel) {
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
-            let live = entries.filter { !$0.isTrashed }
+            let live = readingExportEntries(entries)
             guard !live.isEmpty else { vm.showToast("Nothing to export", isError: true); return }
             guard let parent = chooseFolder("Choose where to create the “Omega Journal Markdown” folder.", prompt: "Export Here") else { return }
             let dir = parent.appendingPathComponent("Omega Journal Markdown \(stamp())", isDirectory: true)
@@ -125,7 +145,7 @@ enum ImportExportPanels {
     static func exportHTMLSite(vm: JournalViewModel) {
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
-            let live = entries.filter { !$0.isTrashed }
+            let live = readingExportEntries(entries)
             guard !live.isEmpty else { vm.showToast("Nothing to export", isError: true); return }
             guard let parent = chooseFolder("Choose where to create the website folder.", prompt: "Export Here") else { return }
             let dir = parent.appendingPathComponent("Omega Journal Site \(stamp())", isDirectory: true)

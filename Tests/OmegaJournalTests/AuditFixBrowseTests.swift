@@ -125,6 +125,39 @@ struct AuditFixBrowseToastHostTests {
     }
 }
 
+// MARK: - browse-6
+
+@Suite("Audit fix browse: reading exports skip Trash", .serialized)
+@MainActor
+struct AuditFixBrowseExportTests {
+    @Test("single-file Markdown and PDF exports leave trashed entries out")
+    func markdownAndPDFSkipTrash() throws {
+        let (vm, root) = try AuditFixBrowseSupport.makeVM()
+        _ = vm.createEntry(title: "BRF kept", body: "keptbodyword")
+        vm.stopEditing()
+        let gone = vm.createEntry(title: "BRF deleted", body: "deletedsecretbody")
+        vm.stopEditing()
+        vm.deleteEntry(gone)
+        let all = ImportExportPanels.fullExportEntries(vm: vm)
+        // Backups (JSON / encrypted) still carry the trash.
+        #expect(all.contains { $0.id == gone.id })
+
+        let md = root.appendingPathComponent("export.md")
+        try ImportExportPanels.writeMarkdownExport(all, to: md)
+        let text = try String(contentsOf: md, encoding: .utf8)
+        #expect(text.contains("keptbodyword"))
+        #expect(!text.contains("deletedsecretbody"), "a trashed entry was written into the Markdown export")
+
+        let pdf = root.appendingPathComponent("export.pdf")
+        try ImportExportPanels.writePDFExport(all, to: pdf)
+        let pdfText = PDFDocument(url: pdf)?.string ?? ""
+        #expect(pdfText.contains("keptbodyword"))
+        #expect(!pdfText.contains("deletedsecretbody"), "a trashed entry was printed into the PDF export")
+
+        #expect(ImportExportPanels.readingExportEntries(all).allSatisfy { !$0.isTrashed })
+    }
+}
+
 // MARK: - browse-11
 
 @Suite("Audit fix browse: Today rolls over")
