@@ -332,6 +332,29 @@ struct AuditFixVMTests {
         #expect(!vm.isZenMode)
     }
 
+    // MARK: vm-8 — sort order applies to Archive in place
+
+    @Test("changing the sort order re-sorts the Archive list too")
+    func sortOrderAppliesToArchive() throws {
+        let (vm, root) = try Self.makeVM()
+        defer {
+            vm.setSortOrder(.dateDesc)
+            Self.tearDown(vm, root)
+        }
+        let a = vm.createEntry(title: "Alpha archived", body: "a"); vm.stopEditing()
+        let z = vm.createEntry(title: "Zulu archived", body: "z"); vm.stopEditing()
+        var older = try #require(vm.entry(id: a.id)); older.createdAt = Date(timeIntervalSinceNow: -86_400)
+        vm.db.saveEntry(older); vm.reload()
+        vm.toggleArchive(try #require(vm.entry(id: z.id)))
+        vm.toggleArchive(try #require(vm.entry(id: a.id)))
+        #expect(vm.archivedEntries.map(\.title) == ["Zulu archived", "Alpha archived"])
+        vm.setSortOrder(.titleAsc)
+        let shown = vm.archivedEntries.map(\.title)
+        vm.reload()
+        #expect(shown == vm.archivedEntries.map(\.title))
+        #expect(shown == ["Alpha archived", "Zulu archived"])
+    }
+
     // MARK: browse-8 (VM half) — trashing an already-trashed entry is a no-op
 
     @Test("Move to Trash on an entry already in Trash keeps its retention and pushes no Undo")

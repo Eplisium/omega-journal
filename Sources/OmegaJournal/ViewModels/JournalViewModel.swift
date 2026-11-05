@@ -389,8 +389,11 @@ final class JournalViewModel {
         if refreshSearch, searchResults != nil { refreshQuery() }
     }
 
+    /// Re-sorts every collection `reload()` fetches with `sortOrder` (active
+    /// and Archive) plus search results, so in-place and reloaded orders agree.
     func sortInPlace() {
         sort(&entries)
+        sort(&archivedEntries)
         if var results = searchResults {
             sort(&results)
             searchResults = results
