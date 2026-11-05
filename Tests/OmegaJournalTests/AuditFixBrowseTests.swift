@@ -158,6 +158,91 @@ struct AuditFixBrowseExportTests {
     }
 }
 
+// MARK: - browse-7
+
+@Suite("Audit fix browse: Save this search", .serialized)
+@MainActor
+struct AuditFixBrowseSaveSearchTests {
+    private func reset(_ vm: JournalViewModel) {
+        vm.filter = .empty
+        vm.searchText = ""
+    }
+
+    @Test("every facet the smart folder supports is saved")
+    func savesFullFilter() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        defer { reset(vm) }
+        vm.searchText = "  garden  "
+        vm.filter.tags = ["brtag", "alpha"]
+        vm.filter.moods = [.good, .bad]
+        vm.filter.dateRange = .last7
+        vm.filter.minWords = 50
+        vm.filter.withAttachmentsOnly = true
+        let outcome = vm.saveSearchAsSmartFolder(name: "BR Recent")
+        guard case .saved(let saved) = outcome else { Issue.record("not saved: \(outcome)"); return }
+        vm.loadOrganizationState()
+        let folder = try #require(vm.smartFolders.first { $0.name == "BR Recent" })
+        #expect(folder.id == saved.id)
+        #expect(folder.query == "garden")
+        #expect(folder.tags == ["alpha", "brtag"])
+        #expect(folder.moods == [Mood.bad.rawValue, Mood.good.rawValue].sorted())
+        #expect(folder.dateRange == .last7)
+        #expect(folder.minWords == 50)
+        #expect(folder.hasAttachment)
+        #expect(vm.toast?.isError == false)
+    }
+
+    @Test("a filter smart folders can't express is named in a toast, never silently dropped")
+    func unsupportedFacets() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        defer { reset(vm) }
+        // Favorites only: nothing a smart folder can hold.
+        vm.filter.favoritesOnly = true
+        #expect(vm.filter.isActive)
+        #expect(vm.saveSearchAsSmartFolder(name: "BR Faves") == .nothingSaved)
+        #expect(!vm.smartFolders.contains { $0.name == "BR Faves" })
+        let toast = try #require(vm.toast)
+        #expect(toast.isError && toast.message.contains("Favorites"))
+
+        // Favorites + Pinned + a tag: the tag is saved, the rest is reported.
+        vm.filter.pinnedOnly = true
+        vm.filter.tags = ["brtag"]
+        guard case .saved = vm.saveSearchAsSmartFolder(name: "BR Tagged") else { Issue.record("not saved"); return }
+        #expect(vm.smartFolders.first { $0.name == "BR Tagged" }?.tags == ["brtag"])
+        let partial = try #require(vm.toast)
+        #expect(partial.message.contains("Favorites") && partial.message.contains("Pinned"))
+
+        // Nothing at all.
+        reset(vm)
+        #expect(vm.saveSearchAsSmartFolder(name: "BR Empty") == .nothingSaved)
+        #expect(vm.toast?.isError == true)
+    }
+
+    @Test("saving over an existing smart folder's name asks first, then keeps its id and pin")
+    func overwriteNeedsConfirmation() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        defer { reset(vm) }
+        var original = SmartFolder(name: "Work log", tags: ["work"], minWords: 100)
+        original.isPinned = true
+        #expect(vm.saveSmartFolder(original))
+        vm.searchText = "standup"
+        let outcome = vm.saveSearchAsSmartFolder(name: "work LOG")
+        #expect(outcome == .needsReplaceConfirmation(existing: try #require(vm.smartFolder(id: original.id))))
+        // Nothing changed yet.
+        #expect(vm.smartFolder(id: original.id)?.tags == ["work"])
+        #expect(vm.smartFolders.count == 1)
+
+        guard case .saved(let replaced) = vm.saveSearchAsSmartFolder(name: "work LOG", replacingExisting: true) else {
+            Issue.record("replace failed"); return
+        }
+        #expect(replaced.id == original.id)
+        #expect(vm.smartFolders.count == 1)
+        let stored = try #require(vm.smartFolder(id: original.id))
+        #expect(stored.query == "standup" && stored.tags.isEmpty && stored.minWords == 0)
+        #expect(stored.isPinned, "replacing a folder dropped its pin")
+    }
+}
+
 // MARK: - browse-11
 
 @Suite("Audit fix browse: Today rolls over")

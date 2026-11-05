@@ -17,6 +17,8 @@ struct EntryListView: View {
     @AppStorage(ListDensity.storageKey) var densityRaw = ListDensity.comfortable.rawValue
     @State var showSaveSearch = false
     @State var savedSearchName = ""
+    /// Set when "Save this search" hits a smart folder with the same name.
+    @State var searchSaveConflict: SmartFolder?
     @State var bulkTagText = ""
     @State var showBulkTagField = false
     @State var showBulkPermanentDeleteConfirmation = false
@@ -52,6 +54,15 @@ struct EntryListView: View {
                                             isLibraryRoot: context.isLibraryRoot,
                                             canWidenToLibrary: context.canWidenToLibrary,
                                             notebookName: vm.activeJournal?.name)
+    }
+
+    /// "Save this search": a smart folder from the full filter. A name that
+    /// is already taken asks before replacing (after the name alert closes).
+    func saveSearch(replacingExisting: Bool) {
+        let outcome = vm.saveSearchAsSmartFolder(name: savedSearchName, replacingExisting: replacingExisting)
+        if case .needsReplaceConfirmation(let existing) = outcome {
+            DispatchQueue.main.async { searchSaveConflict = existing }
+        }
     }
 
     func clearSearch() {
@@ -175,14 +186,18 @@ struct EntryListView: View {
         .background(theme.backgroundColor)
         .alert("Save Search", isPresented: $showSaveSearch) {
             TextField("Name", text: $savedSearchName)
-            Button("Save") {
-                vm.saveCurrentSearch(name: savedSearchName)
-                vm.loadOrganizationState()
-                vm.refreshOrganization()
-            }
+            Button("Save") { saveSearch(replacingExisting: false) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Saves the current search text and first tag or mood filter to the sidebar.")
+            Text("Saves the search text and filters as a smart folder in the sidebar.")
+        }
+        .alert("Replace Smart Folder?",
+               isPresented: Binding(get: { searchSaveConflict != nil }, set: { if !$0 { searchSaveConflict = nil } }),
+               presenting: searchSaveConflict) { _ in
+            Button("Replace", role: .destructive) { saveSearch(replacingExisting: true) }
+            Button("Cancel", role: .cancel) {}
+        } message: { existing in
+            Text("A smart folder named “\(existing.name)” already exists. Replacing it makes it show this search instead; it keeps its place and pin in the sidebar.")
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showFilters)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: vm.isBulkSelecting)

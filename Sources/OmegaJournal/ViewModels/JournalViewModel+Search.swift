@@ -10,8 +10,11 @@ extension JournalViewModel {
         db.setSetting(SavedSearchStore.settingKey, value: SavedSearchStore.encode(savedSearches))
     }
 
-    /// Saves the current search box + first tag/mood filter under `name`.
-    /// A same-named search is replaced; an empty search with no filter is ignored.
+    /// Saves the current search box + first tag/mood filter under `name`
+    /// (the legacy saved-search record, promoted to a smart folder on load).
+    /// A same-named search is replaced; an empty search with no filter is
+    /// ignored. The list's "Save this search" saves the FULL filter instead:
+    /// see `saveSearchAsSmartFolder(name:replacingExisting:)`.
     func saveCurrentSearch(name: String) {
         let new = SavedSearch(
             name: name, query: searchText,
@@ -21,6 +24,80 @@ extension JournalViewModel {
         guard updated != savedSearches else { return }
         savedSearches = updated
         persistSavedSearches()
+    }
+
+    // MARK: - Save this search (smart folder)
+
+    /// What "Save this search" did.
+    enum SearchSaveOutcome: Equatable {
+        case saved(SmartFolder)
+        /// A smart folder already has this name (case-insensitively) and
+        /// nothing changed: ask, then call again with `replacingExisting`.
+        case needsReplaceConfirmation(existing: SmartFolder)
+        /// Nothing was saved; a toast says why.
+        case nothingSaved
+    }
+
+    /// Filter facets a smart folder can't hold. They are named to the user
+    /// when saving, never silently dropped (the folder would list more than
+    /// the search it was saved from).
+    nonisolated static func unsupportedSmartFolderFacets(_ filter: EntryFilter) -> [String] {
+        var facets: [String] = []
+        if filter.favoritesOnly { facets.append("Favorites") }
+        if filter.pinnedOnly { facets.append("Pinned") }
+        return facets
+    }
+
+    /// Saves the search box and every filter facet a smart folder supports
+    /// (all tags and moods, date range, minimum words, attachments) as a smart
+    /// folder named `name`. Facets it can't hold are reported in the toast;
+    /// a search with nothing saveable only toasts. A folder with the same
+    /// name is replaced only with `replacingExisting` — it then keeps its id,
+    /// so its place in the sidebar and its pin survive.
+    @discardableResult
+    func saveSearchAsSmartFolder(name: String, replacingExisting: Bool = false) -> SearchSaveOutcome {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unsupported = Self.unsupportedSmartFolderFacets(filter)
+        let unsupportedText = unsupported.joined(separator: " or ")
+        var folder = smartFolderFromCurrentFilter(name: trimmed)
+        guard folder.hasCriteria else {
+            showToast(unsupported.isEmpty
+                      ? "Nothing to save — type a search or choose a filter first"
+                      : "Smart folders can't filter by \(unsupportedText), so nothing was saved",
+                      isError: true)
+            return .nothingSaved
+        }
+        guard !trimmed.isEmpty else {
+            showToast("Name the search to save it", isError: true)
+            return .nothingSaved
+        }
+        if let existing = smartFolders.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            guard replacingExisting else { return .needsReplaceConfirmation(existing: existing) }
+            let draft = folder
+            folder = SmartFolder(id: existing.id, name: trimmed, query: draft.query, tags: draft.tags,
+                                 moods: draft.moods, dateRange: draft.dateRange,
+                                 hasAttachment: draft.hasAttachment, minWords: draft.minWords)
+            folder.isPinned = existing.isPinned
+        }
+        guard saveSmartFolder(folder) else {
+            // Unchanged list: the identical folder is already saved, or the
+            // folder limit dropped the new one.
+            if smartFolders.contains(folder) {
+                showToast("“\(trimmed)” is already saved")
+                return .saved(folder)
+            }
+            showToast("You already have \(SmartFolderStore.maxCount) smart folders — delete one to save this search",
+                      isError: true)
+            return .nothingSaved
+        }
+        if unsupported.isEmpty {
+            showToast("Saved “\(trimmed)” to Smart Folders")
+        } else {
+            showToast("Saved “\(trimmed)” — smart folders can't filter by \(unsupportedText), so "
+                      + (unsupported.count == 1 ? "that filter was" : "those filters were") + " left out",
+                      isError: true)
+        }
+        return .saved(folder)
     }
 
     func deleteSavedSearch(_ s: SavedSearch) {
