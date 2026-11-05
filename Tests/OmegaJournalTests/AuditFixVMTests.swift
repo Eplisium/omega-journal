@@ -207,8 +207,8 @@ struct AuditFixVMTests {
         #expect(!vm.libraryEntries.contains { $0.id == h.id })
     }
 
-    @Test("a lock that bypasses lockHiddenEntries (idle relock) also re-masks search; unlock re-reveals")
-    func sessionObserverRefreshesSearch() async throws {
+    @Test("a lock that bypasses lockHiddenEntries (idle relock, App Lock) re-masks search; unlock re-reveals")
+    func sessionChangeRefreshesSearch() throws {
         let (vm, root) = try Self.makeVM()
         defer { Self.tearDown(vm, root) }
         BiometricAuth.shared.setAuthenticatedForTesting(true)
@@ -217,11 +217,14 @@ struct AuditFixVMTests {
         vm.searchText = "quokkacodeword"
         vm.refreshQuery()
         #expect(vm.libraryEntries.map(\.id) == [h.id])
-        BiometricAuth.shared.setAuthenticatedForTesting(false)   // what BiometricAuth.lock() does
-        try await Task.sleep(nanoseconds: 100_000_000)         // observers run async on main
+        // What BiometricAuth.lock() does, then what its session observer
+        // delivers (asynchronously on main; called directly so the test stays
+        // synchronous — other suites share BiometricAuth.shared).
+        BiometricAuth.shared.setAuthenticatedForTesting(false)
+        vm.sessionDidChange()
         #expect(!vm.libraryEntries.contains { $0.id == h.id })
         BiometricAuth.shared.setAuthenticatedForTesting(true)
-        try await Task.sleep(nanoseconds: 100_000_000)
+        vm.sessionDidChange()
         #expect(vm.libraryEntries.map(\.id) == [h.id])
     }
 

@@ -195,9 +195,14 @@ final class JournalViewModel {
         // This covers every lock path (idle relock, App Lock, resign-active)
         // without every mutation site needing to remember to do it.
         BiometricAuth.shared.observeSessionChanges(owner: self) { [weak self] in
-            self?.refreshTagCounts()
-            self?.refreshQuery()
+            self?.sessionDidChange()
         }
+    }
+
+    /// Delivered after every real lock-state change.
+    func sessionDidChange() {
+        refreshTagCounts()
+        refreshQuery()
     }
 
     // MARK: - Persisted view state
