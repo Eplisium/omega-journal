@@ -4,18 +4,23 @@ import OmegaJournalCore
 // MARK: - Today hero content
 
 /// Body-derived text for the Today hero card. A locked hidden entry shows its
-/// title/mood/date only (the masked-card rule): no preview and no tags.
+/// title/mood/date only (the masked-card rule): no preview, no tags and no
+/// word count (its length says something about what it holds).
 struct TodayHeroContent: Equatable {
     static let maskedPreview = "Hidden · unlock to read"
 
     let preview: String
     let tags: [String]
+    /// "1,240 words", or nil when masked (the hero then shows no count).
+    let wordCountText: String?
     let isMasked: Bool
 
     init(entry: JournalEntry, hiddenLocked: Bool) {
         isMasked = !ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked)
         preview = isMasked ? Self.maskedPreview : entry.preview
         tags = isMasked ? [] : entry.tags
+        let words = entry.wordCount
+        wordCountText = isMasked ? nil : "\(words.formatted()) \(words == 1 ? "word" : "words")"
     }
 }
 
@@ -215,9 +220,11 @@ struct TodayView: View {
                             .ojGlass(.primaryAction, in: Capsule(), tint: theme.accentColor) {
                                 $0.background(Capsule().fill(theme.accentColor))
                             }
-                        Text("\(entry.wordCount) words")
-                            .font(OmegaTheme.font(.meta))
-                            .foregroundColor(theme.secondaryTextColor)
+                        if let words = hero.wordCountText {
+                            Text(words)
+                                .font(OmegaTheme.font(.meta))
+                                .foregroundColor(theme.secondaryTextColor)
+                        }
                         Spacer()
                     }
                 }
