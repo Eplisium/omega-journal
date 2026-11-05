@@ -380,8 +380,13 @@ public enum StreakCalculator {
                 if let s = sinceMiss { sinceMiss = s + 1 }
             } else if count > 0 {
                 if let s = sinceMiss, s < graceWindow - 1 {
-                    count = 0
-                    sinceMiss = nil
+                    // A second miss inside the grace window ends the run that
+                    // held the previous miss. The best run through this day
+                    // starts just after that miss: keep its `s` written days
+                    // and forgive this miss instead (what `dailyStreak` counts
+                    // walking back from a later day). No written days → no run.
+                    count = s
+                    sinceMiss = s > 0 ? 0 : nil
                 } else {
                     sinceMiss = 0
                 }
@@ -455,16 +460,20 @@ public enum StreakCalculator {
         let since = days.filter { $0 <= todayStart }.max().flatMap {
             calendar.dateComponents([.day], from: $0, to: todayStart).day
         }
+        // `longest` is clamped to `current`: a record below the streak in
+        // progress reads as a bug ("Current 10 days · Longest 7").
         switch mode {
         case .dailyWithRest:
+            let current = dailyStreak(writingDays: days, today: today, calendar: calendar)
             return StreakSummary(
-                current: dailyStreak(writingDays: days, today: today, calendar: calendar),
-                longest: longestDailyStreak(writingDays: days, calendar: calendar),
+                current: current,
+                longest: max(current, longestDailyStreak(writingDays: days, calendar: calendar)),
                 unit: "day", writtenToday: days.contains(todayStart), daysSinceLastEntry: since)
         case .weekly:
+            let current = weeklyStreak(writingDays: days, target: weeklyTarget, today: today, calendar: calendar)
             return StreakSummary(
-                current: weeklyStreak(writingDays: days, target: weeklyTarget, today: today, calendar: calendar),
-                longest: longestWeeklyStreak(writingDays: days, target: weeklyTarget, calendar: calendar),
+                current: current,
+                longest: max(current, longestWeeklyStreak(writingDays: days, target: weeklyTarget, calendar: calendar)),
                 unit: "week", writtenToday: days.contains(todayStart), daysSinceLastEntry: since)
         }
     }
