@@ -185,7 +185,15 @@ struct EditorView: View {
 
     // MARK: Goal ring
 
-    private var entryCountsTowardToday: Bool { entry.createdAt >= Calendar.current.startOfDay(for: Date()) }
+    private var entryCountsTowardToday: Bool { Self.countsTowardToday(createdAt: entry.createdAt) }
+
+    /// The daily goal counts entries dated today — not earlier days and not
+    /// future-dated ones (same `[startOfToday, endOfToday)` window as
+    /// `wordCountSum`), so a planned entry open in the editor never moves the ring.
+    static func countsTowardToday(createdAt: Date, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        createdAt >= calendar.startOfDay(for: now)
+            && createdAt < DatabaseManager.endOfToday(now: now, calendar: calendar)
+    }
 
     /// Words written today in OTHER entries (the goal counts entries created today, like the Today view).
     private func loadGoalBaseline() {

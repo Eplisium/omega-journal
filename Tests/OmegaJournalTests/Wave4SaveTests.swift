@@ -192,7 +192,7 @@ struct Wave4SaveTests {
           arguments: [
             (SaveTagRewrite.rename(from: "a", to: "b"), ["a", "a/x", "ab", "c"], ["b", "b/x", "ab", "c"]),
             (.rename(from: "a", to: "c"), ["a", "c"], ["c"]),
-            (.rename(from: "a", to: "b"), ["A"], ["A"]),
+            (.rename(from: "a", to: "b"), ["A", "A/x", "Ab"], ["b", "b/x", "Ab"]),
             (.delete("a"), ["a", "A/x", "ab", "c"], ["ab", "c"]),
             (.delete("a"), [], []),
           ])

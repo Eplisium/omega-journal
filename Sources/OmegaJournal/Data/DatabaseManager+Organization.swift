@@ -141,8 +141,11 @@ extension DatabaseManager {
     @discardableResult
     func renameTagTree(from old: String, to newName: String) -> Int {
         guard let target = TagPath.normalize(newName), target != old else { return 0 }
-        // Moving a tag beneath itself would orphan it.
-        guard !(target + "/").hasPrefix(old + "/") || target == old else { return 0 }
+        // Moving a tag beneath itself would orphan it. Case-insensitive, like
+        // `TagPath.renamed` (which picks the affected tags): `work` -> `Work/sub`
+        // is beneath itself too. A case-only rename (`work` -> `Work`) is fine.
+        let oldKey = old.lowercased(), targetKey = target.lowercased()
+        guard !(targetKey + "/").hasPrefix(oldKey + "/") || targetKey == oldKey else { return 0 }
         let colors = tagColors()
         let affected = allTagNames().filter { TagPath.renamed($0, from: old, to: target) != nil }
         guard !affected.isEmpty else { return 0 }
