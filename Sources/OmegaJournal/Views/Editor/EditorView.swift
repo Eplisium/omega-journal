@@ -850,18 +850,26 @@ struct EditorView: View {
         let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "-")
         let mime = ext == "png" ? "image/png" : "image/tiff"
         let name = "Pasted image \(stamp).\(ext)"
-        vm.addAttachment(to: entry, data: data, filename: name, mimeType: mime)
-        insertImageReference(filename: name)
+        insertImageReference(for: vm.addAttachment(to: entry, data: data, filename: name, mimeType: mime))
         return true
+    }
+
+    /// The inline reference for a just-saved attachment: images only, keyed by
+    /// the STORED filename (sanitized and unique per entry — the name the
+    /// preview/reader resolve), and nothing when the save failed.
+    static func inlineImageMarkdown(for saved: Attachment?) -> String? {
+        guard let saved, saved.isImage else { return nil }
+        return ImageRefs.markdown(alt: "", filename: saved.filename)
     }
 
     /// Drops a `![](omega-attachment://name)` line at the caret so the image renders inline in the
     /// preview and reader (the attachment itself stays encrypted on disk).
-    private func insertImageReference(filename: String) {
+    private func insertImageReference(for saved: Attachment?) {
+        guard let reference = Self.inlineImageMarkdown(for: saved) else { return }
         let text = controller.text
         let loc = controller.caretLocation ?? (text as NSString).length
         let atLineStart = loc == 0 || (text as NSString).character(at: min(loc, (text as NSString).length) - 1) == 10
-        controller.insert((atLineStart ? "" : "\n") + ImageRefs.markdown(alt: "", filename: filename) + "\n")
+        controller.insert((atLineStart ? "" : "\n") + reference + "\n")
     }
 
     /// Largest single attachment accepted (files are encrypted and stored in-app).
@@ -892,8 +900,7 @@ struct EditorView: View {
                 switch loaded {
                 case .success(let data):
                     let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-                    vm.addAttachment(to: target, data: data, filename: url.lastPathComponent, mimeType: type)
-                    if type.hasPrefix("image/") { insertImageReference(filename: url.lastPathComponent) }
+                    insertImageReference(for: vm.addAttachment(to: target, data: data, filename: url.lastPathComponent, mimeType: type))
                 case .failure(.tooLarge(let name)):
                     vm.showToast("\(name) is too large to attach (limit \(limit / 1_048_576) MB)", isError: true)
                 case .failure(.unreadable(let name)):

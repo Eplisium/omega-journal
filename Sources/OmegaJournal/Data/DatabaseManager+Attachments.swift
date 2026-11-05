@@ -47,11 +47,31 @@ extension DatabaseManager {
             preferredName: Self.sanitizedAttachmentFilename(attachment.filename))
     }
 
+    /// Makes `name` unique among `existing` (one entry's attachment names)
+    /// Finder-style: `image.png` → `image 2.png` → `image 3.png`. Inline
+    /// image refs are keyed by filename, so two attachments of one entry must
+    /// never share a name (the second ref would show the first picture).
+    static func uniqueAttachmentFilename(_ name: String, existing: Set<String>) -> String {
+        guard existing.contains(name) else { return name }
+        let ext = (name as NSString).pathExtension
+        let base = ext.isEmpty ? name : (name as NSString).deletingPathExtension
+        var n = 2
+        while true {
+            let candidate = ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"
+            if !existing.contains(candidate) { return candidate }
+            n += 1
+        }
+    }
+
     func saveAttachment(entryId: String, data: Data, filename rawFilename: String, mimeType: String = "") -> Attachment? {
         let id = UUID().uuidString
         // The name may come from an untrusted import file: never let it pick
         // the directory (`../../omega_journal.sqlite3` would overwrite the DB).
-        let filename = Self.sanitizedAttachmentFilename(rawFilename)
+        // Unique within the entry so inline refs resolve to the right file;
+        // existing rows (and refs to them) keep their names.
+        let filename = Self.uniqueAttachmentFilename(
+            Self.sanitizedAttachmentFilename(rawFilename),
+            existing: Set(fetchAttachments(entryId: entryId).map(\.filename)))
         let dir = (attachmentsDir as NSString).appendingPathComponent(id)
         guard let fileURL = attachmentFileURL(id: id, filename: filename) else {
             reportError("Refused to save attachment with an unsafe name")

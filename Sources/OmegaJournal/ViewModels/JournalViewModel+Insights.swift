@@ -186,21 +186,35 @@ extension JournalViewModel {
 
     // MARK: - Attachments
 
-    func addAttachment(to entry: JournalEntry, data: Data, filename: String, mimeType: String) {
+    /// Stores `data` as an attachment of `entry`. Returns the saved attachment
+    /// (nil, with an error toast, when the save failed). Its `filename` may
+    /// differ from `filename`: it is sanitized and made unique within the
+    /// entry, so anything that references the file (inline image refs) must
+    /// use the returned name.
+    @discardableResult
+    func addAttachment(to entry: JournalEntry, data: Data, filename: String, mimeType: String) -> Attachment? {
         guard let attachment = db.saveAttachment(entryId: entry.id, data: data, filename: filename, mimeType: mimeType) else {
             showToast("Couldn't attach \(filename)", isError: true)
-            return
+            return nil
         }
-        if let idx = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[idx].attachments.append(attachment)
-        }
-        showToast("Attached \(filename)")
+        updateAttachments(ofEntry: entry.id) { $0.append(attachment) }
+        showToast("Attached \(attachment.filename)")
+        return attachment
     }
 
     func deleteAttachment(_ attachment: Attachment) {
         db.deleteAttachment(id: attachment.id)
-        for (i, entry) in entries.enumerated() {
-            entries[i].attachments = entry.attachments.filter { $0.id != attachment.id }
+        updateAttachments(ofEntry: attachment.entryId) { $0.removeAll { $0.id == attachment.id } }
+    }
+
+    /// Applies an attachment change to every collection that can hold the
+    /// entry: archived, hidden and trashed readers/editors and search rows
+    /// resolve from their own copies, not from `entries`. Only collections
+    /// that contain the entry are written (Observation notifies on every set).
+    private func updateAttachments(ofEntry id: String, _ change: (inout [Attachment]) -> Void) {
+        for list in [\JournalViewModel.entries, \.archivedEntries, \.hiddenEntries, \.trashedEntries] {
+            if let i = self[keyPath: list].firstIndex(where: { $0.id == id }) { change(&self[keyPath: list][i].attachments) }
         }
+        if let i = searchResults?.firstIndex(where: { $0.id == id }) { change(&searchResults![i].attachments) }
     }
 }
