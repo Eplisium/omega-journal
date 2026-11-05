@@ -20,6 +20,11 @@ struct ReadView: View {
     @State private var attachmentPendingRemoval: Attachment?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
+    @AppStorage(ReadingPreferences.maxWidthKey) private var readingMaxWidth = ReadingPreferences.defaultMaxWidth
+
+    /// Reader column width from Settings › Reading › Maximum width, clamped
+    /// to the supported range (bad/zero stored values → the default).
+    var readerMaxWidth: CGFloat { CGFloat(ReadingPreferences.clampedWidth(readingMaxWidth)) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,8 +71,8 @@ struct ReadView: View {
                 }
                 .padding(.horizontal, 30)
                 .padding(.vertical, 26)
-                // Readable measure: ~70 characters per line at the reading size.
-                .frame(maxWidth: 720, alignment: .leading)
+                // Readable measure: Settings › Reading › Maximum width.
+                .frame(maxWidth: readerMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .scrollContentBackground(.hidden)
