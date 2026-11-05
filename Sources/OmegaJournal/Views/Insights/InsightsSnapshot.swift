@@ -30,6 +30,8 @@ struct InsightsSnapshot {
     let distribution: [MoodCount]
     let weekdayCounts: [WeekdayCount]
     let recent: [JournalEntry]
+    /// Current daily streak (Today's rule) over the ALL-TIME reflective scope,
+    /// never capped by `period`.
     let streak: Int
     let mostProductiveDay: String?
     let mostProductiveHour: String?
@@ -65,7 +67,8 @@ struct InsightsSnapshot {
     }
 
     /// - Parameters:
-    ///   - journal: the whole active journal; only id/date/private flag are read.
+    ///   - journal: the whole active journal; only id/date/private flag are read
+    ///     (also the source of the all-time `streak`).
     ///   - entries: the already-scoped entries (the ViewModel owns that rule).
     init(
         journal: [JournalEntry],
@@ -157,7 +160,15 @@ struct InsightsSnapshot {
         }
 
         recent = Array(entries.sorted { $0.createdAt > $1.createdAt }.prefix(4))
-        streak = StreakHistory.currentLength(days: Set(entries.map(\.createdAt)))
+        // "Current rhythm" is the Today streak rule (`StreakCalculator`, one
+        // rest day per 7 forgiven) over the all-time reflective scope, at
+        // `reference` in `calendar`. It used the period-filtered entries, so
+        // "7 days" capped a 20-day streak at 7 and "Year" in early January at 3.
+        let reflectiveDays = OmegaAnalytics.filteredRecords(
+            records, period: .allTime, visibility: visibility,
+            relativeTo: reference, calendar: calendar
+        ).map(\.date)
+        streak = StreakCalculator.dailyStreak(writingDays: Set(reflectiveDays), today: reference, calendar: calendar)
         mostProductiveDay = ActivityStats.mostProductiveWeekday(samples)
         mostProductiveHour = ActivityStats.mostProductiveHour(samples).map(ActivityStats.hourLabel)
         contentFingerprint = ReflectionFingerprint.make(entries.map { ($0.id, $0.updatedAt) })
