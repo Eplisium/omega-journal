@@ -12,7 +12,8 @@ import OmegaJournalShared
 /// - only builds that packaging gave an `OJAppGroupIdentifier` publish;
 /// - test/QA runs (`OMEGA_JOURNAL_TEST_DATABASE_PATH`) publish only to an
 ///   explicit non-production `OMEGA_JOURNAL_TEST_APP_GROUP`;
-/// - hidden entries contribute nothing (`WidgetEntryFact.countsForWidget`).
+/// - the numbers cover the whole journal, never just the sidebar's notebook;
+/// - hidden, trashed and archived entries contribute nothing.
 @MainActor
 final class WidgetSnapshotPublisher {
     static let shared = WidgetSnapshotPublisher()
@@ -65,7 +66,7 @@ final class WidgetSnapshotPublisher {
             }
             store = groupStore
         }
-        let snapshot = Self.makeSnapshot(entries: vm.entries, goals: GoalManager.shared, now: now)
+        let snapshot = Self.makeSnapshot(for: vm, goals: GoalManager.shared, now: now)
         // Same numbers as last time: skip the disk write and the widget reload.
         if let lastPublished, Self.sameContent(lastPublished, snapshot) { return nil }
         do {
@@ -84,8 +85,40 @@ final class WidgetSnapshotPublisher {
         return a == b
     }
 
-    /// Facts for the builder. Word counts are only computed for entries the
-    /// snapshot can show (today onwards), because `wordCount` parses the body.
+    // MARK: Snapshot source
+
+    /// The snapshot for the whole journal. The widget and the "Today's
+    /// Writing Progress" intent have no notebook context, so this never looks
+    /// at the sidebar selection (`vm.entries` is scoped to the selected
+    /// notebook): every notebook counts, hidden, trashed and archived entries
+    /// never do.
+    static func makeSnapshot(for vm: JournalViewModel, goals: GoalManager, now: Date = Date()) -> WidgetSnapshot {
+        makeSnapshot(facts: journalFacts(for: vm), goals: goals, now: now)
+    }
+
+    /// Facts for every entry the widget counts, read from stored columns (no
+    /// body is decrypted). An edit still waiting for the debounced autosave,
+    /// or kept after a failed write, supplies its row's word count, so the
+    /// widget shows what is on screen. Which rows count (hidden, trashed,
+    /// archived) always comes from storage.
+    static func journalFacts(for vm: JournalViewModel) -> [WidgetEntryFact] {
+        let edits = unsavedEdits(of: vm)
+        return vm.db.widgetEntryRows().map { row in
+            WidgetEntryFact(createdAt: row.createdAt, wordCount: edits[row.id]?.wordCount ?? row.wordCount,
+                            isHidden: false)
+        }
+    }
+
+    /// Entry snapshots on screen that storage does not have yet, by id.
+    private static func unsavedEdits(of vm: JournalViewModel) -> [String: JournalEntry] {
+        var edits = vm.unsavedSnapshots
+        if let pending = vm.pendingSave { edits[pending.id] = pending }
+        return edits
+    }
+
+    /// Facts from an in-memory entry list. Word counts are only computed for
+    /// entries the snapshot can show (today onwards), because `wordCount`
+    /// parses the body.
     static func facts(from entries: [JournalEntry], now: Date = Date(),
                       calendar: Calendar = .current) -> [WidgetEntryFact] {
         let today = calendar.startOfDay(for: now)
@@ -97,20 +130,32 @@ final class WidgetSnapshotPublisher {
     }
 
     static func makeSnapshot(entries: [JournalEntry], goals: GoalManager, now: Date = Date()) -> WidgetSnapshot {
+        makeSnapshot(facts: facts(from: entries, now: now), goals: goals, now: now)
+    }
+
+    static func makeSnapshot(facts: [WidgetEntryFact], goals: GoalManager, now: Date = Date()) -> WidgetSnapshot {
         let goal = goals.goals.first(where: { $0.type == .dailyWords })?.target ?? WritingGoal.GoalType.dailyWords.defaultValue
         return WidgetSnapshotBuilder.build(
-            facts: facts(from: entries, now: now), dailyWordGoal: goal, streakMode: goals.streakMode,
+            facts: facts, dailyWordGoal: goal, streakMode: goals.streakMode,
             weeklyStreakTarget: goals.weeklyStreakTarget, prompt: PromptGenerator.prompt(for:), now: now)
     }
 
-    /// Cheap change detector evaluated in ContentView's body: no body parsing.
-    static func fingerprint(of entries: [JournalEntry], goals: GoalManager) -> Int {
+    /// Cheap change detector evaluated in ContentView's body: one aggregate
+    /// row over the whole journal plus the edits not stored yet, no body
+    /// parsing. A notebook switch only re-scopes the view model's lists, so it
+    /// leaves this unchanged; a change in any notebook moves it.
+    static func fingerprint(of vm: JournalViewModel, goals: GoalManager) -> Int {
+        // Observation dependencies, so the body re-runs this after every
+        // mutation: the library lists (scoped, so not hashed) and the
+        // journal-wide notebook counts, which also change for writes outside
+        // the selected notebook. Equal values do not notify.
+        _ = (vm.entries.count, vm.archivedEntries.count, vm.trashedEntries.count, vm.hiddenEntries.count,
+             vm.journalCounts.count)
         var hasher = Hasher()
-        hasher.combine(entries.count)
-        for entry in entries {
-            hasher.combine(entry.createdAt)
-            hasher.combine(entry.updatedAt)
-            hasher.combine(entry.isHidden)
+        hasher.combine(vm.db.widgetStorageStamp())
+        for (id, edit) in unsavedEdits(of: vm).sorted(by: { $0.key < $1.key }) {
+            hasher.combine(id)
+            hasher.combine(edit.updatedAt)
         }
         hasher.combine(goals.goals.first(where: { $0.type == .dailyWords })?.target)
         hasher.combine(goals.streakMode.rawValue)

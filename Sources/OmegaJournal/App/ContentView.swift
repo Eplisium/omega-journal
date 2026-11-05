@@ -91,7 +91,7 @@ struct ContentView: View {
         .modifier(ShellReviewRequests(vm: vm, selection: $sidebarSelection))
         // Shortcuts / widget commands and the widget's privacy-safe snapshot (Intents/).
         .modifier(AppCommandHandling(vm: vm, selection: $sidebarSelection))
-        .modifier(WidgetSnapshotPublishing(vm: vm, fingerprint: WidgetSnapshotPublisher.fingerprint(of: vm.entries, goals: GoalManager.shared)))
+        .modifier(WidgetSnapshotPublishing(vm: vm, fingerprint: WidgetSnapshotPublisher.fingerprint(of: vm, goals: GoalManager.shared)))
     }
 
     /// Zen-mode editor. Keyed by entry id (as DetailView does) so switching or
