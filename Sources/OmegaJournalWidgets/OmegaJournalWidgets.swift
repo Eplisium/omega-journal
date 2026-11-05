@@ -57,9 +57,16 @@ struct OmegaTodayProvider: TimelineProvider {
         let entries = WidgetDisplay.timelineDates(for: snapshot, now: now).map {
             OmegaWidgetEntry(date: $0, state: WidgetDisplay.state(for: snapshot, at: $0))
         }
-        // The app reloads timelines whenever its numbers change; past the last
-        // precomputed day there is nothing new to show until it does.
-        completion(Timeline(entries: entries, policy: .atEnd))
+        // The app reloads timelines whenever its numbers change. Past the last
+        // precomputed day there is nothing new to show until it does, so a
+        // missing or expired snapshot waits for midnight instead of `.atEnd`
+        // (which would ask again at once, over and over).
+        let policy: TimelineReloadPolicy
+        switch WidgetDisplay.timelineReload(for: snapshot, now: now) {
+        case .atEnd: policy = .atEnd
+        case .after(let date): policy = .after(date)
+        }
+        completion(Timeline(entries: entries, policy: policy))
     }
 
     private func loadSnapshot() -> WidgetSnapshot? {

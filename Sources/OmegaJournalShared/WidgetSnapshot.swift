@@ -190,6 +190,17 @@ public struct WidgetDisplayState: Equatable, Sendable {
     }
 }
 
+/// When WidgetKit should ask the widget for its next timeline.
+public enum WidgetTimelineReload: Equatable, Sendable {
+    /// After the last entry: the timeline has rows for upcoming midnights.
+    case atEnd
+    /// At this date (the next midnight). Used when nothing lies ahead of
+    /// `now`: `.atEnd` would then ask again immediately, over and over, for
+    /// the same card and burn the widget's reload budget. The app reloads
+    /// every timeline itself whenever it publishes a snapshot.
+    case after(Date)
+}
+
 public enum WidgetDisplay {
     /// The display state at `date`, or `.empty` when the snapshot has no row for
     /// that day (missing, wrong version, or older than its lookahead).
@@ -233,6 +244,18 @@ public enum WidgetDisplay {
             dates.append(day)
         }
         return dates
+    }
+
+    /// Reload policy for the timeline built from `timelineDates`. Keeps
+    /// `.atEnd` only when real lookahead rows exist; with no snapshot, an
+    /// expired one, or today as its last row, waits for the next midnight.
+    public static func timelineReload(for snapshot: WidgetSnapshot?, now: Date,
+                                      calendar: Calendar = .current) -> WidgetTimelineReload {
+        if timelineDates(for: snapshot, now: now, calendar: calendar).contains(where: { $0 > now }) {
+            return .atEnd
+        }
+        let today = calendar.startOfDay(for: now)
+        return .after(calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(86_400))
     }
 
     /// The one-line answer for the "Today's progress" intent. Counts only.
