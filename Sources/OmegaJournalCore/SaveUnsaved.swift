@@ -11,7 +11,7 @@ import Foundation
 /// A tag change that must also be applied to snapshots still held in memory,
 /// so a later retry (which writes the snapshot's tags) cannot bring back a
 /// renamed or deleted tag. Rules mirror the database:
-/// `renameTagTree` re-roots `from` and `from/…` (case-sensitive, like
+/// `renameTagTree` re-roots `from` and `from/…` (case-insensitive, like
 /// `TagPath.renamed`); `deleteTagEverywhere` removes the tag and every
 /// descendant (case-insensitive, like `TagPath.isSameOrDescendant`).
 public enum SaveTagRewrite: Equatable, Sendable {

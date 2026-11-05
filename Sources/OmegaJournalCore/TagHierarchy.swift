@@ -60,12 +60,24 @@ public enum TagPath {
     }
 
     /// Re-roots `tag` when `old` is renamed to `new`. Nil when `tag` is not `old` or one of its children.
+    /// Case-insensitive, like `isSameOrDescendant` (the filter and the tag tree): renaming `work` also
+    /// re-roots `Work/alpha`. The rest of the path keeps its spelling.
     public static func renamed(_ tag: String, from old: String, to new: String) -> String? {
-        if tag == old { return new }
-        let prefix = old + String(separator)
-        guard tag.hasPrefix(prefix) else { return nil }
-        return new + String(separator) + tag.dropFirst(prefix.count)
+        if sameTag(tag, old) { return new }
+        // Split `tag` after as many segments as `old` has and compare that head.
+        let segments = old.filter { $0 == separator }.count + 1
+        var seen = 0
+        for i in tag.indices where tag[i] == separator {
+            seen += 1
+            guard seen == segments else { continue }
+            guard sameTag(String(tag[..<i]), old) else { return nil }
+            return new + String(separator) + tag[tag.index(after: i)...]
+        }
+        return nil
     }
+
+    /// Tag identity as the filter sees it (`isSameOrDescendant`).
+    static func sameTag(_ a: String, _ b: String) -> Bool { a.lowercased() == b.lowercased() }
 }
 
 public struct TagNode: Identifiable, Equatable, Sendable {
@@ -84,20 +96,33 @@ public struct TagNode: Identifiable, Equatable, Sendable {
 public enum TagTree {
     /// Builds a tree from per-entry tag lists. `totalCount` counts DISTINCT entries so an entry tagged both
     /// `a` and `a/b` counts once under `a`. Siblings are ordered by total count, then name.
+    /// Paths group case-insensitively, as the tag filter matches (`isSameOrDescendant`): `Work/alpha` and
+    /// `work` share one `work` node instead of two roots whose counts disagree with the list. A node shows
+    /// the first spelling used as a real tag, else the first spelling seen as an ancestor.
     public static func build(entryTags: [[String]]) -> [TagNode] {
         var own: [String: Int] = [:]
         var entriesUnder: [String: Set<Int>] = [:]
+        var tagSpelling: [String: String] = [:]
+        var ancestorSpelling: [String: String] = [:]
         for (i, tags) in entryTags.enumerated() {
-            for tag in Set(tags) {
-                own[tag, default: 0] += 1
-                entriesUnder[tag, default: []].insert(i)
-                for a in TagPath.ancestors(of: tag) { entriesUnder[a, default: []].insert(i) }
+            var ownKeys = Set<String>()
+            for tag in tags {
+                let key = tag.lowercased()
+                if tagSpelling[key] == nil { tagSpelling[key] = tag }
+                if ownKeys.insert(key).inserted { own[key, default: 0] += 1 }
+                entriesUnder[key, default: []].insert(i)
+                for a in TagPath.ancestors(of: tag) {
+                    let aKey = a.lowercased()
+                    if ancestorSpelling[aKey] == nil { ancestorSpelling[aKey] = a }
+                    entriesUnder[aKey, default: []].insert(i)
+                }
             }
         }
         func children(of parent: String?) -> [TagNode] {
-            let paths = entriesUnder.keys.filter { TagPath.parent(of: $0) == parent }
-            return paths.map { p in
-                TagNode(path: p, ownCount: own[p] ?? 0, totalCount: entriesUnder[p]?.count ?? 0, children: children(of: p))
+            let keys = entriesUnder.keys.filter { TagPath.parent(of: $0) == parent }
+            return keys.map { k in
+                TagNode(path: tagSpelling[k] ?? ancestorSpelling[k] ?? k, ownCount: own[k] ?? 0,
+                        totalCount: entriesUnder[k]?.count ?? 0, children: children(of: k))
             }
             .sorted { $0.totalCount != $1.totalCount ? $0.totalCount > $1.totalCount : $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
         }
