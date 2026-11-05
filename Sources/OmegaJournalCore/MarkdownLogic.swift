@@ -171,12 +171,27 @@ public enum MarkdownLogic {
     }
 
     /// Indents/outdents every line of a block (which may end with a newline).
+    /// A blank CRLF line (`"\r"` once split) is left alone like a blank LF line.
     public static func shiftBlock(_ block: String, outdenting: Bool) -> String {
-        let hadTrailing = block.hasSuffix("\n")
+        let (lines, trailing) = splitBlockLines(block)
+        let shifted = lines.map { line in
+            outdenting ? outdent(line) : (line == "\r" ? line : indentLine(line))
+        }
+        return shifted.joined(separator: "\n") + (trailing > 0 ? "\n" : "")
+    }
+
+    /// Splits a block taken from `NSString.lineRange(for:)` into its lines
+    /// (split on `"\n"`, so a CRLF line keeps its `"\r"`) without the phantom
+    /// empty line after a trailing break, plus that break's UTF-16 length
+    /// (`"\r\n"` = 2, `"\n"` = 1, none = 0). Use this instead of
+    /// `hasSuffix("\n")`: `"\r\n"` is ONE Swift Character, so the Character
+    /// check misses CRLF endings and the next line gets swallowed.
+    public static func splitBlockLines(_ block: String) -> (lines: [String], trailingBreakLength: Int) {
         var lines = block.components(separatedBy: "\n")
-        if hadTrailing { lines.removeLast() }
-        lines = lines.map { outdenting ? outdent($0) : indentLine($0) }
-        return lines.joined(separator: "\n") + (hadTrailing ? "\n" : "")
+        guard block.utf16.last == 10 else { return (lines, 0) }
+        lines.removeLast()
+        let units = Array(block.utf16.suffix(2))
+        return (lines, units.count == 2 && units[0] == 13 ? 2 : 1)
     }
 
     public static func isListLine(_ line: String) -> Bool {
@@ -540,8 +555,11 @@ extension MarkdownLogic {
         }
 
         let loc = selection.location
-        let next: Character? = loc < ns.length ? Character(UnicodeScalar(ns.character(at: loc)) ?? " ") : nil
-        let prev: Character? = loc > 0 ? Character(UnicodeScalar(ns.character(at: loc - 1)) ?? " ") : nil
+        // Whole composed characters on each side of the caret: a lone UTF-16
+        // unit of an emoji/astral character is not a UnicodeScalar, and the old
+        // `?? " "` fallback made every emoji read as whitespace.
+        let next: Character? = loc < ns.length ? ns.substring(with: ns.rangeOfComposedCharacterSequence(at: loc)).first : nil
+        let prev: Character? = loc > 0 ? ns.substring(with: ns.rangeOfComposedCharacterSequence(at: loc - 1)).last : nil
 
         if closers.contains(typed), next == typed {
             return MarkdownTypingEdit(range: NSRange(location: loc, length: 0), replacement: "",
@@ -552,5 +570,88 @@ extension MarkdownLogic {
         if let n = next, !(n.isWhitespace || closers.contains(n)) { return nil }
         return MarkdownTypingEdit(range: NSRange(location: loc, length: 0), replacement: "\(typed)\(close)",
                                   selection: NSRange(location: loc + 1, length: 0))
+    }
+}
+
+// MARK: - Inline style toggles (bold / italic / code / strikethrough)
+
+extension MarkdownLogic {
+    private static let starUnit: UInt16 = 42   // "*"
+
+    /// The edit for an inline style command (`open`/`close` = `**`, `*`,
+    /// `` ` `` or `~~`) on `selection`, as UTF-16 offsets.
+    /// - Markers count whether they sit inside the selection (`**word**`
+    ///   selected) or just outside it (a double-clicked `word` in `**word**`):
+    ///   a present style is removed, an absent one is added.
+    /// - Bold and italic share `*`, so a star run is read by its length:
+    ///   two or more stars carry bold, an odd count carries italic (`***` is
+    ///   both). ⌘I on `**word**` gives `***word***`, not plain `*word*`.
+    /// - Removing markers that were outside the selection keeps the text
+    ///   selected; otherwise the whole result is selected, and an empty
+    ///   selection puts the caret between the markers.
+    public static func inlineWrapEdit(open: String, close: String, in text: String, selection: NSRange) -> MarkdownTypingEdit {
+        let ns = text as NSString
+        if open == close, !open.isEmpty, open.utf16.allSatisfy({ $0 == starUnit }) {
+            return starWrapEdit(markerLength: open.utf16.count, in: ns, selection: selection)
+        }
+        let selected = ns.substring(with: selection)
+        let o = (open as NSString).length, c = (close as NSString).length, n = selection.length
+        // Markers inside the selection: unwrap.
+        if selected.hasPrefix(open), selected.hasSuffix(close), n >= o + c {
+            let inner = (selected as NSString).substring(with: NSRange(location: o, length: n - o - c))
+            return MarkdownTypingEdit(range: selection, replacement: inner,
+                                      selection: NSRange(location: selection.location, length: (inner as NSString).length))
+        }
+        // Markers just outside the selection: remove them.
+        if selection.location >= o, NSMaxRange(selection) + c <= ns.length,
+           ns.substring(with: NSRange(location: selection.location - o, length: o)) == open,
+           ns.substring(with: NSRange(location: NSMaxRange(selection), length: c)) == close {
+            return MarkdownTypingEdit(range: NSRange(location: selection.location - o, length: o + n + c), replacement: selected,
+                                      selection: NSRange(location: selection.location - o, length: n))
+        }
+        let wrapped = open + selected + close
+        return MarkdownTypingEdit(range: selection, replacement: wrapped, selection: n == 0
+            ? NSRange(location: selection.location + o, length: 0)
+            : NSRange(location: selection.location, length: (wrapped as NSString).length))
+    }
+
+    /// `*`/`**` toggle over the whole star runs at both edges of the selection
+    /// (inside and immediately outside it). Stars in a run are interchangeable,
+    /// so the run is rebuilt with `markerLength` stars more or fewer per side.
+    private static func starWrapEdit(markerLength m: Int, in ns: NSString, selection: NSRange) -> MarkdownTypingEdit {
+        let selected = ns.substring(with: selection) as NSString
+        let n = selected.length
+        var lead = 0
+        while lead < n, selected.character(at: lead) == starUnit { lead += 1 }
+        var trail = 0
+        if lead == n {
+            // Only stars selected (or nothing): split the run between the sides.
+            lead = n / 2
+            trail = n - lead
+        } else {
+            while selected.character(at: n - 1 - trail) == starUnit { trail += 1 }
+        }
+        var before = 0
+        while selection.location - before > 0, ns.character(at: selection.location - before - 1) == starUnit { before += 1 }
+        var after = 0
+        while NSMaxRange(selection) + after < ns.length, ns.character(at: NSMaxRange(selection) + after) == starUnit { after += 1 }
+
+        let left = before + lead, right = trail + after
+        let run = min(left, right)
+        let present = m >= 2 ? run >= 2 : run % 2 == 1
+        let newLeft = present ? left - m : left + m
+        let newRight = present ? right - m : right + m
+        let core = selected.substring(with: NSRange(location: lead, length: n - lead - trail))
+        let range = NSRange(location: selection.location - before, length: before + n + after)
+        let replacement = String(repeating: "*", count: newLeft) + core + String(repeating: "*", count: newRight)
+        let newSelection: NSRange
+        if n == 0 {
+            newSelection = NSRange(location: range.location + newLeft, length: 0)
+        } else if lead == 0 && trail == 0 && (before > 0 || after > 0) {
+            newSelection = NSRange(location: range.location + newLeft, length: (core as NSString).length)
+        } else {
+            newSelection = NSRange(location: range.location, length: (replacement as NSString).length)
+        }
+        return MarkdownTypingEdit(range: range, replacement: replacement, selection: newSelection)
     }
 }

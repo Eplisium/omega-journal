@@ -168,7 +168,7 @@ struct ReadView: View {
     /// Jumps proportionally to where the heading sits in the text. The renderer emits one text run per
     /// block, so an exact per-heading anchor isn't available; this lands within a screen of the heading.
     private func outlineList(_ proxy: ScrollViewProxy) -> some View {
-        let lines = max(1, entry.body.split(separator: "\n", omittingEmptySubsequences: false).count)
+        let lines = MarkdownOutline.lineCount(in: entry.body)
         return VStack(alignment: .leading, spacing: 2) {
             Text("CONTENTS").font(OmegaTheme.font(.meta, .semibold)).tracking(0.7).foregroundColor(theme.secondaryTextColor)
                 .accessibilityAddTraits(.isHeader)

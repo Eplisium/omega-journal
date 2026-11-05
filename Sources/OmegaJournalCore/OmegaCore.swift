@@ -77,23 +77,29 @@ public enum OmegaCore {
 
     /// Applies (or toggles off) a line prefix across a block of lines — the logic
     /// behind the heading/list/quote commands. Toggles off only when every line
-    /// already carries the prefix.
+    /// already carries the prefix. Blank separator lines in a multi-line block
+    /// are left alone (no empty `- ` / `# ` items) and don't block toggling off;
+    /// a block that is only blank lines still gets the prefix (caret on an
+    /// empty line). CRLF-safe: a `\r\n` block keeps exactly its own lines.
     public static func applyLinePrefix(_ prefix: String, to block: String) -> String {
-        let hadTrailingNewline = block.hasSuffix("\n")
-        var lines = block.components(separatedBy: "\n")
-        if hadTrailingNewline { lines.removeLast() }
+        let (split, trailingBreak) = MarkdownLogic.splitBlockLines(block)
+        var lines = split
+        func isBlank(_ line: String) -> Bool { line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let skipsBlank = lines.contains { !isBlank($0) }
+        let targets = lines.filter { !skipsBlank || !isBlank($0) }
 
         // A line only counts as prefixed when the prefix IS its whole marker —
         // otherwise "- [ ] x" reads as bulleted and toggling strips just "- ",
         // stranding the "[ ] ".
-        let allPrefixed = !lines.isEmpty && lines.allSatisfy {
+        let allPrefixed = !targets.isEmpty && targets.allSatisfy {
             $0.hasPrefix(prefix) && stripBlockMarker($0) == String($0.dropFirst(prefix.count))
         }
         lines = lines.map { line in
-            allPrefixed ? String(line.dropFirst(prefix.count)) : prefix + stripBlockMarker(line)
+            if skipsBlank && isBlank(line) { return line }
+            return allPrefixed ? String(line.dropFirst(prefix.count)) : prefix + stripBlockMarker(line)
         }
         var out = lines.joined(separator: "\n")
-        if hadTrailingNewline { out += "\n" }
+        if trailingBreak > 0 { out += "\n" }
         return out
     }
 

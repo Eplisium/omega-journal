@@ -642,8 +642,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
             let sel = textView.selectedRange()
             let lineRange = ns.lineRange(for: sel)
             let block = ns.substring(with: lineRange)
-            let multiLine = block.trimmingCharacters(in: .newlines).contains("\n")
-            let firstLine = block.components(separatedBy: "\n").first ?? ""
+            // CRLF-safe: "\r\n" is one Character, so measure breaks in UTF-16.
+            let (lines, trailingBreak) = MarkdownLogic.splitBlockLines(block)
+            let multiLine = block.trimmingCharacters(in: .newlines).utf16.contains(10)
+            let firstLine = (lines.first ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
             guard multiLine || MarkdownLogic.isListLine(firstLine) || outdenting else { return false }
 
             let shifted = MarkdownLogic.shiftBlock(block, outdenting: outdenting)
@@ -652,7 +654,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             textView.textStorage?.replaceCharacters(in: lineRange, with: shifted)
             let delta = (shifted as NSString).length - lineRange.length
             if multiLine || sel.length > 0 {
-                textView.setSelectedRange(NSRange(location: lineRange.location, length: (shifted as NSString).length - (block.hasSuffix("\n") ? 1 : 0)))
+                textView.setSelectedRange(NSRange(location: lineRange.location, length: (shifted as NSString).length - trailingBreak))
             } else {
                 textView.setSelectedRange(NSRange(location: max(lineRange.location, sel.location + delta), length: 0))
             }
@@ -860,33 +862,24 @@ extension NSTextView {
         let ns = string as NSString
         let selection = selectedRange()
 
-        // Inline wrapping: **bold**, *italic*, `code`, ~~strike~~
+        // Inline wrapping: **bold**, *italic*, `code`, ~~strike~~ — markers just
+        // outside the selection count, and bold/italic share star runs.
         if let (open, close) = command.wrap {
-            let selected = ns.substring(with: selection)
-            let result = OmegaCore.toggleWrap(selected, open: open, close: close)
-            // Unwrapping shortens the text; wrapping lengthens it.
-            if result.count < selected.count {
-                replaceAndSelect(result, in: selection, selectLength: (result as NSString).length)
-            } else if selection.length == 0 {
-                // Empty selection: drop the caret between the new markers.
-                replaceAndSelect(result, in: selection, selectLength: 0,
-                                 caretOverride: selection.location + (open as NSString).length)
-            } else {
-                replaceAndSelect(result, in: selection, selectLength: (result as NSString).length)
-            }
+            let edit = MarkdownLogic.inlineWrapEdit(open: open, close: close, in: string, selection: selection)
+            guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+            textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+            setSelectedRange(edit.selection)
             didChangeText()
             return
         }
 
         if command == .toggleTask {
             let lineRange = ns.lineRange(for: selection)
-            let block = ns.substring(with: lineRange)
-            let hadTrailing = block.hasSuffix("\n")
-            var lines = block.components(separatedBy: "\n")
-            if hadTrailing { lines.removeLast() }
-            let out = lines.map { $0.trimmingCharacters(in: .whitespaces).isEmpty ? $0 : MarkdownLogic.cycledTaskLine($0) }
-                .joined(separator: "\n") + (hadTrailing ? "\n" : "")
-            replaceAndSelect(out, in: lineRange, selectLength: (out as NSString).length - (hadTrailing ? 1 : 0))
+            // CRLF-safe split; the trailing line break stays out of the selection.
+            let (lines, trailingBreak) = MarkdownLogic.splitBlockLines(ns.substring(with: lineRange))
+            let out = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? $0 : MarkdownLogic.cycledTaskLine($0) }
+                .joined(separator: "\n") + (trailingBreak > 0 ? "\n" : "")
+            replaceAndSelect(out, in: lineRange, selectLength: (out as NSString).length - trailingBreak)
             didChangeText()
             return
         }
@@ -930,14 +923,10 @@ extension NSTextView {
         insertText(text, replacementRange: selectedRange())
     }
 
-    private func replaceAndSelect(_ replacement: String, in range: NSRange, selectLength: Int, caretOverride: Int? = nil) {
+    private func replaceAndSelect(_ replacement: String, in range: NSRange, selectLength: Int) {
         guard shouldChangeText(in: range, replacementString: replacement) else { return }
         textStorage?.replaceCharacters(in: range, with: replacement)
-        if let caret = caretOverride {
-            setSelectedRange(NSRange(location: caret, length: 0))
-        } else {
-            setSelectedRange(NSRange(location: range.location, length: selectLength))
-        }
+        setSelectedRange(NSRange(location: range.location, length: selectLength))
     }
 }
 

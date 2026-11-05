@@ -28,11 +28,14 @@ public struct OutlineHeading: Equatable, Identifiable, Sendable {
 
 public enum MarkdownOutline {
     /// ATX headings (`# …`), skipping fenced code. A TOC is only worthwhile for long entries.
+    /// Lines split on `"\n"` with a trailing `"\r"` dropped: `"\r\n"` is ONE Swift
+    /// Character, so a Character split never broke a CRLF body into lines.
     public static func headings(in body: String) -> [OutlineHeading] {
         var out: [OutlineHeading] = []
         var inFence = false
-        for (i, rawLine) in body.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-            let line = rawLine.drop(while: { $0 == " " })
+        for (i, rawLine) in body.components(separatedBy: "\n").enumerated() {
+            let unixLine = rawLine.hasSuffix("\r") ? Substring(rawLine.dropLast()) : Substring(rawLine)
+            let line = unixLine.drop(while: { $0 == " " })
             if line.hasPrefix("```") || line.hasPrefix("~~~") { inFence.toggle(); continue }
             if inFence { continue }
             let hashes = line.prefix(while: { $0 == "#" }).count
@@ -43,6 +46,12 @@ public enum MarkdownOutline {
             out.append(OutlineHeading(level: hashes, title: title, line: i))
         }
         return out
+    }
+
+    /// Number of lines in `body` (`"\n"`-separated, so CRLF bodies count
+    /// correctly too); the reader's TOC jump ratio is `heading.line / lineCount`.
+    public static func lineCount(in body: String) -> Int {
+        max(1, body.components(separatedBy: "\n").count)
     }
 
     /// Show a table of contents for long entries with at least `minHeadings` headings.
