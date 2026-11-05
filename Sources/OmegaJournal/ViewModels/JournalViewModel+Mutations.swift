@@ -43,7 +43,7 @@ extension JournalViewModel {
     // MARK: - Trash & archive
 
     /// Moves an entry to the trash (recoverable for 30 days).
-    func deleteEntry(_ entry: JournalEntry) {
+    func deleteEntry(_ entry: JournalEntry, toast message: String = "Moved to Trash") {
         // A pending autosave captured the pre-trash snapshot (deletedAt == nil);
         // letting it fire later would overwrite deleted_at and resurrect the
         // entry, and cancelling it would lose the edit. Save it now, THEN trash.
@@ -58,7 +58,7 @@ extension JournalViewModel {
         trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed, journalId: activeJournalId)
         pushUndo(.restoreTrashed(ids: [entry.id]))
         refreshTagCounts()
-        showToast("Moved to Trash", actionLabel: "Undo")
+        showToast(message, actionLabel: "Undo")
         GoalManager.shared.loadGoals()
     }
 

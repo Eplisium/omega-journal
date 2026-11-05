@@ -26,7 +26,20 @@ final class JournalViewModel {
 
     // Selection & editing
     var selectedEntryId: String?
-    var editingEntryId: String?
+    /// Every path that closes the editor (Done, trash, hide, bulk trash, a
+    /// move out of scope, a restore) also leaves Zen and settles the save
+    /// indicator here, so the next editor never opens straight into
+    /// full-window Zen with a stale "Saved"/"Saving…" footer.
+    var editingEntryId: String? {
+        didSet {
+            // The blank-draft marker belongs to one editor session only.
+            if newDraftId != nil, newDraftId != editingEntryId { newDraftId = nil }
+            guard editingEntryId == nil, oldValue != nil else { return }
+            if isZenMode { isZenMode = false }
+            let settled = currentFailureState ?? .idle
+            if saveState != settled { saveState = settled }
+        }
+    }
 
     // Search & filtering
     var searchText: String = ""
@@ -122,6 +135,10 @@ final class JournalViewModel {
     /// False until `init` finishes, so loading saved view state never
     /// re-persists it (the Combine sinks this replaces used `dropFirst`).
     @ObservationIgnored var persistsViewState = false
+    /// The blank entry the open editor session created (⌘N, a Calendar day),
+    /// until it is given any content. Only this draft may be discarded
+    /// outright; any other entry that ends up empty goes to Trash instead.
+    @ObservationIgnored var newDraftId: String?
     /// Distinct writing days, cached against a cheap fingerprint so keystroke-driven
     /// `entries` updates don't redo calendar math (see `writingDays`).
     @ObservationIgnored var writingDaysCache: (key: [Double], days: Set<Date>)?
@@ -224,6 +241,17 @@ final class JournalViewModel {
         refreshOrganization()
         GoalManager.shared.loadGoals()
         refreshQuery()
+        dropDanglingSelectionAndEditor()
+    }
+
+    /// The reloaded scope may no longer contain the selected or edited entry
+    /// (moved to another notebook, a restored backup without it, a notebook
+    /// switch). Drop those ids so the editor closes for good instead of
+    /// popping back open once the entry is in scope again. The pending
+    /// autosave was already persisted at the top of `reload()`.
+    func dropDanglingSelectionAndEditor() {
+        if let selected = selectedEntryId, entry(id: selected) == nil { selectedEntryId = nil }
+        if let editing = editingEntryId, entry(id: editing) == nil { editingEntryId = nil }
     }
 
     func loadTemplates() {
@@ -340,6 +368,8 @@ final class JournalViewModel {
     /// Targeted update — refresh a single entry in every lifecycle collection
     /// that can display it, without paying for a full SQLite reload.
     func updateEntry(_ entry: JournalEntry, refreshSearch: Bool = true) {
+        // A draft that has had content at any point is no longer discardable.
+        if entry.id == newDraftId, !Self.isBlank(entry) { newDraftId = nil }
         if let old = replaceEntry(entry, in: &entries), sortKeyChanged(from: old, to: entry) {
             sort(&entries)
         }
@@ -394,6 +424,8 @@ final class JournalViewModel {
     func createEntry(title: String = "", body: String = "", tags: [String] = [],
                      journalId: String? = nil, isHidden: Bool = false) -> JournalEntry {
         flushPendingSave()
+        // A new editor opening over an untouched blank draft discards it.
+        discardUntouchedDraft()
         var entry = JournalEntry.new()
         entry.journalId = journalId ?? newEntryJournalId
         entry.title = title
@@ -407,6 +439,7 @@ final class JournalViewModel {
         if searchResults != nil { refreshQuery() }
         selectedEntryId = entry.id
         editingEntryId = entry.id
+        if Self.isBlank(entry) { newDraftId = entry.id }
         refreshTagCounts()
         return entry
     }
@@ -428,6 +461,7 @@ final class JournalViewModel {
     /// Creates an entry back-dated to a specific day — used by the calendar view.
     func createEntry(on date: Date) {
         flushPendingSave()
+        discardUntouchedDraft()
         var entry = JournalEntry.new()
         entry.journalId = newEntryJournalId
         // Keep the current time-of-day but move to the requested calendar day.
@@ -441,6 +475,8 @@ final class JournalViewModel {
         if searchResults != nil { refreshQuery() }
         selectedEntryId = entry.id
         editingEntryId = entry.id
+        newDraftId = entry.id
+        refreshTagCounts()
     }
 
     /// Duplicates an entry as a fresh draft.
@@ -503,11 +539,24 @@ final class JournalViewModel {
         if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
             Task {
                 guard await BiometricAuth.shared.authenticate() else { return }
-                editingEntryId = entry.id
+                openEditor(on: entry.id)
             }
             return
         }
-        editingEntryId = entry.id
+        openEditor(on: entry.id)
+    }
+
+    /// Points the editor at `id`. An untouched blank draft it replaces is
+    /// discarded first (it would otherwise linger as an empty "Untitled").
+    private func openEditor(on id: String) {
+        if editingEntryId != id {
+            flushPendingSave()
+            if discardUntouchedDraft() {
+                refreshTagCounts()
+                GoalManager.shared.loadGoals()
+            }
+        }
+        editingEntryId = id
     }
 
     func stopEditing() {
@@ -517,17 +566,11 @@ final class JournalViewModel {
         // to be a no-op and the final keystrokes depended entirely on the
         // debounce Task surviving a fast "type → Done → quit".
         flushPendingSave()
-        if let e = editingEntry {
-            if e.title.isEmpty && e.body.isEmpty && unsavedSnapshots[e.id] == nil {
-                // Discard entries that were never given any content.
-                db.hardDeleteEntry(id: e.id)
-                entries.removeAll { $0.id == e.id }
-                searchResults?.removeAll { $0.id == e.id }
-                archivedEntries.removeAll { $0.id == e.id }
-                trashedEntries.removeAll { $0.id == e.id }
-                hiddenEntries.removeAll { $0.id == e.id }
-                if selectedEntryId == e.id { selectedEntryId = nil }
-            }
+        if !discardUntouchedDraft(), let e = editingEntry, !e.isTrashed,
+           unsavedSnapshots[e.id] == nil, hasNoContent(e) {
+            // An existing entry the user emptied is never destroyed on Done:
+            // it goes to Trash (recoverable, with Undo) like any other delete.
+            deleteEntry(e, toast: "Empty entry moved to Trash")
         }
         editingEntryId = nil
         // A failed save stays visible (and retryable) after the editor closes.
@@ -535,6 +578,45 @@ final class JournalViewModel {
         isZenMode = false
         refreshTagCounts()
         GoalManager.shared.loadGoals()
+    }
+
+    // MARK: Blank drafts
+
+    /// No text, tags, mood or attachment on the in-memory copy. Cheap enough
+    /// for every keystroke (no storage access).
+    static func isBlank(_ entry: JournalEntry) -> Bool {
+        entry.title.isEmpty && entry.body.isEmpty && entry.tags.isEmpty
+            && entry.mood == .neutral   // JournalEntry.new()'s mood
+            && entry.attachments.isEmpty
+    }
+
+    /// `isBlank`, plus no attachment in storage: not every collection copy is
+    /// refreshed when a voice memo or file is attached (archived entries).
+    func hasNoContent(_ entry: JournalEntry) -> Bool {
+        Self.isBlank(entry) && db.fetchAttachments(entryId: entry.id).isEmpty
+    }
+
+    /// The single discard rule: only a draft this editor session created
+    /// blank, that never had content and has nothing unsaved.
+    func isUntouchedNewDraft(_ entry: JournalEntry) -> Bool {
+        entry.id == newDraftId && unsavedSnapshots[entry.id] == nil && hasNoContent(entry)
+    }
+
+    /// Permanently discards the open editor's draft if it is still untouched
+    /// (Done, or another editor opening over it). Callers flush first.
+    /// Returns whether it was discarded.
+    @discardableResult
+    func discardUntouchedDraft() -> Bool {
+        guard let draft = editingEntry, isUntouchedNewDraft(draft) else { return false }
+        db.hardDeleteEntry(id: draft.id)
+        entries.removeAll { $0.id == draft.id }
+        searchResults?.removeAll { $0.id == draft.id }
+        archivedEntries.removeAll { $0.id == draft.id }
+        trashedEntries.removeAll { $0.id == draft.id }
+        hiddenEntries.removeAll { $0.id == draft.id }
+        if selectedEntryId == draft.id { selectedEntryId = nil }
+        newDraftId = nil
+        return true
     }
 
     func autoSave(_ entry: JournalEntry) {
@@ -747,7 +829,12 @@ final class JournalViewModel {
         let items = QuickCaptureInbox.drain()
         guard !items.isEmpty else { return [] }
         let resumeId = editingEntryId
+        let resumeDraft = newDraftId
+        let resumeZen = isZenMode
         flushPendingSave()
+        // The open editor is resumed below, so the captures' createEntry must
+        // not treat it as an abandoned blank draft and discard it.
+        editingEntryId = nil
         var created: [JournalEntry] = []
         for item in items {
             guard let body = QuickCapture.normalized(item.body) else { continue }
@@ -767,6 +854,8 @@ final class JournalViewModel {
         GoalManager.shared.loadGoals()
         if let resumeId, let previous = entry(id: resumeId), !previous.isTrashed {
             startEditing(previous)
+            if resumeDraft == resumeId { newDraftId = resumeDraft }
+            if resumeZen && editingEntryId == resumeId { isZenMode = true }
         } else if let last = created.last {
             selectedEntryId = last.id
         }

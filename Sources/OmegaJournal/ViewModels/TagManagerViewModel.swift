@@ -111,14 +111,9 @@ extension JournalViewModel {
         }
         activeJournalId = target
         db.setSetting(Self.activeJournalSettingKey, value: target ?? "")
+        // Scope is only known after the reload; reload() drops dangling ids
+        // (and closing the editor leaves Zen).
         reload()
-        // Scope is only known after the reload: drop dangling ids.
-        if let sel = selectedEntryId, entry(id: sel) == nil { selectedEntryId = nil }
-        if let editing = editingEntryId, entry(id: editing) == nil {
-            editingEntryId = nil
-            isZenMode = false
-            saveState = .idle
-        }
     }
 
     @discardableResult
