@@ -95,18 +95,34 @@ public enum ImportParsers {
         return out
     }
 
-    public static func parseDate(_ s: String) -> Date? {
+    /// ISO 8601 (with or without fractional seconds), then the plain local forms
+    /// `yyyy-MM-dd'T'HH:mm:ss`, `yyyy-MM-dd HH:mm:ss`, `yyyy-MM-dd HH:mm` and
+    /// `yyyy-MM-dd`, read in `calendar`'s time zone.
+    public static func parseDate(_ s: String, calendar: Calendar = .current) -> Date? {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = iso.date(from: trimmed) { return d }
         iso.formatOptions = [.withInternetDateTime]
         if let d = iso.date(from: trimmed) { return d }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let local = DayKey.gregorian(matching: calendar)
         for fmt in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
             let f = DateFormatter()
             f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = calendar.timeZone
             f.dateFormat = fmt
             if let d = f.date(from: trimmed) { return d }
+            // A strict formatter returns nil for a wall-clock time that does
+            // not exist locally: every date-only value on a day whose midnight
+            // DST skips (America/Santiago 2019-09-08, Asia/Beirut, Africa/Cairo
+            // …). Read the fields in UTC, where every time exists, and resolve
+            // them on the local calendar, which moves into the day (01:00).
+            f.timeZone = utc.timeZone
+            guard let fields = f.date(from: trimmed) else { continue }
+            let parts = utc.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fields)
+            if let d = local.date(from: parts) { return d }
         }
         return nil
     }
@@ -114,7 +130,8 @@ public enum ImportParsers {
     /// Obsidian / plain markdown note. Front-matter `title`, `date|created`, `tags`, `mood`, `favorite`
     /// win; otherwise the first `# Heading`, otherwise the filename. Inline `#tags` are collected
     /// from the first line starting with only tags is NOT attempted — only front matter tags.
-    public static func parseMarkdownNote(text: String, fallbackTitle: String, fallbackDate: Date) -> ImportedEntry {
+    public static func parseMarkdownNote(text: String, fallbackTitle: String, fallbackDate: Date,
+                                         calendar: Calendar = .current) -> ImportedEntry {
         let (fields, lists, rawBody) = splitFrontMatter(text)
         var body = rawBody
         var title: String
@@ -131,8 +148,10 @@ public enum ImportParsers {
             tags = single.split(whereSeparator: { $0 == "," || $0 == " " }).map(String.init)
         }
         tags = tags.map { $0.hasPrefix("#") ? String($0.dropFirst()) : $0 }
-        let created = (fields["date"] ?? fields["created"] ?? fields["createdat"]).flatMap(parseDate) ?? fallbackDate
-        let updated = (fields["updated"] ?? fields["modified"] ?? fields["updatedat"]).flatMap(parseDate) ?? created
+        let created = (fields["date"] ?? fields["created"] ?? fields["createdat"])
+            .flatMap { parseDate($0, calendar: calendar) } ?? fallbackDate
+        let updated = (fields["updated"] ?? fields["modified"] ?? fields["updatedat"])
+            .flatMap { parseDate($0, calendar: calendar) } ?? created
         let mood = fields["mood"].flatMap { Int($0) }.map { min(5, max(1, $0)) }
         let fav = ["true", "yes", "1"].contains((fields["favorite"] ?? fields["starred"] ?? "").lowercased())
         // Omega's markdown-folder export lists the entry's files (relative to the note).
@@ -194,7 +213,7 @@ public enum ImportParsers {
             }
             text = text.replacingOccurrences(of: "!\\[[^\\]]*\\]\\(dayone-moment://[^)]*\\)", with: "", options: .regularExpression)
             let parsed = OmegaCore.parseMarkdownImport(text: text.trimmingCharacters(in: .whitespacesAndNewlines), fallbackTitle: "Day One entry")
-            let modified = (e["modifiedDate"] as? String).flatMap(parseDate) ?? created
+            let modified = (e["modifiedDate"] as? String).flatMap { parseDate($0) } ?? created
             let tags = ((e["tags"] as? [String]) ?? []).map { $0.replacingOccurrences(of: " ", with: "-") }
             out.append(ImportedEntry(
                 title: parsed.title, body: parsed.body.trimmingCharacters(in: .whitespacesAndNewlines),
