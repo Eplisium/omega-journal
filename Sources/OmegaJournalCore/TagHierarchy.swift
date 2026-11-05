@@ -126,11 +126,13 @@ public enum TagColors {
         "#8B5CF6", "#EC4899", "#EF4444", "#F59E0B", "#10B981", "#06B6D4", "#3B82F6", "#94A3B8",
     ]
 
-    /// Accepts `#RRGGBB` / `RRGGBB`; returns canonical upper-case `#RRGGBB`, or nil if invalid.
+    /// Accepts `#RRGGBB` / `RRGGBB` (ASCII hex digits only); returns canonical upper-case `#RRGGBB`, or nil if invalid.
     public static func normalizedHex(_ raw: String) -> String? {
         var s = raw.trimmingCharacters(in: .whitespaces).uppercased()
         if s.hasPrefix("#") { s.removeFirst() }
-        guard s.count == 6, s.allSatisfy({ $0.isHexDigit }) else { return nil }
+        // `isHexDigit` alone also accepts full-width forms (`ＡＢＣ１２３`), which
+        // `UInt32(_:radix:)` can't parse, so the colour was stored but never drawn.
+        guard s.count == 6, s.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
         return "#" + s
     }
 
