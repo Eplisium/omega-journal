@@ -28,7 +28,9 @@ extension JournalViewModel {
             selectedEntryId = nil
             Self.markLegacyImportOfferHandled(defaults: defaults)
             let noun = summary.entries == 1 ? "entry" : "entries"
-            showToast("Imported your earlier journal — \(summary.entries) \(noun).")
+            let kept = summary.preImportSnapshot == nil ? ""
+                : " This journal's previous notebooks, templates and settings are saved as a \"Before import\" backup."
+            showToast("Imported your earlier journal — \(summary.entries) \(noun).\(kept)")
             return true
         } catch let error as DatabaseManager.LegacyImportError {
             showToast(error.errorDescription ?? "The import didn't finish.", isError: true)

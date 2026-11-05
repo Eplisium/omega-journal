@@ -661,7 +661,7 @@ struct SettingsView: View {
                 SettingsRowDivider()
                 SettingsRow(
                     title: "Import journal from an earlier version",
-                    subtitle: "Brings in the journal from the version downloaded from GitHub. Works while this journal is still empty."
+                    subtitle: "Brings in the journal from the version downloaded from GitHub. Works while this journal has no entries; notebooks, templates and settings made here are replaced, and a copy is kept in Backups as \"Before import\"."
                 ) {
                     SettingsPillButton(title: "Import…", icon: "tray.and.arrow.down") {
                         vm.chooseAndImportLegacyJournal()
