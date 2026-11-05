@@ -188,13 +188,15 @@ final class JournalViewModel {
         reload()
         loadTemplates()
         persistsViewState = true
-        // Lock/unlock changes which tags may appear in the sidebar, so
-        // re-derive tag counts whenever the biometric session really changes
+        // Lock/unlock changes which tags may appear in the sidebar and what a
+        // hidden entry may match on, so re-derive tag counts and re-run the
+        // active search whenever the biometric session really changes
         // (delivered asynchronously on the main queue, after the change).
-        // This keeps counts in sync without every mutation site needing to
-        // remember to do it.
+        // This covers every lock path (idle relock, App Lock, resign-active)
+        // without every mutation site needing to remember to do it.
         BiometricAuth.shared.observeSessionChanges(owner: self) { [weak self] in
             self?.refreshTagCounts()
+            self?.refreshQuery()
         }
     }
 
@@ -523,6 +525,9 @@ final class JournalViewModel {
         // Tag counts must re-derive immediately: the locked sidebar must not
         // advertise tags used on hidden entries (privacy rule in AGENTS.md).
         refreshTagCounts()
+        // Search results were computed unlocked; a locked hidden entry may now
+        // match on its title only, so re-run the query before anything renders.
+        refreshQuery()
     }
 
     // MARK: - Selection & editing

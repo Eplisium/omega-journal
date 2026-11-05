@@ -190,6 +190,41 @@ struct AuditFixVMTests {
         #expect(vm.db.fetchEntry(id: next.id) != nil)
     }
 
+    // MARK: vm-4 / browse-2 — every lock path re-masks the search results
+
+    @Test("locking re-runs the active search so hidden body matches disappear")
+    func lockRefreshesSearchResults() throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        BiometricAuth.shared.setAuthenticatedForTesting(true)
+        let h = vm.createEntry(title: "Ordinary title", body: "the zebrafish secret", isHidden: true)
+        vm.stopEditing()
+        vm.searchText = "zebrafish"
+        vm.refreshQuery()
+        #expect(vm.libraryEntries.map(\.id) == [h.id])
+        vm.lockHiddenEntries()
+        #expect(vm.hiddenLocked)
+        #expect(!vm.libraryEntries.contains { $0.id == h.id })
+    }
+
+    @Test("a lock that bypasses lockHiddenEntries (idle relock) also re-masks search; unlock re-reveals")
+    func sessionObserverRefreshesSearch() async throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        BiometricAuth.shared.setAuthenticatedForTesting(true)
+        let h = vm.createEntry(title: "Plain", body: "quokkacodeword appointment", isHidden: true)
+        vm.stopEditing()
+        vm.searchText = "quokkacodeword"
+        vm.refreshQuery()
+        #expect(vm.libraryEntries.map(\.id) == [h.id])
+        BiometricAuth.shared.setAuthenticatedForTesting(false)   // what BiometricAuth.lock() does
+        try await Task.sleep(nanoseconds: 100_000_000)         // observers run async on main
+        #expect(!vm.libraryEntries.contains { $0.id == h.id })
+        BiometricAuth.shared.setAuthenticatedForTesting(true)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(vm.libraryEntries.map(\.id) == [h.id])
+    }
+
     // MARK: vm-6 — reload reconciles dangling editor/selection ids
 
     @Test("moving the edited entry out of the active notebook closes the editor for good")
