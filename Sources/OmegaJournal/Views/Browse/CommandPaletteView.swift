@@ -47,6 +47,76 @@ struct CommandPaletteView: View {
         return base + " · \(entry.wordCount)w"
     }
 
+    /// An Entry-group command for the selection.
+    nonisolated enum EntryAction: Equatable {
+        case edit, togglePin, toggleFavorite, duplicate, archive, unarchive, moveToTrash
+        case restore, deleteForever
+
+        func title(for entry: JournalEntry) -> String {
+            switch self {
+            case .edit: "Edit “\(entry.displayTitle)”"
+            case .togglePin: entry.isPinned ? "Unpin Entry" : "Pin Entry"
+            case .toggleFavorite: entry.isFavorite ? "Remove Favorite" : "Favorite Entry"
+            case .duplicate: "Duplicate Entry"
+            case .archive: "Archive Entry"
+            case .unarchive: "Unarchive Entry"
+            case .moveToTrash: "Move to Trash"
+            case .restore: "Restore from Trash"
+            case .deleteForever: "Delete Forever"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .edit: "pencil"
+            case .togglePin: "pin"
+            case .toggleFavorite: "star"
+            case .duplicate: "doc.on.doc"
+            case .archive: "archivebox"
+            case .unarchive: "tray.and.arrow.up"
+            case .moveToTrash: "trash"
+            case .restore: "arrow.uturn.backward"
+            case .deleteForever: "trash.slash"
+            }
+        }
+    }
+
+    /// The Entry commands for the selection, by lifecycle (as the row's
+    /// context menu does). A trashed entry offers only Restore and Delete
+    /// Forever: editing, pinning or archiving it made no sense, and "Move to
+    /// Trash" again restarted its 30-day clock. An archived entry offers
+    /// Unarchive — "Archive Entry" used to toggle it back out of the archive.
+    nonisolated static func entryActions(for entry: JournalEntry) -> [EntryAction] {
+        if entry.isTrashed { return [.restore, .deleteForever] }
+        return [.edit, .togglePin, .toggleFavorite, .duplicate, entry.isArchived ? .unarchive : .archive, .moveToTrash]
+    }
+
+    private func run(_ action: EntryAction, on entry: JournalEntry) {
+        switch action {
+        case .edit: vm.startEditing(entry)
+        case .togglePin: vm.togglePin(entry)
+        case .toggleFavorite: vm.toggleFavorite(entry)
+        case .duplicate: vm.duplicate(entry)
+        case .archive, .unarchive: vm.toggleArchive(entry)
+        case .moveToTrash: vm.deleteEntry(entry)
+        case .restore: vm.restoreFromTrash(entry)
+        case .deleteForever: if Self.confirmDeleteForever() { vm.deleteForever(entry) }
+        }
+    }
+
+    /// The palette has closed by the time a command runs, so Delete Forever
+    /// asks with an alert of its own (the row dialog's wording).
+    private static func confirmDeleteForever() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete this entry forever?"
+        alert.informativeText = "This cannot be undone. The entry and its attachments will be permanently removed."
+        alert.addButton(withTitle: "Delete Forever")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     private var commands: [Command] {
         var list: [Command] = [
             Command(title: "New Entry", subtitle: "Start writing", icon: "square.and.pencil", group: "Create") {
@@ -72,28 +142,15 @@ struct CommandPaletteView: View {
             })
         }
 
-        // Entry actions on the current selection
+        // Entry actions on the current selection, following its lifecycle.
         if let entry = vm.selectedEntry {
-            list.append(contentsOf: [
-                Command(title: "Edit “\(entry.displayTitle)”", subtitle: "Open in editor", icon: "pencil", group: "Entry") {
-                    vm.startEditing(entry)
-                },
-                Command(title: entry.isPinned ? "Unpin Entry" : "Pin Entry", subtitle: entry.displayTitle, icon: "pin", group: "Entry") {
-                    vm.togglePin(entry)
-                },
-                Command(title: entry.isFavorite ? "Remove Favorite" : "Favorite Entry", subtitle: entry.displayTitle, icon: "star", group: "Entry") {
-                    vm.toggleFavorite(entry)
-                },
-                Command(title: "Duplicate Entry", subtitle: entry.displayTitle, icon: "doc.on.doc", group: "Entry") {
-                    vm.duplicate(entry)
-                },
-                Command(title: "Archive Entry", subtitle: entry.displayTitle, icon: "archivebox", group: "Entry") {
-                    vm.toggleArchive(entry)
-                },
-                Command(title: "Move to Trash", subtitle: entry.displayTitle, icon: "trash", group: "Entry") {
-                    vm.deleteEntry(entry)
-                },
-            ])
+            for action in Self.entryActions(for: entry) {
+                list.append(Command(title: action.title(for: entry),
+                                    subtitle: action == .edit ? "Open in editor" : entry.displayTitle,
+                                    icon: action.icon, group: "Entry") {
+                    run(action, on: entry)
+                })
+            }
         }
 
         // Sorting

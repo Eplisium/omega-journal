@@ -243,6 +243,28 @@ struct AuditFixBrowseSaveSearchTests {
     }
 }
 
+// MARK: - browse-8 (palette half)
+
+@Suite("Audit fix browse: palette entry commands follow the lifecycle")
+@MainActor
+struct AuditFixBrowsePaletteTests {
+    typealias A = CommandPaletteView.EntryAction
+
+    @Test("library, archived and trashed selections get their own commands")
+    func actionsByLifecycle() {
+        let library = AuditFixBrowseSupport.entry()
+        #expect(CommandPaletteView.entryActions(for: library) == [.edit, .togglePin, .toggleFavorite, .duplicate, .archive, .moveToTrash])
+        let archived = AuditFixBrowseSupport.entry(archived: true)
+        let archivedActions = CommandPaletteView.entryActions(for: archived)
+        #expect(archivedActions.contains(.unarchive) && !archivedActions.contains(.archive))
+        #expect(A.unarchive.title(for: archived) == "Unarchive Entry")
+        let trashed = AuditFixBrowseSupport.entry(archived: true, trashed: true)
+        #expect(CommandPaletteView.entryActions(for: trashed) == [.restore, .deleteForever])
+        #expect(A.restore.title(for: trashed) == "Restore from Trash")
+        #expect(A.deleteForever.title(for: trashed) == "Delete Forever")
+    }
+}
+
 // MARK: - browse-11
 
 @Suite("Audit fix browse: Today rolls over")
