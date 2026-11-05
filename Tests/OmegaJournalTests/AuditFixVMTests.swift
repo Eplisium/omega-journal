@@ -255,4 +255,28 @@ struct AuditFixVMTests {
         #expect(vm.editingEntryId == nil)
         #expect(!vm.isZenMode)
     }
+
+    // MARK: browse-8 (VM half) — trashing an already-trashed entry is a no-op
+
+    @Test("Move to Trash on an entry already in Trash keeps its retention and pushes no Undo")
+    func trashingTrashedEntryIsNoOp() throws {
+        let (vm, root) = try Self.makeVM()
+        defer { Self.tearDown(vm, root) }
+        let e = vm.createEntry(title: "VM old trash", body: "x")
+        vm.stopEditing()
+        vm.deleteEntry(e)
+        let twentyDaysAgo = Date().addingTimeInterval(-20 * 86_400).timeIntervalSince1970
+        #expect(vm.db.exec("UPDATE entries SET deleted_at = \(twentyDaysAgo) WHERE id = '\(e.id)';"))
+        vm.reload()
+        let selected = try #require(vm.entry(id: e.id))
+        #expect(selected.daysInTrash >= 19)
+        vm.selectedEntryId = selected.id
+        let depth = vm.undoDepth
+        vm.toast = nil
+        vm.deleteEntry(try #require(vm.selectedEntry))   // palette "Move to Trash"
+        #expect(try #require(vm.db.fetchEntry(id: e.id)).daysInTrash >= 19)
+        #expect(vm.undoDepth == depth)
+        #expect(vm.toast == nil)
+        #expect(vm.selectedEntryId == e.id)
+    }
 }

@@ -44,6 +44,10 @@ extension JournalViewModel {
 
     /// Moves an entry to the trash (recoverable for 30 days).
     func deleteEntry(_ entry: JournalEntry, toast message: String = "Moved to Trash") {
+        // Already in Trash (e.g. the palette's "Move to Trash" on a trashed
+        // selection): trashing again would restart its 30-day retention and
+        // push an Undo that pulls it out of Trash.
+        guard !entry.isTrashed, self.entry(id: entry.id)?.isTrashed != true else { return }
         // A pending autosave captured the pre-trash snapshot (deletedAt == nil);
         // letting it fire later would overwrite deleted_at and resurrect the
         // entry, and cancelling it would lose the edit. Save it now, THEN trash.
