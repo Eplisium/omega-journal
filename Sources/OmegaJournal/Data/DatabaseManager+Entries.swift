@@ -511,26 +511,45 @@ extension DatabaseManager {
         return 0
     }
 
-    /// Entry count since a timestamp — used by goal tracking.
-    func entryCount(since: Date) -> Int {
-        let sql = "SELECT COUNT(*) FROM entries WHERE deleted_at IS NULL AND is_archived = 0 AND created_at >= ?;"
-        guard let stmt = try? prepare(sql) else { return 0 }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
-        if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int(stmt, 0)) }
-        return 0
+    /// Start of tomorrow: goal windows end here, so an entry dated later
+    /// (planned from the Calendar) never counts as written.
+    static func endOfToday(now: Date = Date(), calendar: Calendar = .current) -> Date {
+        let start = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(24 * 3600)
     }
 
-    /// Sum of word counts since a timestamp — used by goal tracking.
-    /// Reads the stored `word_count` column so no body text is loaded.
-    func wordCountSum(since: Date) -> Int {
-        let sql = "SELECT COALESCE(SUM(word_count), 0) FROM entries WHERE deleted_at IS NULL AND is_archived = 0 AND created_at >= ?;"
+    /// WHERE clause shared by the goal aggregates: live, unarchived entries
+    /// dated in `[since, until)`; hidden entries only while unlocked (locked
+    /// hidden entries never contribute word counts).
+    private func goalWindowClause(includeHidden: Bool) -> String {
+        "deleted_at IS NULL AND is_archived = 0 AND created_at >= ? AND created_at < ?"
+            + (includeHidden ? "" : " AND is_hidden = 0")
+    }
+
+    /// Entry count since a timestamp — used by goal tracking. Ends at `until`
+    /// (default: end of today) and skips hidden entries unless
+    /// `includeHidden` (default: the current biometric session).
+    func entryCount(since: Date, until: Date? = nil,
+                    includeHidden: Bool = BiometricAuth.shared.isAuthenticated) -> Int {
+        goalAggregate("SELECT COUNT(*) FROM entries WHERE \(goalWindowClause(includeHidden: includeHidden));",
+                      since: since, until: until ?? Self.endOfToday())
+    }
+
+    /// Sum of word counts since a timestamp — used by goal tracking and the
+    /// editor goal ring. Reads the stored `word_count` column so no body text
+    /// is loaded. Same window and hidden-entry rule as `entryCount(since:)`.
+    func wordCountSum(since: Date, until: Date? = nil,
+                      includeHidden: Bool = BiometricAuth.shared.isAuthenticated) -> Int {
+        goalAggregate("SELECT COALESCE(SUM(word_count), 0) FROM entries WHERE \(goalWindowClause(includeHidden: includeHidden));",
+                      since: since, until: until ?? Self.endOfToday())
+    }
+
+    private func goalAggregate(_ sql: String, since: Date, until: Date) -> Int {
         guard let stmt = try? prepare(sql) else { return 0 }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            return Int(sqlite3_column_int(stmt, 0))
-        }
+        sqlite3_bind_double(stmt, 2, until.timeIntervalSince1970)
+        if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int64(stmt, 0)) }
         return 0
     }
 }

@@ -87,10 +87,20 @@ final class GoalManager {
     static let weeklyStreakTargetKey = "streak_weeklyTarget"
 
     private let db: DatabaseManager
+    /// Whose lock state decides whether hidden entries count (tests inject
+    /// their own instance so the shared session stays untouched).
+    private let auth: BiometricAuth
+    /// Re-derives the goals at midnight; released (and unregistered) with us.
+    @ObservationIgnored private var dayChangeObservation: NotificationObservation?
 
-    init(db: DatabaseManager) {
+    init(db: DatabaseManager, auth: BiometricAuth = .shared) {
         self.db = db
+        self.auth = auth
         loadGoals()
+        // Locked hidden entries never contribute words, so the numbers change
+        // with the session; "today" changes at midnight (and with the clock).
+        auth.observeSessionChanges(owner: self) { [weak self] in self?.loadGoals() }
+        dayChangeObservation = NotificationObservation(.NSCalendarDayChanged) { [weak self] in self?.loadGoals() }
     }
 
     func setStreakMode(_ mode: StreakMode) {
@@ -124,15 +134,19 @@ final class GoalManager {
         let weeklyWordsTarget = savedTarget(for: .weeklyWords)
 
         let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
+        let now = Date()
+        let today = cal.startOfDay(for: now)
         let weekStart = cal.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        // Both windows end tonight: a future-dated entry is not writing done.
+        let end = DatabaseManager.endOfToday(now: now, calendar: cal)
+        let unlocked = auth.isAuthenticated
 
         // SQL-side computation — avoids loading every entry into memory just to
         // count four numbers.
-        let dailyWords = db.wordCountSum(since: today)
-        let dailyEntryCount = db.entryCount(since: today)
-        let weeklyWords = db.wordCountSum(since: weekStart)
-        let weeklyEntryCount = db.entryCount(since: weekStart)
+        let dailyWords = db.wordCountSum(since: today, until: end, includeHidden: unlocked)
+        let dailyEntryCount = db.entryCount(since: today, until: end, includeHidden: unlocked)
+        let weeklyWords = db.wordCountSum(since: weekStart, until: end, includeHidden: unlocked)
+        let weeklyEntryCount = db.entryCount(since: weekStart, until: end, includeHidden: unlocked)
 
         goals = [
             .goal(for: .dailyWords, target: dailyWordsTarget, current: dailyWords),
@@ -167,4 +181,20 @@ final class GoalManager {
             db.setSetting(type.storageKey, value: legacy)
         }
     }
+}
+
+/// A NotificationCenter block registration delivered on the main queue that
+/// unregisters itself when released, so short-lived owners (tests build many
+/// GoalManagers) leave nothing behind. `NSCalendarDayChanged` is posted from a
+/// background queue; `queue: .main` hops it to the main thread first.
+private nonisolated final class NotificationObservation {
+    private let token: NSObjectProtocol
+
+    init(_ name: Notification.Name, _ handler: @escaping @MainActor () -> Void) {
+        token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { handler() }
+        }
+    }
+
+    deinit { NotificationCenter.default.removeObserver(token) }
 }
