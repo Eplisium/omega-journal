@@ -40,26 +40,36 @@ struct TodayView: View {
     private let biometricAuth = BiometricAuth.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var recentEntries: [JournalEntry] {
-        // Reflective scope: a future-dated entry is not "recent writing".
-        vm.recentReflectiveEntries(limit: 3)
+    var body: some View {
+        // Everything below reads the clock (greeting, date, today's entry,
+        // recents, On This Day). The schedule re-renders the page at midnight
+        // and at each greeting change, so a Today left open overnight rolls
+        // over. `Date()` (not the tick's date) stays right after a late tick,
+        // e.g. when the Mac slept through midnight.
+        TimelineView(TodayRolloverSchedule()) { _ in
+            page(now: Date())
+        }
     }
 
-    var body: some View {
-        ScrollView {
+    private func page(now: Date) -> some View {
+        let todays = Self.todaysEntry(in: vm.entries, now: now)
+        // Reflective scope: a future-dated entry is not "recent writing".
+        let recent = vm.recentReflectiveEntries(limit: 3, relativeTo: now)
+        let memory = vm.reflectiveOnThisDay(relativeTo: now).first
+        return ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                welcomeHeader
+                welcomeHeader(now: now)
                 // Writing comes first: either continue today's entry or start one.
-                if todaysEntry != nil { heroCard } else { startWritingCard }
+                if let todays { heroCard(todays) } else { startWritingCard }
                 if !vm.entries.isEmpty { statLine }
                 if hasDailyGoals { progressCard }
 
-                if !recentEntries.isEmpty {
-                    recentWriting
+                if !recent.isEmpty {
+                    recentWriting(recent)
                 }
 
-                if !vm.reflectiveOnThisDay.isEmpty {
-                    memoryMoment
+                if let memory {
+                    memoryMoment(memory)
                 }
             }
             .padding(.horizontal, 36)
@@ -73,14 +83,14 @@ struct TodayView: View {
 
     /// Greeting + date + one gentle status line. The primary Write action
     /// lives in the hero card directly below, not floating at the far right.
-    private var welcomeHeader: some View {
+    private func welcomeHeader(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(todayLabel.uppercased())
+            Text(now.formatted(.dateTime.weekday(.wide).month(.wide).day()).uppercased())
                 .font(OmegaTheme.font(.meta, .semibold))
                 .tracking(0.9)
                 .foregroundColor(theme.secondaryTextColor)
 
-            Text(greeting)
+            Text(Self.greeting(at: now))
                 .font(OmegaTheme.font(.title, .bold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .accessibilityAddTraits(.isHeader)
@@ -161,86 +171,85 @@ struct TodayView: View {
 
     // MARK: Hero — today's entry
 
-    private var todaysEntry: JournalEntry? {
-        vm.entries
-            .filter { Calendar.current.isDate($0.createdAt, inSameDayAs: Date()) }
+    /// The newest entry written on `now`'s day (the hero offers to continue
+    /// it). Evaluated against the page's clock, so it lapses at midnight.
+    static func todaysEntry(in entries: [JournalEntry], now: Date, calendar: Calendar = .current) -> JournalEntry? {
+        entries
+            .filter { calendar.isDate($0.createdAt, inSameDayAs: now) }
             .max { $0.createdAt < $1.createdAt }
     }
 
-    @ViewBuilder
-    private var heroCard: some View {
-        if let entry = todaysEntry {
-            let hero = TodayHeroContent(entry: entry, hiddenLocked: !biometricAuth.isAuthenticated)
-            Button { openEntry(entry) } label: {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(entry.mood.color)
-                            .frame(width: 7, height: 7)
-                        Text("Today · \(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
-                            .font(OmegaTheme.font(.meta, .medium))
-                            .foregroundColor(theme.secondaryTextColor)
-                        Spacer()
-                        if !hero.tags.isEmpty {
-                            ForEach(hero.tags.prefix(2), id: \.self) { tag in
-                                Text("#\(tag)")
-                                    .font(OmegaTheme.font(.meta, .medium))
-                                    .foregroundColor(theme.accentColor.opacity(0.9))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-                            }
-                        }
-                    }
-
-                    Text("Today's entry")
-                        .font(OmegaTheme.font(.meta, .semibold))
-                        .tracking(1.0)
+    private func heroCard(_ entry: JournalEntry) -> some View {
+        let hero = TodayHeroContent(entry: entry, hiddenLocked: !biometricAuth.isAuthenticated)
+        return Button { openEntry(entry) } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(entry.mood.color)
+                        .frame(width: 7, height: 7)
+                    Text("Today · \(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+                        .font(OmegaTheme.font(.meta, .medium))
                         .foregroundColor(theme.secondaryTextColor)
-
-                    Text(entry.displayTitle)
-                        .font(OmegaTheme.font(.caption, .semibold, design: .serif))
-                        .foregroundColor(theme.titleTextColor)
-                        .lineLimit(1)
-
-                    Text(hero.preview)
-                        .font(OmegaTheme.font(.caption))
-                        .foregroundColor(theme.bodyTextColor)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-
-                    HStack(spacing: 10) {
-                        Label("Continue writing", systemImage: "pencil.line")
-                            .font(OmegaTheme.font(.caption, .semibold))
-                            .foregroundColor(theme.onAccentColor)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            // The card is the button; its call to action
-                            // reads as a prominent glass capsule on macOS 26.
-                            .ojGlass(.primaryAction, in: Capsule(), tint: theme.accentColor) {
-                                $0.background(Capsule().fill(theme.accentColor))
-                            }
-                        if let words = hero.wordCountText {
-                            Text(words)
-                                .font(OmegaTheme.font(.meta))
-                                .foregroundColor(theme.secondaryTextColor)
+                    Spacer()
+                    if !hero.tags.isEmpty {
+                        ForEach(hero.tags.prefix(2), id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(OmegaTheme.font(.meta, .medium))
+                                .foregroundColor(theme.accentColor.opacity(0.9))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(theme.accentColor.opacity(0.14)))
                         }
-                        Spacer()
                     }
                 }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(theme.cardColor.opacity(0.72))
-                )
-                .shadow(color: theme.accentColor.opacity(0.18), radius: 20, x: 0, y: 6)
-                .contentShape(Rectangle())
-                .hoverGlow(radius: 16, glow: 0.4, border: 0.55)
+
+                Text("Today's entry")
+                    .font(OmegaTheme.font(.meta, .semibold))
+                    .tracking(1.0)
+                    .foregroundColor(theme.secondaryTextColor)
+
+                Text(entry.displayTitle)
+                    .font(OmegaTheme.font(.caption, .semibold, design: .serif))
+                    .foregroundColor(theme.titleTextColor)
+                    .lineLimit(1)
+
+                Text(hero.preview)
+                    .font(OmegaTheme.font(.caption))
+                    .foregroundColor(theme.bodyTextColor)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                HStack(spacing: 10) {
+                    Label("Continue writing", systemImage: "pencil.line")
+                        .font(OmegaTheme.font(.caption, .semibold))
+                        .foregroundColor(theme.onAccentColor)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        // The card is the button; its call to action
+                        // reads as a prominent glass capsule on macOS 26.
+                        .ojGlass(.primaryAction, in: Capsule(), tint: theme.accentColor) {
+                            $0.background(Capsule().fill(theme.accentColor))
+                        }
+                    if let words = hero.wordCountText {
+                        Text(words)
+                            .font(OmegaTheme.font(.meta))
+                            .foregroundColor(theme.secondaryTextColor)
+                    }
+                    Spacer()
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Continue today's entry: \(entry.displayTitle)")
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(theme.cardColor.opacity(0.72))
+            )
+            .shadow(color: theme.accentColor.opacity(0.18), radius: 20, x: 0, y: 6)
+            .contentShape(Rectangle())
+            .hoverGlow(radius: 16, glow: 0.4, border: 0.55)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Continue today's entry: \(entry.displayTitle)")
     }
 
     /// One quiet line instead of three cards: the numbers stay, the visual weight goes.
@@ -298,7 +307,7 @@ struct TodayView: View {
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.42)))
     }
 
-    private var recentWriting: some View {
+    private func recentWriting(_ recentEntries: [JournalEntry]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -381,9 +390,8 @@ struct TodayView: View {
         }
     }
 
-    private var memoryMoment: some View {
-        let entry = vm.reflectiveOnThisDay[0]
-        return Button { openEntry(entry) } label: {
+    private func memoryMoment(_ entry: JournalEntry) -> some View {
+        Button { openEntry(entry) } label: {
             HStack(spacing: 13) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(OmegaTheme.font(.heading, .medium))
@@ -412,17 +420,44 @@ struct TodayView: View {
         .accessibilityLabel("Open memory from this day: \(entry.displayTitle)")
     }
 
-    private var greeting: String {
-        switch Calendar.current.component(.hour, from: Date()) {
+    /// Changes at the hours `TodayRolloverSchedule.boundaryHours` lists.
+    nonisolated static func greeting(at date: Date, calendar: Calendar = .current) -> String {
+        switch calendar.component(.hour, from: date) {
         case 5..<12: "Good morning"
         case 12..<17: "Good afternoon"
         case 17..<22: "Good evening"
         default: "Still awake?"
         }
     }
+}
 
-    private var todayLabel: String {
-        Date().formatted(.dateTime.weekday(.wide).month(.wide).day())
+// MARK: - Midnight / greeting rollover
+
+/// When the Today page has to re-render on its own: every midnight (date,
+/// today's entry, recents, On This Day) and whenever the greeting changes.
+nonisolated struct TodayRolloverSchedule: TimelineSchedule {
+    /// Midnight plus the hours `TodayView.greeting(at:)` switches at.
+    static let boundaryHours = [0, 5, 12, 17, 22]
+
+    var calendar: Calendar = .current
+
+    /// The first boundary strictly after `date`. `.nextTime` keeps a skipped
+    /// midnight (a DST jump at 00:00) on the new day instead of dropping it.
+    static func nextBoundary(after date: Date, calendar: Calendar = .current) -> Date {
+        let candidates = boundaryHours.compactMap {
+            calendar.nextDate(after: date, matching: DateComponents(hour: $0, minute: 0, second: 0),
+                              matchingPolicy: .nextTime)
+        }
+        return candidates.min() ?? date.addingTimeInterval(3_600)
+    }
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        let calendar = calendar
+        var next = startDate
+        return AnyIterator {
+            defer { next = Self.nextBoundary(after: next, calendar: calendar) }
+            return next
+        }
     }
 }
 

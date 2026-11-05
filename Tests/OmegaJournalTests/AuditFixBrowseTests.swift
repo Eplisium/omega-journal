@@ -66,3 +66,51 @@ struct AuditFixBrowseTodayHeroTests {
     }
 }
 
+// MARK: - browse-11
+
+@Suite("Audit fix browse: Today rolls over")
+@MainActor
+struct AuditFixBrowseTodayRolloverTests {
+    let cal = AuditFixBrowseSupport.calendar()
+
+    @Test("the Today schedule ticks at midnight and at every greeting change")
+    func boundaries() {
+        let d = { AuditFixBrowseSupport.date(2026, 11, $0, $1, $2, cal: cal) }
+        #expect(TodayRolloverSchedule.nextBoundary(after: d(5, 23, 58), calendar: cal) == d(6, 0, 0))
+        #expect(TodayRolloverSchedule.nextBoundary(after: d(6, 0, 0), calendar: cal) == d(6, 5, 0))
+        #expect(TodayRolloverSchedule.nextBoundary(after: d(6, 6, 30), calendar: cal) == d(6, 12, 0))
+        #expect(TodayRolloverSchedule.nextBoundary(after: d(6, 12, 0), calendar: cal) == d(6, 17, 0))
+        #expect(TodayRolloverSchedule.nextBoundary(after: d(6, 21, 59), calendar: cal) == d(6, 22, 0))
+        let ticks = Array(TodayRolloverSchedule(calendar: cal).entries(from: d(5, 23, 58), mode: .normal).prefix(4))
+        #expect(ticks == [d(5, 23, 58), d(6, 0, 0), d(6, 5, 0), d(6, 12, 0)])
+    }
+
+    @Test("a skipped midnight (DST) still rolls the day over")
+    func dstMidnight() {
+        let sp = AuditFixBrowseSupport.calendar("America/Sao_Paulo")
+        // 2018-11-04 00:00 did not exist in São Paulo (clocks jumped to 01:00).
+        let before = AuditFixBrowseSupport.date(2018, 11, 3, 23, 30, cal: sp)
+        let next = TodayRolloverSchedule.nextBoundary(after: before, calendar: sp)
+        #expect(next > before)
+        #expect(!sp.isDate(next, inSameDayAs: before))
+    }
+
+    @Test("greeting, date and today's entry follow the clock, not the first render")
+    func followsTheClock() {
+        let late = AuditFixBrowseSupport.date(2026, 11, 5, 23, 58, cal: cal)
+        let morning = AuditFixBrowseSupport.date(2026, 11, 6, 8, 0, cal: cal)
+        #expect(TodayView.greeting(at: late, calendar: cal) == "Still awake?")
+        #expect(TodayView.greeting(at: morning, calendar: cal) == "Good morning")
+        let yesterday = AuditFixBrowseSupport.entry(title: "late night", createdAt: late.addingTimeInterval(-60))
+        #expect(TodayView.todaysEntry(in: [yesterday], now: late, calendar: cal)?.id == yesterday.id)
+        #expect(TodayView.todaysEntry(in: [yesterday], now: morning, calendar: cal) == nil)
+    }
+
+    @Test("the Today page is driven by the rollover schedule")
+    func todayUsesTimeline() throws {
+        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        let view = TodayView(vm: vm, openJournal: {}, openCalendar: {}, openInsights: {}, openEntry: { _ in })
+        #expect(String(describing: type(of: view.body)).contains("TodayRolloverSchedule"))
+    }
+}
+
