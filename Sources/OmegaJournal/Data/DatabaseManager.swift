@@ -137,6 +137,10 @@ final class DatabaseManager {
 
     func bootstrap() {
         try? FileManager.default.createDirectory(atPath: attachmentsDir, withIntermediateDirectories: true)
+        if isPrimaryInstance {
+            // Decrypted restore/verify/import copies a crash left next to the journal.
+            Self.removeStagingLeftovers(in: URL(fileURLWithPath: dbPath).deletingLastPathComponent())
+        }
         openDatabase()
         guard !openFailed else { return }
         JournalCrypto.registerEncryptedDataProbe(owner: self) { [weak self] in self?.hasEncryptedRows() ?? false }

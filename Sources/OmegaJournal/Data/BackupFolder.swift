@@ -141,6 +141,14 @@ extension DatabaseManager {
         return all.sorted { $0.date > $1.date }
     }
 
+    /// Where `verifyBackup` stages its decrypted copy: next to the live
+    /// database (like restore), not in the shared system temp folder. A crash
+    /// leftover is swept at the next launch (`removeStagingLeftovers`).
+    func backupVerificationStagingURL() -> URL {
+        URL(fileURLWithPath: dbPath).deletingLastPathComponent()
+            .appendingPathComponent("\(Self.verifyStagingPrefix)\(UUID().uuidString).sqlite3")
+    }
+
     /// Decrypts and validates a backup without touching the live database.
     func verifyBackup(at url: URL) throws -> BackupVerification {
         let fm = FileManager.default
@@ -152,9 +160,10 @@ extension DatabaseManager {
         if raw.starts(with: Data("SQLite format 3\0".utf8)) { plain = raw }
         else if let opened = try? JournalCrypto.decrypt(raw) { plain = opened }
         else { throw RestoreError.invalid("The backup could not be decrypted (wrong key or corrupted file).") }
-        let tmp = fm.temporaryDirectory.appendingPathComponent("verify-\(UUID().uuidString).sqlite3")
+        let tmp = backupVerificationStagingURL()
         defer { for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: tmp.path + suffix) } }
         try plain.write(to: tmp, options: .atomic)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp.path)
         try Self.validateDatabaseFile(at: tmp.path, maxVersion: Self.currentSchemaVersion)
         var h: OpaquePointer?
         guard sqlite3_open_v2(tmp.path, &h, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let handle = h else {

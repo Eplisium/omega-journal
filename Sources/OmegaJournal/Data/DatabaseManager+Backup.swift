@@ -164,7 +164,7 @@ extension DatabaseManager {
             throw RestoreError.invalid("The backup could not be decrypted (wrong key or corrupted file).")
         }
         let dir = URL(fileURLWithPath: dbPath).deletingLastPathComponent()
-        let staging = dir.appendingPathComponent("restore-staging-\(UUID().uuidString).sqlite3")
+        let staging = dir.appendingPathComponent("\(Self.restoreStagingPrefix)\(UUID().uuidString).sqlite3")
         defer {
             for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: staging.path + suffix) }
         }
@@ -218,6 +218,38 @@ extension DatabaseManager {
         encryptionKeyError = nil
         JournalCrypto.resetKeyFailureCache()
         reconcileTagStorage()
+    }
+
+    // MARK: - Staging leftovers
+
+    /// Decrypted copies staged next to the live database (restore, backup
+    /// verification, legacy import). Each is removed by `defer`, so one only
+    /// survives a crash or force-quit mid-operation.
+    nonisolated static let restoreStagingPrefix = "restore-staging-"
+    nonisolated static let verifyStagingPrefix = "verify-staging-"
+    nonisolated static let importStagingPrefix = "import-staging-"
+
+    /// Leftovers younger than this may belong to an operation still running
+    /// in another process on the same journal, so they are left alone.
+    nonisolated static let stagingLeftoverMinimumAge: TimeInterval = 10 * 60
+
+    /// Removes crash leftovers of the staging copies above from `directory`
+    /// (the journal folder). Returns the names removed.
+    @discardableResult
+    nonisolated static func removeStagingLeftovers(in directory: URL, now: Date = Date()) -> [String] {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
+        else { return [] }
+        var removed: [String] = []
+        for url in items {
+            let name = url.lastPathComponent
+            guard [restoreStagingPrefix, verifyStagingPrefix, importStagingPrefix].contains(where: { name.hasPrefix($0) }) else { continue }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            guard now.timeIntervalSince(modified) >= stagingLeftoverMinimumAge else { continue }
+            if (try? fm.removeItem(at: url)) != nil { removed.append(name) }
+        }
+        return removed
     }
 
     /// Opens a database file read-only and checks it looks like a journal.

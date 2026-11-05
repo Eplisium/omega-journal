@@ -560,3 +560,111 @@ struct AuditFixDataKeyFailureCacheTests {
     }
 }
 
+// MARK: - DATA-7
+
+@Suite("Audit fix data: decrypted copies stay out of the shared temp folder (DATA-7)", .serialized)
+@MainActor
+struct AuditFixDataTempFileTests {
+    init() { MASDataTestEnv.ensureIsolated() }
+
+    /// Source of a file in this package (`Tests/OmegaJournalTests/x.swift` → `Sources/…`).
+    static func packageSource(_ relative: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(relative), encoding: .utf8)
+    }
+
+    /// The body of `func <name>(` up to the next top-level member.
+    static func functionBody(_ source: String, _ signature: String) -> String? {
+        guard let start = source.range(of: signature) else { return nil }
+        let rest = source[start.upperBound...]
+        let end = rest.range(of: "\n    func ") ?? rest.range(of: "\n    @discardableResult") ?? rest.range(of: "\n}")
+        return String(rest[..<(end?.lowerBound ?? rest.endIndex)])
+    }
+
+    @Test("an .ojenc import decodes the decrypted JSON in memory, never via a temp file")
+    func ojencImportInMemory() throws {
+        let (root, _, db) = AuditFixDataEnv.tempDB("ojenc")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vm = JournalViewModel(database: db)
+        var e = JournalEntry.new()
+        e.title = "Exported"
+        e.body = "kangaroosecretomega"
+        let file = root.appendingPathComponent("export.ojenc")
+        try ExportManager.exportEncrypted([e], to: file, passphrase: "correct horse", iterations: 1_000)
+        #expect(vm.importEncryptedExport(from: file, passphrase: "correct horse") == 1)
+        #expect(db.fetchEntry(id: e.id)?.body == "kangaroosecretomega")
+        #expect(vm.importEncryptedExport(from: file, passphrase: "wrong") == 0)
+        // The in-memory entry point the .ojenc path uses: plain bytes in, no URL.
+        var other = JournalEntry.new()
+        other.title = "From bytes"
+        let json = try ExportManager.jsonData([other], db: db)
+        #expect(vm.importJSON(data: json) == 1)
+        #expect(db.fetchEntry(id: other.id)?.title == "From bytes")
+        #expect(vm.importJSON(data: json) == 0)   // ids are never overwritten
+        // Guard: the decrypted export (every body, hidden ones too) must not be
+        // staged as a plaintext file a crash would leave in the temp folder.
+        let source = try Self.packageSource("Sources/OmegaJournal/Data/ImportService.swift")
+        let body = try #require(Self.functionBody(source, "func importEncryptedExport("))
+        #expect(!body.contains("temporaryDirectory") && !body.contains(".write(to:"))
+    }
+
+    @Test("verifying a backup stages its decrypted copy next to the journal and removes it")
+    func verifyBackupStagesNextToJournal() throws {
+        let (root, _, db) = AuditFixDataEnv.tempDB("verify")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var e = JournalEntry.new()
+        e.body = "verify me"
+        #expect(db.saveEntry(e))
+        let backup = try #require(db.backupNow())
+        let staging = db.backupVerificationStagingURL()
+        #expect(staging.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL)
+        #expect(staging.lastPathComponent.hasPrefix(DatabaseManager.verifyStagingPrefix))
+        let result = try db.verifyBackup(at: backup)
+        #expect(result.entryCount == 1)
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        #expect(!leftovers.contains { $0.hasPrefix(DatabaseManager.verifyStagingPrefix) })
+        // Guard: verifyBackup uses that seam, not the shared system temp folder.
+        let source = try Self.packageSource("Sources/OmegaJournal/Data/BackupFolder.swift")
+        let body = try #require(Self.functionBody(source, "func verifyBackup("))
+        #expect(body.contains("backupVerificationStagingURL()"))
+        #expect(!body.contains("temporaryDirectory"))
+    }
+
+    @Test("crash leftovers of decrypted copies are swept: system temp names and journal-folder staging files")
+    func crashSweepCoversAllPrefixes() throws {
+        let dir = MASDataTestEnv.tempDir("auditfix-data-sweep")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fm = FileManager.default
+        let uuid = UUID().uuidString
+        let legacy = ["omega-open-\(uuid)-photo.jpg", "ojimport-\(uuid).json",
+                      "verify-\(uuid).sqlite3", "verify-\(uuid).sqlite3-wal", "verify-\(uuid).sqlite3-shm"]
+        let unrelated = ["ojimport-notes.json", "verify-report.sqlite3", "other-app.json"]
+        for n in legacy + unrelated { fm.createFile(atPath: dir.appendingPathComponent(n).path, contents: Data("x".utf8)) }
+        JournalCrypto.removeLegacyDecryptedFiles(in: dir)
+        let left = Set((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+        #expect(left == Set(unrelated))
+
+        // Journal-folder staging copies: old ones go, fresh ones (a live
+        // operation in another process) and the journal itself stay.
+        let journalDir = MASDataTestEnv.tempDir("auditfix-data-staging")
+        defer { try? FileManager.default.removeItem(at: journalDir) }
+        let old = Date().addingTimeInterval(-3600)
+        let stale = ["restore-staging-\(uuid).sqlite3", "verify-staging-\(uuid).sqlite3-wal"]
+        for n in stale {
+            let path = journalDir.appendingPathComponent(n).path
+            fm.createFile(atPath: path, contents: Data("x".utf8))
+            try fm.setAttributes([.modificationDate: old], ofItemAtPath: path)
+        }
+        let importDir = journalDir.appendingPathComponent("import-staging-\(uuid)", isDirectory: true)
+        try fm.createDirectory(at: importDir, withIntermediateDirectories: true)
+        fm.createFile(atPath: importDir.appendingPathComponent("omega_journal.sqlite3").path, contents: Data("x".utf8))
+        try fm.setAttributes([.modificationDate: old], ofItemAtPath: importDir.path)
+        let fresh = "verify-staging-\(UUID().uuidString).sqlite3"
+        fm.createFile(atPath: journalDir.appendingPathComponent(fresh).path, contents: Data("x".utf8))
+        fm.createFile(atPath: journalDir.appendingPathComponent("omega_journal.sqlite3").path, contents: Data("x".utf8))
+        let removed = DatabaseManager.removeStagingLeftovers(in: journalDir)
+        #expect(Set(removed) == Set(stale + [importDir.lastPathComponent]))
+        let remaining = Set((try? fm.contentsOfDirectory(atPath: journalDir.path)) ?? [])
+        #expect(remaining == [fresh, "omega_journal.sqlite3"])
+    }
+}

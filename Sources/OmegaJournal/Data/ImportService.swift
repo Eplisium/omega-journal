@@ -270,17 +270,91 @@ extension JournalViewModel {
     }
 
     /// Opens a passphrase-protected `.ojenc` export (or plain JSON) and imports it.
+    /// The decrypted JSON is decoded in memory: it carries every entry body
+    /// (hidden ones too), revisions and attachments, so it must never be
+    /// written to a temp file a crash could leave behind.
     @discardableResult
     func importEncryptedExport(from url: URL, passphrase: String) -> Int {
+        let plain: Data
         do {
             let raw = try Data(contentsOf: url)
-            let plain = try PassphraseVault.open(raw, passphrase: passphrase)
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ojimport-\(UUID().uuidString).json")
-            defer { try? FileManager.default.removeItem(at: tmp) }
-            try plain.write(to: tmp, options: .atomic)
-            return importJSON(from: tmp)
+            plain = try PassphraseVault.open(raw, passphrase: passphrase)
         } catch {
             showToast(error.localizedDescription, isError: true)
+            return 0
+        }
+        return importJSON(data: plain)
+    }
+
+    /// Imports a JSON export already in memory (`importJSON(from:)` reads the
+    /// file; `.ojenc` imports pass the decrypted bytes). Returns the number
+    /// added. Existing ids (active, archived, hidden OR trashed) are never
+    /// overwritten.
+    @discardableResult
+    func importJSON(data: Data) -> Int {
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let export = try decoder.decode(ExportManager.JSONExport.self, from: data)
+            guard let stored = allStoredEntries() else {
+                showToast("Import aborted: couldn't read the existing journal safely", isError: true)
+                return 0
+            }
+            flushBeforeImmediateMutation()
+            var knownIDs = Set(stored.map(\.id))
+            var added = 0
+            var skipped = 0
+            var pendingAttachments: [(id: String, items: [ExportManager.DecodedAttachment])] = []
+            // One transaction for the whole file: a failure leaves the journal
+            // untouched instead of half-imported, and there is one commit/FTS
+            // pass instead of one per entry.
+            let committed = db.inTransaction {
+              for je in export.entries {
+                guard knownIDs.insert(je.id).inserted else { skipped += 1; continue }
+                var entry = JournalEntry(
+                    id: je.id, title: ImportParsers.normalizeNewlines(je.title), body: ImportParsers.normalizeNewlines(je.body),
+                    mood: Mood(rawValue: je.mood) ?? .neutral,
+                    tags: OmegaCore.normalizeTags(je.tags),
+                    createdAt: je.createdAt, updatedAt: je.updatedAt,
+                    isPinned: je.isPinned, isFavorite: je.isFavorite,
+                    isArchived: je.isArchived ?? false,
+                    deletedAt: je.deletedAt,
+                    isHidden: je.isHidden ?? false,
+                    attachments: []
+                )
+                entry.journalId = db.ensureJournal(id: je.journalId, name: je.journalName)
+                db.saveEntry(entry)
+                added += 1
+                let atts = ExportManager.decodeAttachments(je)
+                if !atts.isEmpty { pendingAttachments.append((je.id, atts)) }
+                for r in je.revisions ?? [] {
+                    // A revision that can't be stored fails the whole import (rolled back)
+                    // rather than silently dropping history the file carried.
+                    if !db.importRevision(entryId: je.id, title: r.title, body: ImportParsers.normalizeNewlines(r.body),
+                                          createdAt: r.createdAt, isAuto: r.isAuto ?? true) {
+                        db.flagTransactionFailure()
+                    }
+                }
+              }
+            }
+            guard committed else {
+                reload()
+                showToast("Import failed and was rolled back — no entries were added", isError: true)
+                return 0
+            }
+            // Attachment files are written only after the entries committed.
+            for (id, items) in pendingAttachments {
+                for a in items { _ = db.saveAttachment(entryId: id, data: a.data, filename: a.filename, mimeType: a.mimeType) }
+            }
+            reload()
+            if added == 0 {
+                showToast("Nothing new to import (\(skipped) already in your journal)")
+            } else {
+                showToast("Imported \(added) \(added == 1 ? "entry" : "entries")" + (skipped > 0 ? ", skipped \(skipped) already present" : ""))
+            }
+            return added
+        } catch {
+            showToast("Import failed: \(error.localizedDescription)", isError: true)
             return 0
         }
     }

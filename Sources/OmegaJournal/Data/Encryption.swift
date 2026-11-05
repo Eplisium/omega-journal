@@ -273,15 +273,31 @@ enum JournalCrypto {
         return temp
     }
 
-    /// Removes every decrypted temp copy, including legacy `omega-open-*`
-    /// files that older builds left directly in the system temp directory.
+    /// Removes every decrypted temp copy, including plaintext files that
+    /// older builds left directly in the system temp directory.
     nonisolated static func cleanupTemporaryFiles() {
         let fm = FileManager.default
         try? fm.removeItem(at: temporaryDirectory)
-        if let legacy = try? fm.contentsOfDirectory(at: fm.temporaryDirectory, includingPropertiesForKeys: nil) {
-            for url in legacy where url.lastPathComponent.hasPrefix("omega-open-") {
-                try? fm.removeItem(at: url)
-            }
+        removeLegacyDecryptedFiles(in: fm.temporaryDirectory)
+    }
+
+    /// Plaintext copies older builds wrote straight into the system temp
+    /// directory and removed only on success: decrypted attachments
+    /// (`omega-open-*`), `.ojenc` imports (`ojimport-<UUID>.json`) and backup
+    /// verification copies (`verify-<UUID>.sqlite3` + -wal/-shm). The UUID
+    /// shape keeps the sweep off other apps' files in a shared temp folder.
+    nonisolated static func isLegacyDecryptedTempName(_ name: String) -> Bool {
+        if name.hasPrefix("omega-open-") { return true }
+        let uuid = "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+        return name.range(of: "^ojimport-\(uuid)\\.json$", options: .regularExpression) != nil
+            || name.range(of: "^verify-\(uuid)\\.sqlite3(-wal|-shm)?$", options: .regularExpression) != nil
+    }
+
+    nonisolated static func removeLegacyDecryptedFiles(in directory: URL) {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+        for url in items where isLegacyDecryptedTempName(url.lastPathComponent) {
+            try? fm.removeItem(at: url)
         }
     }
 

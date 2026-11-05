@@ -87,7 +87,7 @@ extension DatabaseManager {
 
         // 1. Stage a copy of the source database next to ours and fold its WAL
         //    in, so the source folder is only ever read.
-        let staging = currentDir.appendingPathComponent("import-staging-\(UUID().uuidString)", isDirectory: true)
+        let staging = currentDir.appendingPathComponent("\(Self.importStagingPrefix)\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: staging) }
         let stagedDB = staging.appendingPathComponent(dbFile)
         do {
