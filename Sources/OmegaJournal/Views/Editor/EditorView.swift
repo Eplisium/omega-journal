@@ -170,7 +170,8 @@ struct EditorView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .formatCommand)) { note in
-            if let cmd = note.object as? MarkdownCommand { controller.apply(cmd) }
+            // Menu shortcuts only format the body when it (or nothing text-like) has focus.
+            if let cmd = note.object as? MarkdownCommand { controller.applyMenuCommand(cmd) }
         }
         .onAppear {
             if title.isEmpty { titleFocused = true }

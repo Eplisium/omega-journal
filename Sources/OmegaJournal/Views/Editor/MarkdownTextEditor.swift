@@ -131,6 +131,25 @@ final class MarkdownEditorController {
         tv.applyMarkdownCommand(command)
     }
 
+    /// A Format-menu shortcut (posted app-wide as `.formatCommand`). Applied
+    /// only when it is meant for the body: ⌘B while typing in the Title, tag
+    /// or find field must not edit the body out of sight.
+    func applyMenuCommand(_ command: MarkdownCommand) {
+        guard let tv = textView else { return }
+        let focusWindow = NSApp?.keyWindow ?? tv.window
+        guard Self.menuCommandTargetsBody(focused: focusWindow?.firstResponder, body: tv) else { return }
+        apply(command)
+    }
+
+    /// The body takes a menu command when it has focus, or when nothing
+    /// text-like does (no field to type in, e.g. right after a click on the
+    /// toolbar). Any other text input — a field editor for the Title/tag
+    /// fields, the find bar, another text view — owns the shortcut instead.
+    static func menuCommandTargetsBody(focused: NSResponder?, body: NSTextView) -> Bool {
+        guard let focused, focused !== body else { return true }
+        return !(focused is NSText || focused is NSTextField)
+    }
+
     func focus() {
         guard let tv = textView else { return }
         tv.window?.makeFirstResponder(tv)
@@ -358,6 +377,19 @@ struct MarkdownTextEditor: NSViewRepresentable {
         Self.applyActive(isActive, scrollView: scrollView, textView: textView)
     }
 
+    /// SwiftUI tears the editor down (entry switch, Zen toggle, closing the
+    /// editor). Every text view shares the window's undo manager, so the dead
+    /// view's typing would stay on Edit ▸ Undo: ⌘Z in the next editor would
+    /// silently "undo" text in a detached view (and keep its storage alive).
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        if let undo = coordinator.lastUndoManager ?? textView.undoManager {
+            if let storage = textView.textStorage { undo.removeAllActions(withTarget: storage) }
+            undo.removeAllActions(withTarget: textView)
+        }
+        coordinator.lastUndoManager = nil
+    }
+
     /// Hides/shows the source without tearing it down. Hiding drops first
     /// responder so typing can't land in invisible text.
     static func applyActive(_ active: Bool, scrollView: NSScrollView, textView: NSTextView) {
@@ -379,6 +411,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
         private var dirtyRange: NSRange?
         private var lastCodeRanges: [NSRange] = []
         var styleSignature = ""
+        /// The (window) undo manager this text view registered its edits with,
+        /// remembered while attached so `dismantleNSView` can clear them even
+        /// once the view has left the window.
+        weak var lastUndoManager: UndoManager?
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
@@ -467,6 +503,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
+            if let undo = tv.undoManager { lastUndoManager = undo }
             if !suppressChangeCallback, parent.text != tv.string { parent.text = tv.string }
             applyHighlighting(to: tv)
             applyFocusDimming(to: tv)
