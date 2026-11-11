@@ -7,8 +7,12 @@ import Testing
 // of `SearchQuery.contains` / `SearchQuery.matches` (Foundation,
 // case- and diacritic-insensitive), only faster.
 
+// Pure and CPU-heavy (hundreds of thousands of Foundation comparisons):
+// nonisolated so it runs on the cooperative pool. On the main actor (the
+// test target's default isolation) it held main for seconds and starved
+// suites that poll main-queue notifications.
 @Suite("W1Data search index: identical to Foundation matching")
-struct W1DataIndexSearchTests {
+nonisolated struct W1DataIndexSearchTests {
     static let opts: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
     static let printableASCII: [String] = (0x20...0x7E).map { String(UnicodeScalar(UInt8($0))) }
 
