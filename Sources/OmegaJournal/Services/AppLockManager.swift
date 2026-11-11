@@ -23,13 +23,23 @@ final class AppLockManager {
     @ObservationIgnored private var lastActive: Date?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var authInFlight = false
+    /// Runs every time the app locks: removes decrypted temp copies (opened
+    /// attachments, audio decoded for playback or transcription) so nothing
+    /// readable is left on disk behind the lock screen. Test seam.
+    private let sweepTemporaryFiles: () -> Void
     var isObservingApp: Bool { !observers.isEmpty }
 
-    init(db: DatabaseManager? = nil, auth: BiometricAuth? = nil, observeApp: Bool = true) {
+    init(db: DatabaseManager? = nil, auth: BiometricAuth? = nil, observeApp: Bool = true,
+         sweepTemporaryFiles: (() -> Void)? = nil) {
         let db = db ?? DatabaseManager.shared
         let auth = auth ?? BiometricAuth.shared
         self.db = db
         self.auth = auth
+        // The default keeps a memo that is still being recorded (MemoTempFiles).
+        // Inside the test runner the default does nothing, so lock tests can't race
+        // tests that use the shared temp folder (they inject their own sweep).
+        self.sweepTemporaryFiles = sweepTemporaryFiles
+            ?? (BiometricAuth.isTestRunnerProcess ? {} : { MemoTempFiles.sweep() })
         let enabled = db.getSetting(Self.enabledKey, defaultValue: "false") == "true"
         let raw = Int(db.getSetting(Self.timeoutKey, defaultValue: "0")) ?? 0
         let timeout = AppLockTimeout(rawValue: raw) ?? .immediately
@@ -74,6 +84,7 @@ final class AppLockManager {
     func lock() {
         guard isEnabled else { return }
         isLocked = true
+        sweepTemporaryFiles()
         // Locking the app also re-masks hidden entries.
         NotificationCenter.default.post(name: .lockHiddenEntries, object: nil)
     }
