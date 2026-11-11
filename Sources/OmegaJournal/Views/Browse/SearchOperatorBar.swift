@@ -11,6 +11,7 @@ struct SearchOperatorBar: View {
     private let theme = ThemeManager.shared
 
     private let inserts = ["tag:", "mood:", "before:", "after:", "has:image"]
+    @State private var showTips = false
 
     var body: some View {
         let empty = vm.searchText.trimmingCharacters(in: .whitespaces).isEmpty
@@ -21,6 +22,10 @@ struct SearchOperatorBar: View {
                         OmegaChip(title: op) { append(op) }
                             .accessibilityLabel("Add \(op) filter")
                     }
+                    OmegaChip(title: "Tips", systemImage: "questionmark.circle") { showTips.toggle() }
+                        .accessibilityLabel("Search tips")
+                        .help("How to search: phrases, exclusions and filters")
+                        .popover(isPresented: $showTips, arrowEdge: .bottom) { SearchTipsView() }
                     if empty {
                         ForEach(vm.recentSearches, id: \.self) { q in
                             OmegaChip(title: q, systemImage: "clock") { vm.searchText = q; vm.searchTextChanged() }
@@ -55,6 +60,51 @@ struct SearchOperatorBar: View {
         if !t.isEmpty && !t.hasSuffix(" ") { t += " " }
         vm.searchText = t + op
         vm.searchTextChanged()
+    }
+}
+
+/// The search grammar in one glance (`SearchQuery`). Same rules in the list,
+/// Archive / Hidden / Trash, the command palette and smart folders.
+struct SearchTipsView: View {
+    private let theme = ThemeManager.shared
+
+    static let tips: [(syntax: String, meaning: String)] = [
+        ("rain walk", "Entries with every word, in any order"),
+        ("\"rainy walk\"", "That exact phrase"),
+        ("-work", "Leave out entries that mention it"),
+        ("-\"day job\"", "Leave out an exact phrase"),
+        ("tag:travel  #travel", "Tagged travel (or travel/…)"),
+        ("mood:good", "By mood name or 1–5"),
+        ("after:2026-01  before:today", "By date: day, month, year, today, yesterday"),
+        ("has:image", "Also has:attachment, has:link, has:task"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Search tips")
+                .font(OmegaTheme.font(.caption, .semibold))
+                .foregroundColor(theme.titleTextColor)
+                .accessibilityAddTraits(.isHeader)
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                ForEach(Self.tips, id: \.syntax) { tip in
+                    GridRow {
+                        Text(tip.syntax)
+                            .font(OmegaTheme.font(.meta, design: .monospaced))
+                            .foregroundColor(theme.accentColor)
+                            .textSelection(.enabled)
+                        Text(tip.meaning)
+                            .font(OmegaTheme.font(.meta))
+                            .foregroundColor(theme.bodyTextColor)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            Text("Hidden entries match on their title only while they're locked.")
+                .font(OmegaTheme.font(.meta))
+                .foregroundColor(theme.secondaryTextColor)
+        }
+        .padding(14)
+        .frame(width: 420, alignment: .leading)
     }
 }
 

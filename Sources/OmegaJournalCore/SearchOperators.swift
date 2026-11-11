@@ -2,7 +2,15 @@ import Foundation
 
 // MARK: - Search operators (pure)
 //
-// `tag:work mood:good before:2026-03-01 after:2026-01-01 has:image "exact phrase" free words`
+// `tag:work mood:good before:2026-03-01 after:2026-01-01 has:image "exact phrase" free words -skip -"not this"`
+//
+// The ONE query grammar for every search surface: the journal list (plain and operator queries),
+// Archive / Hidden / Trash, the command palette and smart folders all parse with `SearchQuery.parse`
+// and match with `matches(_:hiddenLocked:)`, so a query means the same thing everywhere.
+//
+// - Free words must ALL appear (title, body or tags), in any order, case- and diacritic-insensitive.
+// - `"exact phrase"` must appear as written (one term).
+// - `-word` / `-"exact phrase"` excludes entries containing it.
 //
 // Parsing and matching are independent of the app's entry type so the rules (and the hidden-entry
 // masking policy) are unit-testable without a database.
@@ -15,8 +23,10 @@ public struct SearchQuery: Equatable, Sendable {
     /// Operator keys the parser understands (also drives the suggestion chips in the UI).
     public static let operatorKeys = ["tag", "mood", "before", "after", "has"]
 
-    /// Free text with operators removed (quotes around phrases dropped).
+    /// Free text with operators and exclusions removed (phrases keep their quotes).
     public var text: String = ""
+    /// `-word` / `-"phrase"` terms: an entry containing any of them doesn't match.
+    public var excluded: [String] = []
     public var tags: [String] = []
     public var moods: [String] = []
     /// Entries strictly before the start of this day.
@@ -30,7 +40,7 @@ public struct SearchQuery: Equatable, Sendable {
     public var hasOperators: Bool {
         !tags.isEmpty || !moods.isEmpty || before != nil || after != nil || !has.isEmpty
     }
-    public var isEmpty: Bool { text.isEmpty && !hasOperators }
+    public var isEmpty: Bool { text.isEmpty && excluded.isEmpty && !hasOperators }
 
     /// Free-text terms (whitespace separated; quoted phrases stay one term).
     public var terms: [String] { Self.splitTerms(text) }
@@ -66,6 +76,14 @@ public struct SearchQuery: Equatable, Sendable {
         var q = SearchQuery()
         var free: [String] = []
         for token in tokenize(raw) {
+            // `-word` / `-"a phrase"`: exclusion. A lone `-` is ignored.
+            if token.hasPrefix("-") {
+                let value = unquote(String(token.dropFirst()))
+                if !value.isEmpty, !q.excluded.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) {
+                    q.excluded.append(value)
+                }
+                continue
+            }
             if token.hasPrefix("#"), token.count > 1, !token.contains(":") {
                 q.tags.append(unquote(String(token.dropFirst())))
                 continue
@@ -188,6 +206,14 @@ public struct SearchQuery: Equatable, Sendable {
             if Self.contains(record.body, term) { continue }
             if record.tags.contains(where: { Self.contains($0, term) }) { continue }
             return false
+        }
+        // Exclusions look only at what may be shown: for a locked hidden entry that is the
+        // title, so `-word` can't reveal what its body or tags contain by making it vanish.
+        for term in excluded {
+            if Self.contains(record.title, term) { return false }
+            if masked { continue }
+            if Self.contains(record.body, term) { return false }
+            if record.tags.contains(where: { Self.contains($0, term) }) { return false }
         }
         return true
     }

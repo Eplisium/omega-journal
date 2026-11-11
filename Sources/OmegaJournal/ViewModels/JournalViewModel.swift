@@ -273,70 +273,61 @@ final class JournalViewModel {
         refreshOrganization()
     }
 
-    /// Re-runs whichever query matches the current search box contents.
+    /// Re-runs the search box query over the active list.
     ///
-    /// Results are the union of the FTS hits and a substring pass over the
-    /// decrypted in-memory library, so a body-only match is found even when the
-    /// title/tags also match (and vice versa). Locked hidden entries never
-    /// match on body or tags.
+    /// Every search surface uses the same grammar (`SearchQuery`: all words,
+    /// `"exact phrase"`, `-exclusion`, operators), matched over the decrypted
+    /// in-memory library. FTS5 (titles and tags only — bodies never reach the
+    /// on-disk index) just ranks the matches: its hits come first, the rest
+    /// keep list order. Locked hidden entries match on title only.
     func refreshQuery() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
             searchResults = nil
             return
         }
-        let unlocked = BiometricAuth.shared.isAuthenticated
         let parsed = SearchQuery.parse(q)
-        if parsed.hasOperators {
-            // Operator queries (tag:/mood:/before:/after:/has:) run over the decrypted in-memory set.
-            searchResults = operatorMatches(parsed, in: entries)
+        let matched = operatorMatches(parsed, in: entries)
+        let ftsText = parsed.terms.joined(separator: " ")
+        guard !ftsText.isEmpty else {
+            searchResults = matched
             return
         }
-        let fts = db.fullTextSearch(q, scope: .active, journalId: activeJournalId).filter { entry in
-            unlocked || !entry.isHidden || Self.matchesVisibleFields(entry, query: q)
-        }
-        var seen = Set(fts.map(\.id))
-        var results = fts
-        for entry in Self.searchMatches(entries, query: q, unlocked: unlocked) where seen.insert(entry.id).inserted {
-            results.append(entry)
-        }
-        searchResults = results
+        let ranked = db.fullTextSearch(ftsText, scope: .active, journalId: activeJournalId).map(\.id)
+        searchResults = Self.rankedFirst(matched, rankedIds: ranked)
     }
 
-    /// Pure substring search over already-decrypted entries. Locked hidden
-    /// entries match on title only.
+    /// `matches` with the ids in `rankedIds` moved to the front, in that order;
+    /// the rest keep their order. Ids that aren't in `matches` are ignored, so
+    /// ranking can never add a result.
+    nonisolated static func rankedFirst(_ matches: [JournalEntry], rankedIds: [String]) -> [JournalEntry] {
+        guard !rankedIds.isEmpty else { return matches }
+        let byId = Dictionary(matches.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<String>()
+        var out: [JournalEntry] = []
+        out.reserveCapacity(matches.count)
+        for id in rankedIds { if let e = byId[id], seen.insert(id).inserted { out.append(e) } }
+        for e in matches where seen.insert(e.id).inserted { out.append(e) }
+        return out
+    }
+
+    /// Search grammar over already-decrypted entries (see `SearchQuery`).
+    /// Locked hidden entries match on title only.
     static func searchMatches(_ source: [JournalEntry], query: String, unlocked: Bool) -> [JournalEntry] {
-        source.filter { entry in
-            if entry.isHidden && !unlocked { return matchesVisibleFields(entry, query: query) }
-            return matchesSearchableFields(entry, query: query)
-        }
+        let parsed = SearchQuery.parse(query)
+        guard !parsed.isEmpty else { return source }
+        return source.filter { parsed.matches($0.searchRecord, hiddenLocked: !unlocked) }
     }
 
-    static func matchesVisibleFields(_ entry: JournalEntry, query: String) -> Bool {
-        entry.title.localizedCaseInsensitiveContains(query)
-    }
-
-    /// Applies the current query to a non-active storage collection. Active
-    /// Journal search stays FTS-backed in `refreshQuery`; Archive, Hidden, and
-    /// Trash use this in-memory pass so their search field never lies. Locked
-    /// hidden entries intentionally match titles only.
+    /// Applies the current query to a non-active storage collection (Archive,
+    /// Hidden, Trash) with the same grammar as the journal list, so their
+    /// search field never lies. Locked hidden entries match titles only.
     func entriesMatchingCurrentSearch(in source: [JournalEntry]) -> [JournalEntry] {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return source }
         let parsed = SearchQuery.parse(query)
-        if parsed.hasOperators { return operatorMatches(parsed, in: source) }
-        return source.filter { entry in
-            if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
-                return Self.matchesVisibleFields(entry, query: query)
-            }
-            return Self.matchesSearchableFields(entry, query: query)
-        }
-    }
-
-    static func matchesSearchableFields(_ entry: JournalEntry, query: String) -> Bool {
-        entry.title.localizedCaseInsensitiveContains(query)
-            || entry.body.localizedCaseInsensitiveContains(query)
-            || entry.tags.contains { $0.localizedCaseInsensitiveContains(query) }
+        guard !parsed.isEmpty else { return source }
+        return operatorMatches(parsed, in: source)
     }
 
     /// Debounced search — called on every keystroke, hits the DB at most every 250ms.
