@@ -27,3 +27,20 @@ struct W1UITodayTests {
         #expect(UITodayCopy.entryHeading == "Today's entry")
     }
 }
+
+@Suite("W1UI: What's new")
+@MainActor
+struct W1UIWhatsNewTests {
+    @Test("revision moves up so people who saw 2.2 get the new highlights")
+    func bumped() {
+        #expect(OnboardingState.whatsNewVersion == "2.3")
+        #expect(ReleaseNotes.shouldShowWhatsNew(lastSeenVersion: "2.2", current: OnboardingState.whatsNewVersion,
+                                                hasCompletedOnboarding: true))
+    }
+
+    @Test("highlights stay short")
+    func short() {
+        #expect((3...6).contains(WhatsNewView.items.count))
+        for item in WhatsNewView.items { #expect(item.2.count <= 90, "\(item.1) is too long") }
+    }
+}

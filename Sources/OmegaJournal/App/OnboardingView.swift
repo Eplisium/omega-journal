@@ -11,7 +11,7 @@ final class OnboardingState {
     /// Revision of the highlights in `WhatsNewView`, compared against what the user last saw.
     /// Bump it whenever the highlights change. It is an internal counter, not the app version
     /// (1.x builds already stored "2.0", so it only ever moves up from there).
-    static let whatsNewVersion = "2.2"
+    static let whatsNewVersion = "2.3"
 
     var isPresentingTour = false
     var isPresentingWhatsNew = false
@@ -113,13 +113,12 @@ struct WhatsNewView: View {
     var onboarding: OnboardingState
     private let theme = ThemeManager.shared
 
-    private let items: [(String, String, String)] = [
-        ("rectangle.3.group", "Widgets", "Today's words, your streak and a prompt on your desktop. Never your entries."),
-        ("square.stack.3d.up", "Shortcuts & Siri", "New entry, quick capture, Today and your progress from Shortcuts, Spotlight or Siri."),
-        ("drop", "A fresh look", "Toolbars, the command palette and buttons use Liquid Glass on macOS 26 and later."),
-        ("heart.text.square", "Daily check-in", "Log sleep, energy, stress and habits from one quiet line on Today."),
-        ("magnifyingglass", "Sharper search", "\"Exact phrases\" and -words to leave out, the same in every search."),
-        ("checkmark.shield", "Safer saving", "A failed save stays visible, keeps your text and retries. Quitting warns first."),
+    static let items: [(String, String, String)] = [
+        ("sun.max", "A calmer Today", "Today's prompt and your writing come first; the rest stays quiet below."),
+        ("textformat.size", "Text size", "Make the whole app larger or smaller in Settings › Appearance."),
+        ("gearshape", "A proper Settings window", "⌘, opens Settings in its own window, one pane per area."),
+        ("command", "Smarter command palette", "Best matches first, with the matching words highlighted. ⌘↩ edits an entry."),
+        ("chart.bar", "Clearer Insights", "Fewer numbers, each with its unit, and charts with labelled axes."),
     ]
 
     var body: some View {
@@ -127,7 +126,7 @@ struct WhatsNewView: View {
             Text("What's new in Omega Journal")
                 .font(OmegaTheme.font(.title, .bold, design: .serif)).foregroundColor(theme.titleTextColor)
                 .accessibilityAddTraits(.isHeader)
-            ForEach(items, id: \.1) { item in
+            ForEach(Self.items, id: \.1) { item in
                 HStack(alignment: .top, spacing: OmegaTheme.Spacing.m) {
                     Image(systemName: item.0).font(OmegaTheme.font(.bodyLarge)).foregroundColor(theme.accentColor).frame(width: 24)
                         .accessibilityHidden(true)
