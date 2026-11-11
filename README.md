@@ -40,7 +40,8 @@ No account, no cloud, no tracking. Just open it and write in Markdown, then find
 - **Find your way back.** Tags, notebooks, smart folders, full-text search with operators, linked entries (`[[like this]]`), a calendar, and On This Day.
 - **Notice patterns, without pressure.** Mood check-ins, writing rhythm, and insights that stay quiet and kind.
 - **Truly native.** SwiftUI + AppKit, keyboard-first, themes, Liquid Glass on macOS 26+, Quick Capture from the menu bar, optional Spotlight title search, and zero third-party dependencies.
-- **Around your Mac.** A desktop widget with today's words, your streak and a prompt (never your entries), plus Shortcuts, Spotlight and Siri actions for new entries, quick capture, Today and your progress.
+- **Around your Mac.** A desktop widget with today's words, your streak and a prompt (never your entries), plus Shortcuts, Spotlight and Siri actions for new entries, quick capture, Today and your progress, and for finding, opening and adding to entries.
+- **Help that stays on your Mac.** With Apple Intelligence (macOS 26+), opt-in writing suggestions, Go deeper follow-up questions and Ask your journal all run on-device; voice memos can be transcribed on-device too.
 
 <table>
   <tr>
@@ -140,6 +141,7 @@ After publishing a release, bump the Homebrew cask: in [Eplisium/homebrew-tap](h
 - **Calendar:** month and agenda browsing with entry drill-through.
 - **Insights:** writing activity, mood trends, patterns, and year review.
 - **On This Day:** revisit entries associated with today's calendar date.
+- **Map:** entries with a saved place (added with Add context or imported from Apple Journal) as clustered pins. Locked hidden entries never appear on it.
 
 Archive removes entries from the active library without deleting them. Trash is a soft delete with restoration and permanent-deletion actions; expired trash is purged after the 30-day retention period when database startup maintenance runs.
 
@@ -158,7 +160,7 @@ Archive removes entries from the active library without deleting them. Trash is 
 
 Focus controls include Zen mode, typewriter scrolling, inactive-paragraph dimming, font style/size, line height, and editor column width. The footer shows writing statistics, save state, session duration/net words/WPM, daily word-goal progress, and 10- or 20-minute writing sprints.
 
-Place/weather metadata can be entered manually. It is not fetched from a weather service or automatically geolocated.
+Place/weather metadata can be entered manually. **Add context** (off by default; turn sources on in Settings → Writing) can add your current place, today's calendar events and photos you pick from today. Each source asks for macOS permission the first time; the place name is looked up with Apple Maps. You can also have place and events added to new entries automatically. Weather is never fetched.
 
 ### Templates and prompts
 
@@ -176,9 +178,7 @@ The template editor includes an expansion preview. Slash insertion can insert a 
 
 Attach files through the picker, Finder drag-and-drop, or image paste. The limit is **25 MB per attachment**. Images use internal `omega-attachment://` references, render inline, and offer Small/Medium/Large/Original sizing. The reader displays attachment thumbnails and open/remove actions.
 
-The editor includes a voice recorder with permission handling, waveform, elapsed time, Cancel, and **Stop & attach**. Recordings use mono AAC `.m4a`; the reader provides playback and progress. There is no transcription or seek UI.
-
-**Recording caution:** the current automatic ten-minute cutoff discards the stopped recording instead of attaching it. Use **Stop & attach before the cutoff** until this is fixed.
+The editor includes a voice recorder with permission handling, waveform, elapsed time, Cancel, and **Stop & attach**. Recordings use mono AAC `.m4a`, are stored encrypted like other attachments, and stop and attach themselves at ten minutes; the reader provides playback and progress. On macOS 26+, a memo can be **transcribed on this Mac** (speech recognition runs on-device) and inserted into the entry.
 
 ### Reader and revisions
 
@@ -267,13 +267,19 @@ Today has a **Daily check-in** line under your writing, folded by default ("2 of
 
 Settings → Writing Goals includes weekly/monthly review controls. Clicking a review reminder opens the review, even when it launches the app. Reviews summarize writing totals, mood, tags, favorite/pinned links, and reflection prompts and can be saved as entries. The reachable review-save action excludes hidden entries. Insights also offers a year selector and year-review PDF export.
 
-### Partially integrated features
+### On-device writing help
 
-- **On-device AI assist:** an opt-in setting and title/tag/summary service exist for macOS 26+ with Apple Intelligence. The service rejects hidden entries and uses Apple's on-device model, but no user workflow currently invokes suggestion generation.
+With Apple Intelligence on macOS 26+, turn on **Settings → Writing → Writing Suggestions** to get:
+
+- **Suggest title & tags** for the entry you're writing.
+- **Go deeper:** a few follow-up questions about what you wrote.
+- **Ask your journal (⇧⌘A):** ask a question and get an answer drawn from your entries, with links to the entries it used.
+
+Everything runs on Apple's on-device model; no text leaves your Mac. Writing help is never offered on hidden entries, and Ask your journal uses hidden entries only while they are unlocked. On Macs without Apple Intelligence these features don't appear.
 
 ## Appearance and Mac integration
 
-Theme presets: **Purple, Midnight, Paper, Sepia, Forest, Ocean, Rose, Mono, and High Contrast**. Custom colors, per-preset accent overrides, system-following light/dark presets, and contrast warnings are available.
+Theme presets: **Purple, Midnight, Paper, Sepia, Forest, Ocean, Rose, Mono, and High Contrast**. Custom colors, per-preset accent overrides, system-following light/dark presets, and contrast warnings are available. **Text size** (Settings → Appearance) scales the sidebar, lists, reader and labels. Settings is a native Settings window (⌘,) with Appearance, Writing, Privacy, Data and About panes.
 
 The UI uses shared typography, spacing, cards, chips, and buttons, with accessibility labels and reduced-motion/transparency accommodations. This is not a claim of a completed VoiceOver or accessibility-conformance audit.
 
@@ -310,7 +316,9 @@ Reflection requires explicit private inclusion as well as authentication. Full e
 
 Opening an attachment in another application creates a decrypted temporary copy in a private directory. Cleanup runs on launch and quit; the receiving application may make its own copies.
 
-Ordinary Markdown, JSON, HTML, and PDF exports contain readable content. They do not inherit the journal's at-rest encryption. An optional extra backup folder may be cloud-synced by another service, and opening links uses external applications; local-first does not mean user-directed exports can never leave the machine.
+**Add context** is the one feature that contacts a service: when the Place source is on and you add context, your current coordinate is sent to Apple Maps to look up the place name. The place and coordinates are then stored inside the encrypted entry body. Calendar events and photos are read locally.
+
+Ordinary Markdown, JSON, HTML, PDF, and EPUB exports contain readable content. They do not inherit the journal's at-rest encryption. An optional extra backup folder may be cloud-synced by another service, and opening links uses external applications; local-first does not mean user-directed exports can never leave the machine.
 
 ## Backups and recovery
 
@@ -338,6 +346,7 @@ Keep an independent, tested recovery strategy for both journal data and attachme
 - **Markdown folder:** one file per nontrashed entry with front matter plus an attachments folder.
 - **Static website:** self-contained HTML index/entry pages and attachments. Export creates files; it does not publish them online.
 - **Encrypted `.ojenc`:** JSON entry/attachment payload sealed using AES-GCM and a PBKDF2-derived passphrase key. The current encrypted-export path does **not** include revision history.
+- **Book (EPUB):** the whole journal or the selected entries as an e-book for Apple Books or any e-reader, with images. Trash is never included.
 
 Full entry-backup exports include archive/trash; Markdown-folder and website exports exclude trash. Exports operate on the view model's loaded notebook scope—select **all notebooks** before exporting across notebooks. If authentication is cancelled, hidden entries are omitted rather than exported silently.
 
@@ -345,7 +354,7 @@ Attachment files accompany Markdown-folder and website exports, but layout is no
 
 ### Imports
 
-Import Omega JSON backups, Markdown/text files, Day One JSON (file or unzipped folder), Obsidian/notes folders, and encrypted Omega exports. Notes-folder import recognizes supported front-matter metadata and local image attachments. Older Omega JSON fields remain optional for compatibility, including lifecycle and hidden state.
+Import Omega JSON backups, Markdown/text files, Day One JSON (file or unzipped folder), Apple Journal exports (in Journal choose File › Export, then pick the folder or its .zip; places with coordinates show on the Map), Obsidian/notes folders, and encrypted Omega exports. Notes-folder import recognizes supported front-matter metadata and local image attachments. Older Omega JSON fields remain optional for compatibility, including lifecycle and hidden state.
 
 Omega JSON import (including the decrypted encrypted-export import path) is **additive**: existing entry IDs are skipped, including archived, hidden, and trashed entries. It does not overwrite those entries or replenish their missing attachments/revisions. Use database restore for snapshot restoration, remembering that database backups themselves omit attachment files.
 
@@ -366,6 +375,7 @@ Imports and exports have format-specific fidelity; neither PDF nor a static webs
 - **⇧⌘P:** pin; **⇧⌘S:** favorite; **⌃⌘A:** archive.
 - **⌃⌘D:** duplicate; **⌃⌘E:** export entry; **⌘P:** reader print.
 - **⌘L:** lock hidden entries; **⌃⌘F:** Zen mode.
+- **⇧⌘A:** Ask your journal (Macs with Apple Intelligence).
 - **⌥⌘J:** optional system-wide new-entry shortcut.
 - **Escape:** dismiss suggestions/transient UI or exit Zen, depending on focus; not an instruction to discard edits.
 
@@ -382,7 +392,6 @@ Imports and exports have format-specific fidelity; neither PDF nor a static webs
 
 These are source-level integration/behavior findings, not promises of fixes or a substitute for runtime QA:
 
-- **AI suggestions:** partially integrated as described above.
 - **Reader navigation:** heading navigation is approximate.
 - **Saved filters:** legacy Save Search retains only the first selected tag/mood, not every advanced filter. Smart-folder counts can differ from a list additionally narrowed by current filters. At most 40 smart folders are stored.
 - **Search:** no `OR`/parentheses grammar. Smart-folder and analytics date boundaries differ for rolling periods.
@@ -422,7 +431,7 @@ Key implementation areas:
 - [`InsightsWorkspaceView.swift`](Sources/OmegaJournal/InsightsWorkspaceView.swift) and [`SmartInsightsSections.swift`](Sources/OmegaJournal/SmartInsightsSections.swift): active analytics dashboard.
 - [`Package.swift`](Package.swift): libraries, app and widget executables, and test target; Swift 6 language mode with main-actor default isolation for the app; no third-party package dependencies.
 
-Apple frameworks provide SwiftUI/AppKit, SQLite3, CryptoKit/Security, LocalAuthentication, NaturalLanguage, and system integrations. FoundationModels is conditionally used by the unfinished on-device AI service.
+Apple frameworks provide SwiftUI/AppKit, SQLite3, CryptoKit/Security, LocalAuthentication, NaturalLanguage, and system integrations. FoundationModels (writing help, Ask your journal) and Speech (memo transcription) are used only on macOS 26+, on-device; MapKit, CoreLocation, EventKit and Photos back the opt-in Add context sources and the Map.
 
 ## Contributing
 

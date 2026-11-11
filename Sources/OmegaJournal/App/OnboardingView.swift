@@ -114,11 +114,12 @@ struct WhatsNewView: View {
     private let theme = ThemeManager.shared
 
     static let items: [(String, String, String)] = [
+        ("sparkles", "Ask your journal", "With Apple Intelligence, ask a question and get answers from your entries, on this Mac."),
+        ("book.closed", "Import from Apple Journal", "Bring in a Journal export from Settings › Data, places included."),
+        ("map", "Map and context", "Add your place, today's events or photos to an entry, then see your places on a map."),
+        ("waveform", "Voice memo transcripts", "Turn a voice memo into text on this Mac and add it to the entry."),
         ("sun.max", "A calmer Today", "Today's prompt and your writing come first; the rest stays quiet below."),
-        ("textformat.size", "Text size", "Make the whole app larger or smaller in Settings › Appearance."),
-        ("gearshape", "A proper Settings window", "⌘, opens Settings in its own window, one pane per area."),
-        ("command", "Smarter command palette", "Best matches first, with the matching words highlighted. ⌘↩ edits an entry."),
-        ("chart.bar", "Clearer Insights", "Fewer numbers, each with its unit, and charts with labelled axes."),
+        ("gearshape", "A proper Settings window", "⌘, opens Settings in its own window. Text size is under Appearance."),
     ]
 
     var body: some View {
