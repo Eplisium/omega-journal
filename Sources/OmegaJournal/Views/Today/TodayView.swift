@@ -39,6 +39,7 @@ struct TodayView: View {
     private let goals = GoalManager.shared
     private let biometricAuth = BiometricAuth.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(TodayCheckinPrefs.showKey) private var showCheckin = true
 
     var body: some View {
         // Everything below reads the clock (greeting, date, today's entry,
@@ -63,6 +64,8 @@ struct TodayView: View {
                 if let todays { heroCard(todays) } else { startWritingCard }
                 if !vm.entries.isEmpty { statLine }
                 if hasDailyGoals { progressCard }
+                // One folded line under the writing; opens to the check-in and habits.
+                if showCheckin { TodayCheckinSection(now: now) }
 
                 if !recent.isEmpty {
                     recentWriting(recent)

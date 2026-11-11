@@ -47,6 +47,7 @@ struct ImproveSettingsCatalogTests {
             SmartAssist.enabledKey,
             AppLockManager.enabledKey, AppLockManager.timeoutKey,
             ShellPrefs.lockOnResignKey, SpotlightIndexer.enabledKey,
+            TodayCheckinPrefs.showKey,
         ]
         for key in appKeys {
             let owners = SettingsCardID.allCases.filter { $0.storageKeys.contains(key) }

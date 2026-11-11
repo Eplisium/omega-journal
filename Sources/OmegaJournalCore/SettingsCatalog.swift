@@ -15,7 +15,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
     // Appearance
     case theme, systemAppearance, reading, customColors
     // Writing
-    case writingGoals, quickCapture, reviewReminders, periodicReview, aiAssist
+    case writingGoals, dailyCheckin, quickCapture, reviewReminders, periodicReview, aiAssist
     // Privacy
     case whatsProtected, appLock, hiddenEntries
     // Data
@@ -28,7 +28,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
     public var group: SettingsGroup {
         switch self {
         case .theme, .systemAppearance, .reading, .customColors: .appearance
-        case .writingGoals, .quickCapture, .reviewReminders, .periodicReview, .aiAssist: .writing
+        case .writingGoals, .dailyCheckin, .quickCapture, .reviewReminders, .periodicReview, .aiAssist: .writing
         case .whatsProtected, .appLock, .hiddenEntries: .privacy
         case .backups, .export, .moreExports, .encryptedExport, .importEntries, .importOtherApps,
              .storage, .dangerZone: .data
@@ -44,6 +44,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         case .reading: "Reading"
         case .customColors: "Custom Colors"
         case .writingGoals: "Writing Goals"
+        case .dailyCheckin: "Daily Check-in"
         case .quickCapture: "Quick Capture"
         case .reviewReminders: "Review Reminders"
         case .periodicReview: "Weekly & Monthly Review"
@@ -71,6 +72,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         case .reading: "textformat"
         case .customColors: "eyedropper"
         case .writingGoals: "target"
+        case .dailyCheckin: "heart.text.square"
         case .quickCapture: "bolt"
         case .reviewReminders: "bell.badge"
         case .periodicReview: "calendar.badge.clock"
@@ -98,6 +100,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         case .reading: ["readingFontDesign", "readingShowCover", "readingMaxWidth"]
         case .quickCapture: ["shell.menuBarQuickCapture", "shell.globalHotkeyEnabled"]
         case .aiAssist: ["smartAssistEnabled"]
+        case .dailyCheckin: ["today.showCheckin"]
         case .appLock: ["appLockEnabled", "appLockTimeoutSeconds"]
         case .hiddenEntries: ["shell.lockHiddenOnResignActive", "spotlight.indexTitles"]
         default: []

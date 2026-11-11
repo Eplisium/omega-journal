@@ -66,6 +66,24 @@ final class CheckinStore {
 
     var hasTodayCheckin: Bool { !(values[Self.todayKey()] ?? [:]).isEmpty }
 
+    /// Metrics that exist and have a value on `day` (values of removed metrics don't count).
+    func loggedMetricCount(day: String = CheckinStore.todayKey()) -> Int {
+        let today = values[day] ?? [:]
+        return metrics.filter { today[$0.id] != nil }.count
+    }
+
+    /// Habits checked off on `day`.
+    func doneHabitCount(day: String = CheckinStore.todayKey()) -> Int {
+        habits.filter { isDone($0.id, day: day) }.count
+    }
+
+    /// The collapsed Today line for `day` (see `CheckinSummary`).
+    func summary(day: String = CheckinStore.todayKey()) -> (text: String, isComplete: Bool) {
+        let logged = loggedMetricCount(day: day), done = doneHabitCount(day: day)
+        return (CheckinSummary.line(metricsLogged: logged, metricCount: metrics.count, habitsDone: done, habitCount: habits.count),
+                CheckinSummary.isComplete(metricsLogged: logged, metricCount: metrics.count, habitsDone: done, habitCount: habits.count))
+    }
+
     // MARK: Habits
 
     @discardableResult

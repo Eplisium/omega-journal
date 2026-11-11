@@ -40,7 +40,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .appearance: "Theme, colors, and how entries read"
-        case .goals: "Daily goals, quick capture, and reviews"
+        case .goals: "Daily goals, check-ins, quick capture, and reviews"
         case .privacy: "Encryption, app lock, hidden entries, and Spotlight"
         case .data: "Backups, export, import, and storage"
         case .about: "Keyboard shortcuts and app info"
@@ -69,6 +69,7 @@ struct SettingsView: View {
     @AppStorage(ReadingPreferences.fontDesignKey) private var readingFontDesign = "default"
     @AppStorage(ReadingPreferences.showCoverKey) private var readingShowCover = true
     @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
+    @AppStorage(TodayCheckinPrefs.showKey) private var showCheckinOnToday = true
 
     /// Sized from the journal window (never the sheet itself, which would feed
     /// back into its own size) and captured once per presentation. When the app
@@ -221,6 +222,7 @@ struct SettingsView: View {
         case .reading: readingCard(card)
         case .customColors: customColorsCard(card)
         case .writingGoals: goalsCard(card)
+        case .dailyCheckin: dailyCheckinCard(card)
         case .quickCapture: quickCaptureCard(card)
         case .reviewReminders: ReviewRemindersPanel()
         case .periodicReview: PeriodicReviewPanel(vm: vm)
@@ -518,6 +520,23 @@ struct SettingsView: View {
         }
     }
 
+    private func dailyCheckinCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Check-in values and habits are stored as plain numbers, like moods and dates. Insights uses them to look for patterns with your writing."
+        ) {
+            SettingsRow(
+                title: "Show check-in on Today",
+                subtitle: "Sleep, energy, stress, your own metrics and habits, folded into one line under today's writing."
+            ) {
+                Toggle("Show check-in on Today", isOn: $showCheckinOnToday)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+        }
+    }
+
     private func quickCaptureCard(_ card: SettingsCardID) -> some View {
         SettingsCard(
             title: card.title,
@@ -556,7 +575,7 @@ struct SettingsView: View {
             SettingsRowDivider()
             SettingsRow(
                 title: "Stored as plain metadata",
-                subtitle: "Titles, tags, moods, dates, and word counts — so search and filters stay fast. Anyone signed in to your Mac account could read these."
+                subtitle: "Titles, tags, moods, dates, word counts, check-ins and habits — so search and filters stay fast. Anyone signed in to your Mac account could read these."
             ) { Image(systemName: "info.circle").foregroundColor(theme.secondaryTextColor).accessibilityHidden(true) }
         }
     }
