@@ -193,4 +193,22 @@ public enum PlaceIndex {
         let lonSpan = min(350, max(minimumSpan, (maxLon - minLon) * padding))
         return (PlaceCoordinate(latitude: (minLat + maxLat) / 2, longitude: (minLon + maxLon) / 2), latSpan, lonSpan)
     }
+
+    /// What clicking a pin does.
+    public enum PinAction: Equatable, Sendable {
+        /// One entry: open it.
+        case open(entryId: String)
+        /// Entries spread out: zoom so they separate.
+        case zoom(center: PlaceCoordinate, latSpan: Double, lonSpan: Double)
+        /// Entries at (nearly) the same spot: zooming won't help, list them.
+        case list([PlacePoint])
+    }
+
+    public static func action(for cluster: PlaceCluster, minimumSpan: Double = 0.002) -> PinAction {
+        if cluster.isSingle, let p = cluster.points.first { return .open(entryId: p.entryId) }
+        guard let r = boundingRegion(cluster.points, padding: 2.2, minimumSpan: minimumSpan) else { return .list(cluster.points) }
+        // Everything within ~20 m: the region bottoms out at the minimum span.
+        if r.latSpan <= minimumSpan && r.lonSpan <= minimumSpan { return .list(cluster.points) }
+        return .zoom(center: r.center, latSpan: r.latSpan, lonSpan: r.lonSpan)
+    }
 }
