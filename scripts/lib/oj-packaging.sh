@@ -98,6 +98,10 @@ oj_swift_build_args() {
     if [ "$1" = "universal" ]; then
         OJ_SWIFT_ARGS+=(--arch arm64 --arch x86_64)
     fi
+    # OMEGA_JOURNAL_BUILD_JOBS=4 caps parallel compile jobs on a busy machine.
+    if [ -n "${OMEGA_JOURNAL_BUILD_JOBS:-}" ]; then
+        OJ_SWIFT_ARGS+=(-j "$OMEGA_JOURNAL_BUILD_JOBS")
+    fi
 }
 
 # Builds the release binaries and sets OJ_BINARY (app) and OJ_WIDGET_BINARY (widget
