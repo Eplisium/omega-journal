@@ -121,6 +121,8 @@ struct MASPipelinePackagingTests {
         #expect(i["ITSAppUsesNonExemptEncryption"] as? Bool == false)
         #expect(i["LSMinimumSystemVersion"] as? String == "14.0")
         #expect((i["NSMicrophoneUsageDescription"] as? String)?.isEmpty == false)
+        // Memo transcription asks for speech recognition; a missing string crashes at the prompt.
+        #expect((i["NSSpeechRecognitionUsageDescription"] as? String)?.contains("never leaves your Mac") == true)
         #expect((i["NSHumanReadableCopyright"] as? String)?.contains("@YEAR@") == true)
     }
 

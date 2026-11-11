@@ -25,6 +25,7 @@
     <key>NSHumanReadableCopyright</key><string>Copyright © @YEAR@ Zach Gladfelter. All rights reserved.</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key><string>Omega Journal uses the microphone only when you record a voice memo to attach to an entry. Recordings are stored encrypted on this Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Omega Journal transcribes your voice memos on this Mac when you ask. Audio never leaves your Mac.</string>
     <key>NSLocationUsageDescription</key><string>Omega Journal uses your location only when you choose to add your current place to an entry. The place is stored encrypted on this Mac.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>Omega Journal uses your location only when you choose to add your current place to an entry. The place is stored encrypted on this Mac.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>Omega Journal reads the titles and times of today's events only when you choose to add them to an entry. It never changes your calendars.</string>
