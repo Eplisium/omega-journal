@@ -87,7 +87,7 @@ extension DatabaseManager {
 
         if search.trimmingCharacters(in: .whitespaces).isEmpty {
             let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeSQL) \(orderBy);"
-            guard let stmt = try? prepare(sql) else { return [] }
+            guard let stmt = prepareRead(sql) else { return [] }
             return collectEntries(stmt)
         }
 
@@ -99,7 +99,7 @@ extension DatabaseManager {
         // ("ournal" in "Journal") is never dropped for lacking a body match.
         var ftsIDs = Set<String>()
         if let ftsQuery = sanitizeFTSQuery(search),
-           let stmt = try? prepare("SELECT f.entry_id FROM entries_fts f WHERE entries_fts MATCH ?;") {
+           let stmt = prepareRead("SELECT f.entry_id FROM entries_fts f WHERE entries_fts MATCH ?;") {
             defer { sqlite3_finalize(stmt) }
             bindText(stmt, index: 1, value: ftsQuery)
             while sqlite3_step(stmt) == SQLITE_ROW {
@@ -107,7 +107,7 @@ extension DatabaseManager {
             }
         }
         let allSQL = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeSQL) \(orderBy);"
-        guard let allStmt = try? prepare(allSQL) else { return [] }
+        guard let allStmt = prepareRead(allSQL) else { return [] }
         let q = search.trimmingCharacters(in: .whitespaces)
         return collectEntries(allStmt).filter { e in
             ftsIDs.contains(e.id)
@@ -121,19 +121,32 @@ extension DatabaseManager {
     /// scan across all of them (reload() used to pay 2 full-table scans per
     /// scope × 4 scopes). Results are keyed by the requested scope.
     func fetchScopes(_ requests: [(scope: EntryScope, sort: SortOrder)], journalId: String? = nil) -> [EntryScope: [JournalEntry]] {
+        fetchScopesChecked(requests, journalId: journalId).entries
+    }
+
+    /// `fetchScopes` that also says which scopes could not be read in full
+    /// (their list may be empty or cut short — never treat it as the truth).
+    func fetchScopesChecked(_ requests: [(scope: EntryScope, sort: SortOrder)], journalId: String? = nil)
+        -> (entries: [EntryScope: [JournalEntry]], failed: Set<EntryScope>) {
+        let failuresBefore = readFailureCount
         let attachments = allAttachmentsByEntry()
         let tags = allTagsByEntry()
+        // Without the shared maps every scope would show wrong tags/attachments.
+        let mapsFailed = readFailureCount != failuresBefore
         var result: [EntryScope: [JournalEntry]] = [:]
+        var failed: Set<EntryScope> = []
         result.reserveCapacity(requests.count)
         for request in requests {
+            let before = readFailureCount
             let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE \(scopeClause(request.scope, journalId: journalId)) \(orderClause(request.sort));"
-            guard let stmt = try? prepare(sql) else {
+            if let stmt = prepareRead(sql, context: "fetchScopes") {
+                result[request.scope] = collectEntries(stmt, preloaded: (attachments, tags))
+            } else {
                 result[request.scope] = []
-                continue
             }
-            result[request.scope] = collectEntries(stmt, preloaded: (attachments, tags))
+            if mapsFailed || readFailureCount != before { failed.insert(request.scope) }
         }
-        return result
+        return (result, failed)
     }
 
     func fullTextSearch(_ query: String, scope: EntryScope = .active, journalId: String? = nil) -> [JournalEntry] {
@@ -145,7 +158,7 @@ extension DatabaseManager {
             WHERE entries_fts MATCH ? AND \(scopeClause(scope, journalId: journalId))
             ORDER BY rank;
         """
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         bindText(stmt, index: 1, value: ftsQuery)
         return collectEntries(stmt)
     }
@@ -161,7 +174,7 @@ extension DatabaseManager {
             WHERE entries_fts MATCH ? AND \(scopeClause(scope, journalId: journalId))
             ORDER BY rank;
         """
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: ftsQuery)
         var ids: [String] = []
@@ -195,7 +208,7 @@ extension DatabaseManager {
             let chunk = Array(ids[start..<end])
             let marks = Array(repeating: "?", count: chunk.count).joined(separator: ",")
             let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE e.id IN (\(marks));"
-            guard let stmt = try? prepare(sql) else { return out }
+            guard let stmt = prepareRead(sql) else { return out }
             for (i, id) in chunk.enumerated() { bindText(stmt, index: Int32(i + 1), value: id) }
             out += collectEntries(stmt, preloaded: maps)
             start = end
@@ -205,7 +218,7 @@ extension DatabaseManager {
 
     func fetchEntry(id: String) -> JournalEntry? {
         let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE e.id = ?;"
-        guard let stmt = try? prepare(sql) else { return nil }
+        guard let stmt = prepareRead(sql) else { return nil }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
         if sqlite3_step(stmt) == SQLITE_ROW {
@@ -226,7 +239,9 @@ extension DatabaseManager {
         defer { sqlite3_finalize(stmt) }
         var entries: [JournalEntry] = []
         var sealedBodies: [(index: Int, sealed: Data)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        // A step error (I/O, corruption) ends the list early: recorded as a
+        // read failure so the caller never presents it as the whole journal.
+        forEachRow(stmt, context: "collectEntries") {
             let (entry, sealed) = rowFields(stmt)
             if let sealed { sealedBodies.append((entries.count, sealed)) }
             entries.append(entry)
@@ -669,7 +684,7 @@ extension DatabaseManager {
 
     func entryCount(scope: EntryScope = .active, journalId: String? = nil) -> Int {
         let sql = "SELECT COUNT(*) FROM entries e WHERE \(scopeClause(scope, journalId: journalId));"
-        guard let stmt = try? prepare(sql) else { return 0 }
+        guard let stmt = prepareRead(sql) else { return 0 }
         defer { sqlite3_finalize(stmt) }
         if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int(stmt, 0)) }
         return 0
@@ -709,7 +724,7 @@ extension DatabaseManager {
     }
 
     private func goalAggregate(_ sql: String, since: Date, until: Date) -> Int {
-        guard let stmt = try? prepare(sql) else { return 0 }
+        guard let stmt = prepareRead(sql) else { return 0 }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
         sqlite3_bind_double(stmt, 2, until.timeIntervalSince1970)

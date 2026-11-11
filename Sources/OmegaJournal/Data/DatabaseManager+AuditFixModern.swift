@@ -30,7 +30,7 @@ extension DatabaseManager {
     /// Every entry the widget counts, from stored columns only.
     func widgetEntryRows() -> [WidgetEntryRow] {
         let sql = "SELECT e.id, e.created_at, e.word_count FROM entries e WHERE \(widgetEntriesClause);"
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         var rows: [WidgetEntryRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -47,7 +47,7 @@ extension DatabaseManager {
         SELECT COUNT(*), TOTAL(e.created_at), TOTAL(e.updated_at), COALESCE(MAX(e.updated_at), 0), TOTAL(e.word_count)
         FROM entries e WHERE \(widgetEntriesClause);
         """
-        guard let stmt = try? prepare(sql) else { return WidgetStorageStamp() }
+        guard let stmt = prepareRead(sql) else { return WidgetStorageStamp() }
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_step(stmt) == SQLITE_ROW else { return WidgetStorageStamp() }
         return WidgetStorageStamp(count: Int(sqlite3_column_int64(stmt, 0)),

@@ -16,7 +16,7 @@ extension DatabaseManager {
 
     func templates() -> [EntryTemplate] {
         let sql = "SELECT id, name, body, tags, icon, sort_order FROM templates ORDER BY sort_order, name;"
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         var result: [EntryTemplate] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -64,7 +64,7 @@ extension DatabaseManager {
 
     func getSetting(_ key: String, defaultValue: String = "") -> String {
         let sql = "SELECT value FROM settings WHERE key = ?;"
-        guard let stmt = try? prepare(sql) else { return defaultValue }
+        guard let stmt = prepareRead(sql) else { return defaultValue }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: key)
         if sqlite3_step(stmt) == SQLITE_ROW { return String(cString: sqlite3_column_text(stmt, 0)) }

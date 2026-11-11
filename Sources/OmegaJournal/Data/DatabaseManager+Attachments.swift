@@ -99,7 +99,7 @@ extension DatabaseManager {
         bindText(stmt, index: 4, value: mimeType)
         sqlite3_bind_double(stmt, 5, Date().timeIntervalSince1970)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
-            print("Attachment insert failed: \(String(cString: sqlite3_errmsg(db)))")
+            OmegaLog.database.error("Attachment insert failed: \(String(cString: sqlite3_errmsg(self.db)), privacy: .private)")
             // Don't leave an orphaned file behind for a row that doesn't exist.
             try? FileManager.default.removeItem(atPath: dir)
             return nil
@@ -110,7 +110,7 @@ extension DatabaseManager {
 
     func fetchAttachments(entryId: String) -> [Attachment] {
         let sql = "SELECT id, entry_id, filename, mime_type, created_at FROM attachments WHERE entry_id = ? ORDER BY created_at;"
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: entryId)
         var attachments: [Attachment] = []
@@ -143,10 +143,10 @@ extension DatabaseManager {
     /// One query for every attachment, grouped by entry — avoids N+1 when listing entries.
     func allAttachmentsByEntry() -> [String: [Attachment]] {
         let sql = "SELECT id, entry_id, filename, mime_type, created_at FROM attachments ORDER BY created_at;"
-        guard let stmt = try? prepare(sql) else { return [:] }
+        guard let stmt = prepareRead(sql) else { return [:] }
         defer { sqlite3_finalize(stmt) }
         var map: [String: [Attachment]] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        forEachRow(stmt, context: "allAttachmentsByEntry") {
             let a = Attachment(
                 id: String(cString: sqlite3_column_text(stmt, 0)),
                 entryId: String(cString: sqlite3_column_text(stmt, 1)),

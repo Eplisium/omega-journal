@@ -48,10 +48,10 @@ final class DatabaseManager {
     /// flushed to the first handler that is installed.
     var onError: ((String) -> Void)? {
         didSet {
-            guard onError != nil, !pendingErrors.isEmpty else { return }
+            guard let onError, !pendingErrors.isEmpty else { return }
             let buffered = pendingErrors
             pendingErrors.removeAll()
-            buffered.forEach(onError!)
+            buffered.forEach(onError)
         }
     }
     var pendingErrors: [String] = []
@@ -60,7 +60,8 @@ final class DatabaseManager {
     /// transaction the failure is also flagged for rollback; outside one the
     /// swallow-and-continue behaviour that tests rely on is preserved.
     func reportError(_ message: String) {
-        print("OmegaJournal: \(message)")
+        // Messages can quote file names or SQLite text: private in the log.
+        OmegaLog.database.error("\(message, privacy: .private)")
         lastErrorMessage = message
         if let onError {
             onError(message)
@@ -69,6 +70,44 @@ final class DatabaseManager {
             pendingErrors.append(message)
             if pendingErrors.count > 5 { pendingErrors.removeFirst(pendingErrors.count - 5) }
         }
+    }
+
+    // MARK: - Read failures
+
+    /// Bumped on every failed read (a statement that would not prepare, or a
+    /// step that ended in an error instead of running out of rows). Callers
+    /// compare it before and after a fetch: a read that failed must never be
+    /// mistaken for "no entries".
+    var readFailureCount = 0
+
+    /// Records a failed read: logged (SQLite text is private), counted, never
+    /// shown raw to the user — the view model shows fixed wording instead.
+    func noteReadFailure(_ context: String) {
+        readFailureCount += 1
+        let detail = db.map { String(cString: sqlite3_errmsg($0)) } ?? "no connection"
+        OmegaLog.database.error("Read failed (\(context, privacy: .public)): \(detail, privacy: .private)")
+    }
+
+    /// `prepare` for a read path: a failure is recorded with
+    /// `noteReadFailure` instead of silently reading as empty.
+    func prepareRead(_ sql: String, context: String = #function) -> OpaquePointer? {
+        do {
+            return try prepare(sql)
+        } catch {
+            noteReadFailure(context)
+            return nil
+        }
+    }
+
+    /// Steps `stmt` through every row, then records a failure if the
+    /// statement stopped on an error rather than at the end of its rows.
+    func forEachRow(_ stmt: OpaquePointer?, context: String = #function, _ body: () -> Void) {
+        var rc = sqlite3_step(stmt)
+        while rc == SQLITE_ROW {
+            body()
+            rc = sqlite3_step(stmt)
+        }
+        if rc != SQLITE_DONE { noteReadFailure(context) }
     }
 
     /// Runs one UPDATE-style statement with bound parameters, checking the
@@ -219,10 +258,39 @@ final class DatabaseManager {
 
     /// True when any row holds an encrypted body — used to refuse minting a
     /// replacement key that would orphan that data.
+    /// Fails CLOSED: when the question can't be answered (closed connection,
+    /// prepare or step error) the answer is "yes", so a key lookup failure is
+    /// never taken as permission to mint a fresh key over encrypted data.
     func hasEncryptedRows() -> Bool {
-        guard let stmt = try? prepare("SELECT 1 FROM entries WHERE body_enc IS NOT NULL LIMIT 1;") else { return false }
+        func unknown() -> Bool {
+            OmegaLog.encryption.error("Couldn't check for encrypted entries; assuming they exist")
+            return true
+        }
+        guard db != nil else { return unknown() }
+        // A brand-new file (no `entries` table yet) provably holds nothing.
+        switch schemaHasEntriesTable() {
+        case .some(false): return false
+        case .none: return unknown()
+        case .some(true): break
+        }
+        guard let stmt = try? prepare("SELECT 1 FROM entries WHERE body_enc IS NOT NULL LIMIT 1;") else { return unknown() }
         defer { sqlite3_finalize(stmt) }
-        return sqlite3_step(stmt) == SQLITE_ROW
+        switch sqlite3_step(stmt) {
+        case SQLITE_ROW: return true
+        case SQLITE_DONE: return false
+        default: return unknown()
+        }
+    }
+
+    /// Whether the schema has an `entries` table; nil when that can't be read.
+    private func schemaHasEntriesTable() -> Bool? {
+        guard let stmt = try? prepare("SELECT 1 FROM sqlite_temp_master WHERE name = 'entries' UNION ALL SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = 'entries';") else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        switch sqlite3_step(stmt) {
+        case SQLITE_ROW: return true
+        case SQLITE_DONE: return false
+        default: return nil
+        }
     }
 
     /// Entries whose stored ciphertext could not be decrypted on their last

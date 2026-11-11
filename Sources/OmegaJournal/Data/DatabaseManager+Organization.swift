@@ -16,7 +16,7 @@ extension DatabaseManager {
 
     func fetchJournals() -> [Journal] {
         guard tableExists("journals"),
-              let stmt = try? prepare("SELECT id, name, color, sort_order FROM journals ORDER BY sort_order, created_at;") else { return [] }
+              let stmt = prepareRead("SELECT id, name, color, sort_order FROM journals ORDER BY sort_order, created_at;") else { return [] }
         defer { sqlite3_finalize(stmt) }
         var out: [Journal] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -94,7 +94,7 @@ extension DatabaseManager {
     /// Non-trashed entry counts per journal. While locked (`includeHidden == false`) hidden entries are not counted.
     func journalEntryCounts(includeHidden: Bool) -> [String: Int] {
         let hidden = includeHidden ? "" : " AND is_hidden = 0"
-        guard let stmt = try? prepare("SELECT journal_id, COUNT(*) FROM entries WHERE deleted_at IS NULL\(hidden) GROUP BY journal_id;") else { return [:] }
+        guard let stmt = prepareRead("SELECT journal_id, COUNT(*) FROM entries WHERE deleted_at IS NULL\(hidden) GROUP BY journal_id;") else { return [:] }
         defer { sqlite3_finalize(stmt) }
         var out: [String: Int] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -104,7 +104,7 @@ extension DatabaseManager {
     }
 
     func journalIdForEntry(_ id: String) -> String? {
-        guard let stmt = try? prepare("SELECT journal_id FROM entries WHERE id = ?;") else { return nil }
+        guard let stmt = prepareRead("SELECT journal_id FROM entries WHERE id = ?;") else { return nil }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
         return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_text(stmt, 0).map { String(cString: $0) } : nil
@@ -113,7 +113,7 @@ extension DatabaseManager {
     // MARK: - Tag colors
 
     func tagColors() -> [String: String] {
-        guard columnExists("tags", "color"), let stmt = try? prepare("SELECT name, color FROM tags WHERE color IS NOT NULL AND color != '';") else { return [:] }
+        guard columnExists("tags", "color"), let stmt = prepareRead("SELECT name, color FROM tags WHERE color IS NOT NULL AND color != '';") else { return [:] }
         defer { sqlite3_finalize(stmt) }
         var out: [String: String] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -163,7 +163,7 @@ extension DatabaseManager {
     }
 
     func allTagNames() -> [String] {
-        guard let stmt = try? prepare("SELECT name FROM tags;") else { return [] }
+        guard let stmt = prepareRead("SELECT name FROM tags;") else { return [] }
         defer { sqlite3_finalize(stmt) }
         var out: [String] = []
         while sqlite3_step(stmt) == SQLITE_ROW { out.append(String(cString: sqlite3_column_text(stmt, 0))) }

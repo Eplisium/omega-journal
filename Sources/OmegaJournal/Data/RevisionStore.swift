@@ -19,7 +19,7 @@ extension DatabaseManager {
     /// Newest first. Metadata only — bodies are decrypted on demand via `revisionBody(id:)`.
     func revisions(entryId: String) -> [EntryRevision] {
         guard tableExists("entry_revisions"),
-              let stmt = try? prepare("SELECT id, entry_id, created_at, title, word_count, is_auto FROM entry_revisions WHERE entry_id = ? ORDER BY created_at DESC;")
+              let stmt = prepareRead("SELECT id, entry_id, created_at, title, word_count, is_auto FROM entry_revisions WHERE entry_id = ? ORDER BY created_at DESC;")
         else { return [] }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: entryId)
@@ -37,7 +37,7 @@ extension DatabaseManager {
     }
 
     func revisionCount(entryId: String) -> Int {
-        guard let stmt = try? prepare("SELECT COUNT(*) FROM entry_revisions WHERE entry_id = ?;") else { return 0 }
+        guard let stmt = prepareRead("SELECT COUNT(*) FROM entry_revisions WHERE entry_id = ?;") else { return 0 }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: entryId)
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
@@ -45,7 +45,7 @@ extension DatabaseManager {
 
     /// Decrypted body of a revision; nil if missing or undecryptable.
     func revisionBody(id: String) -> String? {
-        guard let stmt = try? prepare("SELECT body_enc FROM entry_revisions WHERE id = ?;") else { return nil }
+        guard let stmt = prepareRead("SELECT body_enc FROM entry_revisions WHERE id = ?;") else { return nil }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: id)
         guard sqlite3_step(stmt) == SQLITE_ROW, let sealed = blobAt(stmt, index: 0) else { return nil }

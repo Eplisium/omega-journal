@@ -78,6 +78,14 @@ final class JournalViewModel {
     var recentSearches: [String] = []
     var journalCounts: [String: Int] = [:]
     var tagTree: [TagNode] = []
+    /// Set when part of the journal could not be read (fixed wording, never
+    /// raw SQLite text); a list that failed to load is then kept as it was
+    /// instead of being shown empty. Cleared by the next complete `reload()`.
+    /// Shown by `DataErrorBanner`; Retry calls `retryReading()`.
+    var readError: String?
+    /// The notebook the lists were last loaded for: a failed reload keeps the
+    /// previous lists only when they belong to the same notebook.
+    @ObservationIgnored var loadedJournalId: String??
 
     // Reflection scope
     var analyticsPeriod: AnalyticsPeriod = .thirtyDays
@@ -237,16 +245,25 @@ final class JournalViewModel {
         // would replace the edit in memory with stale storage. Only the
         // pending snapshot is written, never other in-memory state.
         persistPendingSnapshot()
-        // One shared attachments/tags scan for all four scopes (was 8 full-table
-        // scans per reload) plus the single tagsWithCounts query below.
-        let scopes = db.fetchScopes([
+        let failuresBefore = db.readFailureCount
+        // One shared attachments/tags scan for all scopes plus the single
+        // tagsWithCounts query below.
+        let fetched = db.fetchScopesChecked([
             (.active, sortOrder),
             (.trashed, .dateDesc),
             (.archived, sortOrder),
         ], journalId: activeJournalId)
-        entries = scopes[.active] ?? []
-        trashedEntries = scopes[.trashed] ?? []
-        archivedEntries = scopes[.archived] ?? []
+        // A scope that could not be read keeps what is on screen (same
+        // notebook only) rather than turning into an empty journal.
+        let sameNotebook = loadedJournalId == .some(activeJournalId)
+        func pick(_ scope: DatabaseManager.EntryScope, _ current: [JournalEntry]) -> [JournalEntry] {
+            if fetched.failed.contains(scope), sameNotebook, !current.isEmpty { return current }
+            return fetched.entries[scope] ?? []
+        }
+        entries = pick(.active, entries)
+        trashedEntries = pick(.trashed, trashedEntries)
+        archivedEntries = pick(.archived, archivedEntries)
+        if fetched.failed.isEmpty { loadedJournalId = .some(activeJournalId) }
         // `.hidden` is exactly the hidden rows of active + archived (neither
         // includes the trash), so it is derived instead of fetched and
         // decrypted a second time.
@@ -259,6 +276,28 @@ final class JournalViewModel {
         GoalManager.shared.loadGoals()
         refreshQuery()
         dropDanglingSelectionAndEditor()
+        noteReadOutcome(since: failuresBefore, complete: true)
+    }
+
+    static let readErrorMessage =
+        "Part of your journal couldn’t be read just now. Nothing was deleted — try again in a moment."
+
+    /// Shows or clears `readError` after a refresh. Only a complete reload
+    /// can clear it; a targeted refresh can only raise it.
+    func noteReadOutcome(since failuresBefore: Int, complete: Bool) {
+        if db.readFailureCount != failuresBefore {
+            if readError == nil {
+                OmegaLog.viewModel.error("Showing the read-error banner after a failed refresh")
+            }
+            readError = Self.readErrorMessage
+        } else if complete {
+            readError = nil
+        }
+    }
+
+    /// The banner's Retry: reads everything again.
+    func retryReading() {
+        reload()
     }
 
     /// The reloaded scope may no longer contain the selected or edited entry

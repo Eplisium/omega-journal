@@ -79,7 +79,7 @@ extension DatabaseManager {
 
         if changedCount > 0 {
             rebuildFTS()
-            print("OmegaJournal: reconciled tag storage for \(changedCount) entries")
+            OmegaLog.organization.notice("Reconciled tag storage for \(changedCount, privacy: .public) entries")
         }
     }
 
@@ -108,7 +108,7 @@ extension DatabaseManager {
             WHERE et.entry_id = ?
             ORDER BY t.name;
         """
-        guard let stmt = try? prepare(sql) else { return nil }
+        guard let stmt = prepareRead(sql) else { return nil }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, index: 1, value: entryId)
         var tags: [String] = []
@@ -127,10 +127,10 @@ extension DatabaseManager {
             INNER JOIN tags t ON t.id = et.tag_id
             ORDER BY t.name;
         """
-        guard let stmt = try? prepare(sql) else { return [:] }
+        guard let stmt = prepareRead(sql) else { return [:] }
         defer { sqlite3_finalize(stmt) }
         var map: [String: [String]] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        forEachRow(stmt, context: "allTagsByEntry") {
             let entryId = String(cString: sqlite3_column_text(stmt, 0))
             let name = String(cString: sqlite3_column_text(stmt, 1))
             map[entryId, default: []].append(name)
@@ -154,7 +154,7 @@ extension DatabaseManager {
             GROUP BY t.id
             ORDER BY cnt DESC, t.name;
             """
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         var results: [(String, Int)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {

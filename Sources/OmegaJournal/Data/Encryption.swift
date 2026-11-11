@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CryptoKit
+import os
 import Security
 
 /// At-rest encryption for journal content (audit item S1 — the app's core
@@ -56,18 +57,19 @@ enum JournalCrypto {
     /// database holds encrypted content. A missing key is only minted when no
     /// probe reports encrypted content.
     ///
-    /// Guarded by `dataProbesLock`: a `DatabaseManager` unregisters from its
-    /// `deinit`, which can run on whatever thread drops the last reference.
-    nonisolated(unsafe) private static var dataProbes: [ObjectIdentifier: () -> Bool] = [:]
-    nonisolated private static let dataProbesLock = NSLock()
-    nonisolated static func registerEncryptedDataProbe(owner: AnyObject, _ probe: @escaping () -> Bool) {
-        dataProbesLock.withLock { dataProbes[ObjectIdentifier(owner)] = probe }
+    /// Lock-protected: a `DatabaseManager` unregisters from its `deinit`,
+    /// which can run on whatever thread drops the last reference. Probes run
+    /// outside the lock.
+    typealias EncryptedDataProbe = () -> Bool
+    nonisolated private static let dataProbes = OSAllocatedUnfairLock<[ObjectIdentifier: EncryptedDataProbe]>(uncheckedState: [:])
+    nonisolated static func registerEncryptedDataProbe(owner: AnyObject, _ probe: @escaping EncryptedDataProbe) {
+        dataProbes.withLockUnchecked { $0[ObjectIdentifier(owner)] = probe }
     }
     nonisolated static func unregisterEncryptedDataProbe(owner: AnyObject) {
-        dataProbesLock.withLock { dataProbes[ObjectIdentifier(owner)] = nil }
+        dataProbes.withLockUnchecked { $0[ObjectIdentifier(owner)] = nil }
     }
     private static func encryptedDataExists() -> Bool {
-        let probes = dataProbesLock.withLock { Array(dataProbes.values) }
+        let probes = dataProbes.withLockUnchecked { Array($0.values) }
         return probes.contains { $0() }
     }
 
@@ -149,13 +151,13 @@ enum JournalCrypto {
         let resolved = try resolver.resolve(allowCreate: allowCreate)
         switch resolved.origin {
         case .legacyCopyFailed(let status):
-            print("OmegaJournal: could not copy the encryption key to the data-protection keychain (status \(status)); using the login keychain copy.")
+            OmegaLog.encryption.error("Could not copy the encryption key to the data-protection keychain (status \(status, privacy: .public)); using the login keychain copy.")
         case .mintedPreferred:
             // A direct build may later open this journal; it can only read the
             // login keychain. Failure never fails the mint.
             let status = resolver.mirrorMintedKeyToLegacy(resolved.key)
             if status != errSecSuccess {
-                print("OmegaJournal: could not mirror the new encryption key to the login keychain (status \(status)).")
+                OmegaLog.encryption.error("Could not mirror the new encryption key to the login keychain (status \(status, privacy: .public)).")
             }
         default:
             break

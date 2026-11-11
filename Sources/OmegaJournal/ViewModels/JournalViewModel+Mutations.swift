@@ -51,9 +51,14 @@ extension JournalViewModel {
     /// refreshes them. `W1DataTargetedRefreshTests` pins the equivalence.
     func relocateEntries(_ ids: [String]) {
         persistPendingSnapshot()
+        let failuresBefore = db.readFailureCount
+        defer { noteReadOutcome(since: failuresBefore, complete: false) }
         let wanted = Set(ids)
-        if !wanted.isEmpty {
-            let fresh = db.fetchEntries(ids: Array(wanted)).filter { e in
+        let fetched = wanted.isEmpty ? [] : db.fetchEntries(ids: Array(wanted))
+        // If the rows couldn't be re-read, leave them where they are: moving
+        // them out of every list would make them look deleted.
+        if !wanted.isEmpty, db.readFailureCount == failuresBefore {
+            let fresh = fetched.filter { e in
                 activeJournalId.map { $0.isEmpty || e.journalId == $0 } ?? true
             }.sorted { $0.id < $1.id }
             var active = entries.filter { !wanted.contains($0.id) }

@@ -7,7 +7,7 @@ extension DatabaseManager {
 
     func fetchMetrics(includeArchived: Bool = false) -> [CheckinMetric] {
         guard tableExists("metrics"),
-              let stmt = try? prepare("SELECT id, name, kind, unit, icon, sort_order, is_builtin FROM metrics\(includeArchived ? "" : " WHERE is_archived = 0") ORDER BY sort_order, name;")
+              let stmt = prepareRead("SELECT id, name, kind, unit, icon, sort_order, is_builtin FROM metrics\(includeArchived ? "" : " WHERE is_archived = 0") ORDER BY sort_order, name;")
         else { return [] }
         defer { sqlite3_finalize(stmt) }
         var out: [CheckinMetric] = []
@@ -80,7 +80,7 @@ extension DatabaseManager {
     func fetchCheckinValues(fromDay: String? = nil) -> [CheckinValue] {
         guard tableExists("entry_metrics") else { return [] }
         let sql = "SELECT day, metric_id, value FROM entry_metrics" + (fromDay == nil ? "" : " WHERE day >= ?") + " ORDER BY day;"
-        guard let stmt = try? prepare(sql) else { return [] }
+        guard let stmt = prepareRead(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         if let fromDay { bindText(stmt, index: 1, value: fromDay) }
         var out: [CheckinValue] = []
@@ -96,7 +96,7 @@ extension DatabaseManager {
 
     func fetchHabits(includeArchived: Bool = false) -> [Habit] {
         guard tableExists("habits"),
-              let stmt = try? prepare("SELECT id, name, icon, sort_order, is_archived FROM habits\(includeArchived ? "" : " WHERE is_archived = 0") ORDER BY sort_order, created_at;")
+              let stmt = prepareRead("SELECT id, name, icon, sort_order, is_archived FROM habits\(includeArchived ? "" : " WHERE is_archived = 0") ORDER BY sort_order, created_at;")
         else { return [] }
         defer { sqlite3_finalize(stmt) }
         var out: [Habit] = []
@@ -158,7 +158,7 @@ extension DatabaseManager {
     func fetchHabitLog(fromDay: String? = nil) -> [String: Set<String>] {
         guard tableExists("habit_log") else { return [:] }
         let sql = "SELECT habit_id, day FROM habit_log" + (fromDay == nil ? "" : " WHERE day >= ?") + ";"
-        guard let stmt = try? prepare(sql) else { return [:] }
+        guard let stmt = prepareRead(sql) else { return [:] }
         defer { sqlite3_finalize(stmt) }
         if let fromDay { bindText(stmt, index: 1, value: fromDay) }
         var out: [String: Set<String>] = [:]

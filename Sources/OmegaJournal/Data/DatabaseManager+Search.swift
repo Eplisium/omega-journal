@@ -105,7 +105,7 @@ extension DatabaseManager {
     func enableFTSSecureDeleteIfSupported() {
         guard Self.systemSupportsFTSSecureDelete, !isReadOnly, !ftsSecureDeleteEnabled else { return }
         if sqlite3_exec(db, "INSERT INTO entries_fts(entries_fts, rank) VALUES('secure-delete', 1);", nil, nil, nil) != SQLITE_OK {
-            print("OmegaJournal: FTS secure-delete not enabled: \(String(cString: sqlite3_errmsg(db)))")
+            OmegaLog.search.error("FTS secure-delete not enabled: \(String(cString: sqlite3_errmsg(self.db)), privacy: .private)")
         }
     }
 }
