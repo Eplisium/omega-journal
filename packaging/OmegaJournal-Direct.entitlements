@@ -5,7 +5,9 @@
   hardened runtime, NOT sandboxed.
 
   The hardened runtime blocks the microphone unless this entitlement is present, so
-  without it voice memos silently fail (the 1.0.2 DMG shipped without it).
+  without it voice memos silently fail (the 1.0.2 DMG shipped without it). The same is
+  true for Location, Calendars and Photos ("Add context"): the hardened runtime's
+  resource-access entitlements must be present or those requests fail without a prompt.
 
   application-groups: the App Group the widget extension reads its privacy-safe snapshot
   from. Team-prefixed (<team id>.<app bundle id>), which Developer ID / Apple Development
@@ -15,6 +17,12 @@
 <plist version="1.0">
 <dict>
     <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.personal-information.location</key>
+    <true/>
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+    <key>com.apple.security.personal-information.photos-library</key>
     <true/>
     <key>com.apple.security.application-groups</key>
     <array>
