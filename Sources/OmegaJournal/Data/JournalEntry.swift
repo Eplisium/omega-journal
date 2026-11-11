@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import os
 import OmegaJournalCore
 
 // MARK: - Attachment
@@ -21,7 +22,8 @@ nonisolated struct Attachment: Identifiable, Hashable {
 nonisolated struct JournalEntry: Identifiable, Hashable {
     let id: String
     var title: String
-    var body: String
+    /// Replacing the body drops the derived-value memo (a copy keeps its own).
+    var body: String { didSet { derived = EntryDerivedMemo() } }
     var mood: Mood
     var tags: [String]
     var createdAt: Date
@@ -36,6 +38,9 @@ nonisolated struct JournalEntry: Identifiable, Hashable {
     var attachments: [Attachment]
     /// Notebook the entry belongs to (V11). Defaults to the migrated default journal.
     var journalId: String = JournalDefaults.defaultJournalId
+    /// Memo for values derived from `body` (word count). Equality- and
+    /// hash-neutral, so it never changes what two entries compare as.
+    var derived = EntryDerivedMemo()
 
     static func new() -> JournalEntry {
         JournalEntry(id: UUID().uuidString, title: "", body: "", mood: .neutral,
@@ -46,7 +51,9 @@ nonisolated struct JournalEntry: Identifiable, Hashable {
 
     var isTrashed: Bool { deletedAt != nil }
 
-    var wordCount: Int { Self.countWords(body) }
+    /// Counted once per body (sorting by words and every search record used
+    /// to recount 10k bodies on each pass); see `EntryDerivedMemo`.
+    var wordCount: Int { derived.wordCount(of: body) }
 
     /// Words in an entry body, excluding the trailing `<!-- stamp: ... -->`
     /// comment. Same whitespace semantics as the editor footer
@@ -86,6 +93,66 @@ nonisolated struct JournalEntry: Identifiable, Hashable {
         guard let deletedAt else { return 0 }
         return Calendar.current.dateComponents([.day], from: deletedAt, to: Date()).day ?? 0
     }
+}
+
+// MARK: - Derived-value memo
+
+/// Caches values derived from one body: its word count, whether it holds
+/// Markdown image syntax, and whether search may use the ASCII fast path
+/// (`SearchHaystack.isASCIIFoldable`). `body`'s `didSet` installs a fresh
+/// memo, so a memo only ever describes the body it travels with.
+/// Thread-safe (the load and search passes fill it off the main thread).
+/// Always equal and hashes nothing, so `JournalEntry`'s synthesized
+/// `Hashable` is unchanged.
+nonisolated final class EntryDerivedMemo: Hashable, Sendable {
+    private struct State {
+        var wordCount: Int?
+        var hasImageMarkup: Bool?
+        var searchFoldable: Bool?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    init() {}
+
+    func wordCount(of body: String) -> Int {
+        if let known = state.withLock({ $0.wordCount }) { return known }
+        let counted = JournalEntry.countWords(body)
+        state.withLock { $0.wordCount = counted }
+        return counted
+    }
+
+    /// `body.contains("![")`, the search record's image test.
+    func hasImageMarkup(in body: String) -> Bool {
+        if let known = state.withLock({ $0.hasImageMarkup }) { return known }
+        let found = body.contains("![")
+        state.withLock { $0.hasImageMarkup = found }
+        return found
+    }
+
+    func isSearchFoldable(_ body: String) -> Bool {
+        if let known = state.withLock({ $0.searchFoldable }) { return known }
+        let foldable = SearchHaystack.isASCIIFoldable(body)
+        state.withLock { $0.searchFoldable = foldable }
+        return foldable
+    }
+
+    /// Whether the word count is already known (tests, load pass).
+    var isPrimed: Bool { state.withLock { $0.wordCount != nil } }
+
+    /// Records a count computed elsewhere for the same body.
+    func prime(wordCount: Int) { state.withLock { $0.wordCount = wordCount } }
+
+    /// Records every derived value computed elsewhere for the same body.
+    func prime(_ opened: OpenedBody) {
+        state.withLock {
+            $0.wordCount = opened.wordCount
+            $0.hasImageMarkup = opened.hasImageMarkup
+            $0.searchFoldable = opened.searchFoldable
+        }
+    }
+
+    static func == (lhs: EntryDerivedMemo, rhs: EntryDerivedMemo) -> Bool { true }
+    func hash(into hasher: inout Hasher) {}
 }
 
 // MARK: - Entry Filter

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import SQLite3
 import OmegaJournalCore
 
@@ -146,6 +147,25 @@ extension DatabaseManager {
         return collectEntries(stmt)
     }
 
+    /// Entry ids of FTS hits (title/tags) in rank order, scope-filtered.
+    /// Nothing is decrypted: ranking only needs ids.
+    func ftsRankedIds(_ query: String, scope: EntryScope = .active, journalId: String? = nil) -> [String] {
+        guard let ftsQuery = sanitizeFTSQuery(query) else { return [] }
+        let sql = """
+            SELECT e.id
+            FROM entries e
+            INNER JOIN entries_fts f ON e.id = f.entry_id
+            WHERE entries_fts MATCH ? AND \(scopeClause(scope, journalId: journalId))
+            ORDER BY rank;
+        """
+        guard let stmt = try? prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, index: 1, value: ftsQuery)
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { ids.append(String(cString: sqlite3_column_text(stmt, 0))) }
+        return ids
+    }
+
     func fetchEntry(id: String) -> JournalEntry? {
         let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE e.id = ?;"
         guard let stmt = try? prepare(sql) else { return nil }
@@ -168,9 +188,15 @@ extension DatabaseManager {
     ) -> [JournalEntry] {
         defer { sqlite3_finalize(stmt) }
         var entries: [JournalEntry] = []
+        var sealedBodies: [(index: Int, sealed: Data)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            entries.append(rowToEntry(stmt))
+            let (entry, sealed) = rowFields(stmt)
+            if let sealed { sealedBodies.append((entries.count, sealed)) }
+            entries.append(entry)
         }
+        // Bodies are decrypted in one batch (cache hits skip AES entirely,
+        // misses are opened in parallel off the main thread).
+        resolveBodies(&entries, sealed: sealedBodies)
         // Attach attachments in one pass rather than N queries. Callers that
         // fetch several scopes in a row can share one preloaded pair of maps
         // instead of re-scanning the attachments/tags tables per scope.
@@ -204,6 +230,18 @@ extension DatabaseManager {
     }
 
     func rowToEntry(_ stmt: OpaquePointer?) -> JournalEntry {
+        var (entry, sealed) = rowFields(stmt)
+        guard let sealed else { return entry }
+        var one = [entry]
+        resolveBodies(&one, sealed: [(0, sealed)])
+        entry = one[0]
+        return entry
+    }
+
+    /// Every column except the encrypted body, plus that body's ciphertext
+    /// (nil for a legacy plaintext row, whose text is already in `body`).
+    /// `resolveBodies` turns the ciphertext into text.
+    func rowFields(_ stmt: OpaquePointer?) -> (entry: JournalEntry, sealed: Data?) {
         let id = String(cString: sqlite3_column_text(stmt, 0))
         let title = String(cString: sqlite3_column_text(stmt, 1))
         // V8: the body is the AES-GCM blob in column 2 (`body_enc`). When it is
@@ -211,19 +249,13 @@ extension DatabaseManager {
         // the legacy plaintext `body` (column 13) so text is never hidden.
         // A failed decryption yields an empty body AND marks the entry
         // unreadable: saveEntry then refuses to overwrite the ciphertext.
+        let sealed = blobAt(stmt, index: 2)
         let body: String
-        if let sealed = blobAt(stmt, index: 2) {
-            switch decryptBody(sealed) {
-            case .success(let text):
-                body = text
-                unreadableEntryIds.remove(id)
-            case .failure:
-                body = ""
-                unreadableEntryIds.insert(id)
-            }
-        } else {
+        if sealed == nil {
             unreadableEntryIds.remove(id)
             body = sqlite3_column_text(stmt, 13).map { String(cString: $0) } ?? ""
+        } else {
+            body = ""
         }
         let mood = sqlite3_column_int(stmt, 3)
         let tagsStr = String(cString: sqlite3_column_text(stmt, 4))
@@ -257,8 +289,98 @@ extension DatabaseManager {
             attachments: []
         )
         entry.journalId = journalId.isEmpty ? JournalDefaults.defaultJournalId : journalId
-        return entry
+        return (entry, sealed)
     }
+
+    // MARK: - Body decryption (batched, cached)
+
+    /// Below this many cache misses the batch is opened inline; above it the
+    /// AES work and word counting fan out across cores.
+    static let parallelDecryptThreshold = 64
+
+    /// Fills `entries[i].body` for every `(i, ciphertext)` pair.
+    ///
+    /// - A body whose ciphertext is byte-identical to the one it was last
+    ///   decrypted from comes from `bodyCache` (no AES, word count kept).
+    ///   AES-GCM seals with a fresh random nonce, so any rewrite of the row
+    ///   — or any corruption of it — changes the bytes and misses the cache.
+    /// - Misses are decrypted with the key fetched once here (on the main
+    ///   actor), in parallel when there are many, and their word counts are
+    ///   primed in the same pass.
+    /// - A failure leaves the body empty and marks the entry unreadable,
+    ///   exactly as the per-row path did, so saves never overwrite it.
+    func resolveBodies(_ entries: inout [JournalEntry], sealed pairs: [(index: Int, sealed: Data)]) {
+        guard !pairs.isEmpty else { return }
+        var misses: [(index: Int, sealed: Data)] = []
+        misses.reserveCapacity(pairs.count)
+        for pair in pairs {
+            let id = entries[pair.index].id
+            if let cached = bodyCache[id], cached.sealed == pair.sealed {
+                entries[pair.index].body = cached.body
+                entries[pair.index].derived = cached.derived
+                unreadableEntryIds.remove(id)
+            } else {
+                misses.append(pair)
+            }
+        }
+        guard !misses.isEmpty else { return }
+        let key: SymmetricKey
+        do {
+            key = try JournalCrypto.key()
+        } catch {
+            if let keyError = error as? JournalCrypto.KeyError { noteKeyError(keyError) }
+            for miss in misses {
+                entries[miss.index].body = ""
+                unreadableEntryIds.insert(entries[miss.index].id)
+            }
+            return
+        }
+        let opened = Self.openBodies(misses.map(\.sealed), key: key,
+                                     parallel: misses.count >= Self.parallelDecryptThreshold)
+        for (miss, result) in zip(misses, opened) {
+            let id = entries[miss.index].id
+            if let result {
+                entries[miss.index].body = result.body
+                let memo = EntryDerivedMemo()
+                memo.prime(result)
+                entries[miss.index].derived = memo
+                bodyCache[id] = CachedBody(sealed: miss.sealed, body: result.body, derived: memo)
+                unreadableEntryIds.remove(id)
+            } else {
+                entries[miss.index].body = ""
+                bodyCache[id] = nil
+                unreadableEntryIds.insert(id)
+            }
+        }
+    }
+
+    /// Opens every blob with `key` (nil = could not be decrypted) and derives
+    /// its memoized values (word count, image markup, search eligibility). Pure and nonisolated: runs on worker threads.
+    nonisolated static func openBodies(_ blobs: [Data], key: SymmetricKey, parallel: Bool) -> [OpenedBody?] {
+        func open(_ blob: Data) -> OpenedBody? {
+            guard let text = try? JournalCrypto.decryptString(blob, using: key) else { return nil }
+            return OpenedBody(body: text)
+        }
+        guard parallel else { return blobs.map(open) }
+        var out = [OpenedBody?](repeating: nil, count: blobs.count)
+        out.withUnsafeMutableBufferPointer { buffer in
+            nonisolated(unsafe) let results = buffer
+            let workers = max(1, min(ProcessInfo.processInfo.activeProcessorCount, 8))
+            let chunk = (blobs.count + workers - 1) / workers
+            DispatchQueue.concurrentPerform(iterations: workers) { worker in
+                let lower = worker * chunk
+                let upper = min(lower + chunk, blobs.count)
+                guard lower < upper else { return }
+                for i in lower..<upper { results[i] = open(blobs[i]) }
+            }
+        }
+        return out
+    }
+
+    /// Drops cached plaintext for ids that are gone (hard delete) or for
+    /// everything (connection reopened on another file).
+    func forgetCachedBody(id: String) { bodyCache[id] = nil }
+    func clearBodyCache() { bodyCache.removeAll() }
 
     /// Saves an entry. Source-compatible with callers that ignore the result;
     /// returns whether the write committed. Failures are also reported via
@@ -288,6 +410,8 @@ extension DatabaseManager {
         bindText(stmt, index: 1, value: id)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return (false, false) }
         guard let sealed = blobAt(stmt, index: 0) else { return (true, false) }
+        // The exact bytes decrypted before are readable; skip the AES pass.
+        if let cached = bodyCache[id], cached.sealed == sealed { return (true, false) }
         if case .failure = decryptBody(sealed) { return (true, true) }
         return (true, false)
     }
@@ -417,6 +541,7 @@ extension DatabaseManager {
             bindText(stmt, index: 1, value: id)
         }
         removeFTS(entryId: id)
+        forgetCachedBody(id: id)
     }
 
     // MARK: - Bulk operations (one transaction each)

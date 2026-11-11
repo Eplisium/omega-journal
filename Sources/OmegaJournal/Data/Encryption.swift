@@ -233,6 +233,14 @@ enum JournalCrypto {
         String(decoding: try decrypt(sealed), as: UTF8.self)
     }
 
+    /// Opens `sealed` with an already-resolved key. Touches no shared state,
+    /// so batch decryption can run it on worker threads (the caller fetches
+    /// the key once, on the main actor, through `key()`).
+    nonisolated static func decryptString(_ sealed: Data, using key: SymmetricKey) throws -> String {
+        let box = try AES.GCM.SealedBox(combined: sealed)
+        return String(decoding: try AES.GCM.open(box, using: key), as: UTF8.self)
+    }
+
     // MARK: - Files
 
     /// Atomically writes an encrypted copy of `data` to `url` (used for

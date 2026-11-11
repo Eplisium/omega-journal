@@ -11,6 +11,32 @@ enum SQLiteError: Error, LocalizedError {
     }
 }
 
+// MARK: - Decrypted body cache
+
+/// A body opened from `sealed`, with its word-count memo.
+nonisolated struct CachedBody {
+    let sealed: Data
+    let body: String
+    let derived: EntryDerivedMemo
+}
+
+/// Result of opening one ciphertext off the main thread.
+nonisolated struct OpenedBody: Sendable {
+    let body: String
+    let wordCount: Int
+    let hasImageMarkup: Bool
+    let searchFoldable: Bool
+
+    /// Opens nothing: derives every memoized value of `body` (pure; runs on
+    /// worker threads).
+    init(body: String) {
+        self.body = body
+        wordCount = JournalEntry.countWords(body)
+        hasImageMarkup = body.contains("![")
+        searchFoldable = SearchHaystack.isASCIIFoldable(body)
+    }
+}
+
 // MARK: - Database Manager
 
 final class DatabaseManager {
@@ -153,6 +179,9 @@ final class DatabaseManager {
     }
 
     func openDatabase() {
+        // Another file may be opened here (restore, import): nothing cached
+        // from the previous one may be reused.
+        clearBodyCache()
         openFailed = false
         isReadOnly = false
         startupError = nil
@@ -200,6 +229,12 @@ final class DatabaseManager {
     /// read (wrong/missing key, corruption). Their bodies show as empty in
     /// the model but the stored ciphertext is preserved by `saveEntry`.
     var unreadableEntryIds: Set<String> = []
+
+    /// Decrypted bodies by entry id, each valid only for the exact ciphertext
+    /// it was opened from (see `resolveBodies`). Lets a reload skip AES for
+    /// every unchanged row. In memory only; cleared when the connection is
+    /// reopened.
+    var bodyCache: [String: CachedBody] = [:]
 
     // MARK: - SQL Helpers
 
