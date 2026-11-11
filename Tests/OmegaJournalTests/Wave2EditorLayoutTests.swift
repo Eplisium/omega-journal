@@ -15,10 +15,7 @@ import Testing
 struct Wave2EditorLayoutTests {
     private func makeVM() -> JournalViewModel {
         _ = NSApplication.shared
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oj-w2e-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", dir.appendingPathComponent("db.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", dir.appendingPathComponent("att").path, 1)
+        TestSharedEnvironment.pin()
         return JournalViewModel()
     }
 

@@ -7,7 +7,7 @@ import OmegaJournalCore
 /// Guards the semantics the Combine pipelines had before the move to
 /// `@Observable`: view state persists only on a real change after `init`,
 /// and tag counts re-derive when the biometric session really changes.
-@Suite("Observation migration semantics", .serialized)
+@Suite("Observation migration semantics", .serialized, .lockState)
 @MainActor
 struct ObservationMigrationTests {
     private static func makeVM() throws -> (JournalViewModel, URL) {

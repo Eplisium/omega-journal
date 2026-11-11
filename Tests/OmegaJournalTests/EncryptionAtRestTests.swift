@@ -20,8 +20,7 @@ struct EncryptionAtRestTests {
 
     private static func makeIsolatedDatabase() throws -> DatabaseManager {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         return DatabaseManager.shared
     }
 

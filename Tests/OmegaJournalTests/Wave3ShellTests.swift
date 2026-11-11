@@ -124,11 +124,7 @@ struct Wave3ShellListHeaderWiringTests {
     final class SelectionBox { var value: SidebarItem? }
 
     private static func isolate() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-journal-w3shell-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
     }
 
     /// Filter, search and notebook scope persist in the shared test

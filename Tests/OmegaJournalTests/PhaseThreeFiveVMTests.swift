@@ -4,14 +4,11 @@ import Testing
 import OmegaJournalCore
 @testable import OmegaJournal
 
-@Suite("Reflection, import/export, AI gate (VM)", .serialized)
+@Suite("Reflection, import/export, AI gate (VM)", .serialized, .lockState)
 @MainActor
 struct PhaseThreeFiveVMTests {
     private static func isolate() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("omega-p35-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
     }
 
     @MainActor

@@ -6,17 +6,13 @@ import OmegaJournalCore
 @testable import OmegaJournal
 
 /// Audit group B: view-model autosave, privacy and app-lifecycle regressions.
-@Suite("Audit fixes B — autosave, privacy, lifecycle", .serialized)
+@Suite("Audit fixes B — autosave, privacy, lifecycle", .serialized, .lockState)
 @MainActor
 struct AuditFixesBTests {
     private static func isolate() throws {
         // View structs below touch ThemeManager, which observes NSApp.
         _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-audit-b-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
     }
 
     /// Fresh VM with no pending state; every test removes the rows it made.

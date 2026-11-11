@@ -190,7 +190,7 @@ struct AuditFixDataFTSTests {
 
 // MARK: - DATA-2 / browse-3
 
-@Suite("Audit fix data: writing goals mask hidden and future entries (DATA-2, browse-3)", .serialized)
+@Suite("Audit fix data: writing goals mask hidden and future entries (DATA-2, browse-3)", .serialized, .lockState)
 @MainActor
 struct AuditFixDataGoalTests {
     init() { MASDataTestEnv.ensureIsolated() }

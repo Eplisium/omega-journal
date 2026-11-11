@@ -103,16 +103,12 @@ struct ImproveA11yCoreTests {
 }
 
 /// View-level wiring: the real EntryRow feeds the Core builder masked data.
-@Suite("Improve A11y — EntryRow wiring", .serialized)
+@Suite("Improve A11y — EntryRow wiring", .serialized, .lockState)
 @MainActor
 struct ImproveA11yRowTests {
     private func makeVM() throws -> JournalViewModel {
         _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-a11y-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         BiometricAuth.shared.setAuthenticatedForTesting(false)
         return JournalViewModel()
     }

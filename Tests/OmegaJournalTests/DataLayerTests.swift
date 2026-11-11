@@ -6,7 +6,7 @@ import SQLite3
 /// Data-layer follow-ups: search union (#6/#7), atomic bulk ops (#20), checked
 /// template writes (#14), pragmas (#17), auth concurrency (#22), attachment
 /// export/import (#19). Every test uses its own DatabaseManager in a temp dir.
-@Suite("Data layer", .serialized)
+@Suite("Data layer", .serialized, .lockState)
 @MainActor
 struct DataLayerTests {
 
@@ -205,10 +205,7 @@ struct DataLayerTests {
     // the entries these tests created (titles prefixed "VM DL ").
 
     private func makeVM() -> JournalViewModel {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("omega-dl-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("j.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("att").path, 1)
+        TestSharedEnvironment.pin()
         return JournalViewModel()
     }
 

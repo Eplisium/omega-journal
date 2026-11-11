@@ -121,19 +121,11 @@ struct MASDataJournalLocationTests {
 }
 
 /// Shared isolation for MASData suites: guarantees this process runs in
-/// test mode (ephemeral key, temp singleton database) even when a MASData
-/// suite is the first thing to run. Never overrides a path another suite set.
+/// test mode (ephemeral key, run-wide temp singleton database) even when a
+/// MASData suite is the first thing to run.
 enum MASDataTestEnv {
-    static let root: URL = {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-masdata-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }()
-
     static func ensureIsolated() {
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 0)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 0)
+        TestSharedEnvironment.pin()
     }
 
     static func tempDir(_ label: String) -> URL {

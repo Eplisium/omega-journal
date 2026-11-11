@@ -2,14 +2,11 @@ import Foundation
 import Testing
 @testable import OmegaJournal
 
-@Suite("Wiki link wiring", .serialized)
+@Suite("Wiki link wiring", .serialized, .lockState)
 @MainActor
 struct WikiLinkWiringTests {
     private func makeVM() -> JournalViewModel {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("omega-wl-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("j.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("att").path, 1)
+        TestSharedEnvironment.pin()
         return JournalViewModel()
     }
 

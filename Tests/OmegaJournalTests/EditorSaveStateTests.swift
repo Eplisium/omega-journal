@@ -6,10 +6,7 @@ import Foundation
 @MainActor
 struct EditorSaveStateTests {
     private func makeVM() -> JournalViewModel {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oj-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", dir.appendingPathComponent("db.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", dir.appendingPathComponent("att").path, 1)
+        TestSharedEnvironment.pin()
         return JournalViewModel()
     }
 

@@ -95,10 +95,7 @@ struct MASSandboxDayOneImportTests {
 
     private func makeVM() throws -> (JournalViewModel, URL) {
         let root = try tempDir()
-        if (ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"] ?? "").isEmpty {
-            setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("shared.sqlite3").path, 1)
-            setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("shared-att").path, 1)
-        }
+        TestSharedEnvironment.pin()   // ephemeral key mode: never touch the real Keychain
         let db = DatabaseManager(databasePath: root.appendingPathComponent("j.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("att").path)
         return (JournalViewModel(database: db), root)

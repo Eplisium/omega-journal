@@ -11,11 +11,7 @@ import OmegaJournalShared
 @MainActor
 struct IntentsCommandRoutingTests {
     private static func makeIsolatedDatabase() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-journal-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
     }
 
     @Test("commands queue until drained, then the inbox is empty")
@@ -101,7 +97,7 @@ struct IntentsCommandRoutingTests {
 
 /// The app writes the snapshot from its in-memory entries; hidden entries'
 /// content must never reach the file.
-@Suite("Widget snapshot publisher", .serialized)
+@Suite("Widget snapshot publisher", .serialized, .lockState)
 @MainActor
 struct WidgetSnapshotPublisherTests {
     static func entry(_ title: String, _ body: String, hidden: Bool = false, created: Date = Date()) -> JournalEntry {
@@ -166,8 +162,7 @@ struct WidgetSnapshotPublisherTests {
     func dedupes() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oj-pub-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH",
-               FileManager.default.temporaryDirectory.appendingPathComponent("oj-\(UUID().uuidString).sqlite3").path, 1)
+        TestSharedEnvironment.pin()
         let vm = JournalViewModel()
         let publisher = WidgetSnapshotPublisher()
         publisher.storeOverride = WidgetSnapshotStore(directory: dir)

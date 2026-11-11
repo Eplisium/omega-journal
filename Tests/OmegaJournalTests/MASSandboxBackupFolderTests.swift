@@ -226,11 +226,7 @@ struct MASSandboxBackupFolderTests {
     private static func makeDB() -> (DatabaseManager, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("oj-massandbox-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        if (ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"] ?? "").isEmpty {
-            // Ephemeral key mode: never touch the real Keychain.
-            setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("shared.sqlite3").path, 1)
-            setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("shared-att").path, 1)
-        }
+        TestSharedEnvironment.pin()   // ephemeral key mode: never touch the real Keychain
         let db = DatabaseManager(databasePath: root.appendingPathComponent("j.sqlite3").path,
                                  attachmentsPath: root.appendingPathComponent("att").path)
         return (db, root)

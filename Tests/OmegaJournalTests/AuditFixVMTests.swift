@@ -7,7 +7,7 @@ import OmegaJournalCore
 /// Audit fix wave, track vm: editor lifecycle (draft discard, Trash instead of
 /// hard delete, Zen/save-state reset, dangling ids), lock re-masking search,
 /// notebook delete/move, archive sort, scoped Empty Trash.
-@Suite("Audit fix vm: editor lifecycle, lock, notebooks, trash", .serialized)
+@Suite("Audit fix vm: editor lifecycle, lock, notebooks, trash", .serialized, .lockState)
 @MainActor
 struct AuditFixVMTests {
     /// Private DB per test; the env vars keep any `.shared` singleton off the

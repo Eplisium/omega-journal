@@ -4,14 +4,11 @@ import Testing
 import OmegaJournalCore
 @testable import OmegaJournal
 
-@Suite("Organization: journals, tag colors, masking", .serialized)
+@Suite("Organization: journals, tag colors, masking", .serialized, .lockState)
 @MainActor
 struct OrganizationDBTests {
     private static func isolate() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("omega-journal-org-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
     }
 
     /// The DB is the process-wide singleton shared with other suites: remove only what these tests created.

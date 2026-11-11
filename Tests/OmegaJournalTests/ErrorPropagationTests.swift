@@ -14,8 +14,7 @@ struct ErrorPropagationTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("omega-errors-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         return (root, DatabaseManager.shared)
     }
 
@@ -183,11 +182,7 @@ struct FetchScopesEquivalenceTests {
     @MainActor
     @Test("fetchScopes matches per-scope fetchAllEntries for every lifecycle state")
     func fetchScopesMatchesPerScopeFetches() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-scopes-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         let db = DatabaseManager.shared
 
         var active = JournalEntry.new()

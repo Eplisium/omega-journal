@@ -25,11 +25,7 @@ struct AuditFixesATests {
     /// Env-based isolation for the shared singleton (ephemeral key, no Keychain).
     static func isolate() {
         unsetenv("DATABASE_URL")
-        if ProcessInfo.processInfo.environment["OMEGA_JOURNAL_TEST_DATABASE_PATH"]?.isEmpty ?? true {
-            let root = tempRoot()
-            setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-            setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
-        }
+        TestSharedEnvironment.pin()
     }
 
     static func makeDB() -> (root: URL, db: DatabaseManager) {

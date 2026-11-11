@@ -34,8 +34,7 @@ struct Wave3SaveFailureTests {
     private func makeVM() -> JournalViewModel {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oj-save-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", dir.appendingPathComponent("db.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", dir.appendingPathComponent("att").path, 1)
+        TestSharedEnvironment.pin()
         // A private database: this suite holds unsaved entries across a debounce
         // window, which would leak into parallel suites sharing the singleton.
         let db = DatabaseManager(databasePath: dir.appendingPathComponent("private.sqlite3").path,

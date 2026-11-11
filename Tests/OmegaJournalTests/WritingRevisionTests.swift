@@ -4,7 +4,7 @@ import Testing
 import OmegaJournalCore
 @testable import OmegaJournal
 
-@Suite("Writing: revisions DB, export, templates, stamp", .serialized)
+@Suite("Writing: revisions DB, export, templates, stamp", .serialized, .lockState)
 @MainActor
 struct WritingRevisionTests {
     private func entry(_ title: String, body: String, tags: [String] = []) -> JournalEntry {
@@ -158,10 +158,7 @@ struct WritingRevisionTests {
     @MainActor
     @Test("hidden entry revisions are gated while locked; restore keeps the old text as a kept version")
     func hiddenGatingAndRestore() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("omega-journal-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         let vm = JournalViewModel()
         var e = vm.createEntry(title: "H", body: "v1 text")
         defer { vm.db.hardDeleteEntry(id: e.id) }

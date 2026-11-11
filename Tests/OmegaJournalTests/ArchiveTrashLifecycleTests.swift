@@ -3,18 +3,14 @@ import Foundation
 import Testing
 @testable import OmegaJournal
 
-@Suite("Archive and trash lifecycle", .serialized)
+@Suite("Archive and trash lifecycle", .serialized, .lockState)
 @MainActor
 struct ArchiveTrashLifecycleTests {
     /// Points the process-global env vars at a unique temp database. The
     /// DatabaseManager singleton binds to whichever path is set the first time
     /// it is constructed, so tests must clean up anything they create.
     private static func makeIsolatedDatabase() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-journal-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
     }
 
     @MainActor
@@ -61,15 +57,15 @@ struct ArchiveTrashLifecycleTests {
     @MainActor
     @Test("bulk storage operations keep every collection synchronized")
     func bulkStorageOperationsKeepCollectionsSynchronized() throws {
+        // Asserts on empty collections, so it needs a journal nobody else writes to:
+        // a private database, not the run-wide shared one other suites fill in parallel.
+        TestSharedEnvironment.pin()
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("omega-journal-lifecycle-\(UUID().uuidString)", isDirectory: true)
-        let databaseURL = root.appendingPathComponent("journal.sqlite3")
-        let attachmentsURL = root.appendingPathComponent("attachments", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", databaseURL.path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", attachmentsURL.path, 1)
-
-        let vm = JournalViewModel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let db = DatabaseManager(databasePath: root.appendingPathComponent("journal.sqlite3").path,
+                                 attachmentsPath: root.appendingPathComponent("attachments", isDirectory: true).path)
+        let vm = JournalViewModel(database: db)
         #expect(vm.entries.isEmpty)
 
         let first = vm.createEntry(title: "First lifecycle entry", body: "A testable journal entry.")

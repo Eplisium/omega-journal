@@ -5,7 +5,7 @@ import Testing
 
 /// core-5: Insights "Current rhythm" is the Today streak over the all-time
 /// reflective scope, not capped by the selected period.
-@Suite("Audit fix core: Insights current streak", .serialized)
+@Suite("Audit fix core: Insights current streak", .serialized, .lockState)
 @MainActor
 struct AuditFixCoreInsightsStreakTests {
     static func cal(_ tz: String) -> Calendar {

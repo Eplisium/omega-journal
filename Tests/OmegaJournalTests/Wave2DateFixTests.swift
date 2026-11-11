@@ -9,7 +9,7 @@ import Testing
 /// writing by Today, On This Day, streaks or Insights. Every test pins a fixed
 /// reference date; the "far future" entry is future relative to both the
 /// reference and the real clock, so Calendar assertions never depend on `Date()`.
-@Suite("Wave 2 DateFix — future-dated entries", .serialized)
+@Suite("Wave 2 DateFix — future-dated entries", .serialized, .lockState)
 @MainActor
 struct Wave2DateFixTests {
     static func utc() -> Calendar {
@@ -41,11 +41,7 @@ struct Wave2DateFixTests {
     /// directly so nothing is persisted and nothing needs cleanup.
     private func makeVM(_ entries: [JournalEntry]) throws -> JournalViewModel {
         _ = NSApplication.shared
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("omega-datefix-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        setenv("OMEGA_JOURNAL_TEST_DATABASE_PATH", root.appendingPathComponent("journal.sqlite3").path, 1)
-        setenv("OMEGA_JOURNAL_TEST_ATTACHMENTS_PATH", root.appendingPathComponent("attachments", isDirectory: true).path, 1)
+        TestSharedEnvironment.pin()
         BiometricAuth.shared.setAuthenticatedForTesting(false)
         let vm = JournalViewModel()
         vm.saveDebounce?.cancel()
