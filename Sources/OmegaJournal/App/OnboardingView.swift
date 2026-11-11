@@ -11,7 +11,7 @@ final class OnboardingState {
     /// Revision of the highlights in `WhatsNewView`, compared against what the user last saw.
     /// Bump it whenever the highlights change. It is an internal counter, not the app version
     /// (1.x builds already stored "2.0", so it only ever moves up from there).
-    static let whatsNewVersion = "2.1"
+    static let whatsNewVersion = "2.2"
 
     var isPresentingTour = false
     var isPresentingWhatsNew = false
@@ -117,7 +117,8 @@ struct WhatsNewView: View {
         ("rectangle.3.group", "Widgets", "Today's words, your streak and a prompt on your desktop. Never your entries."),
         ("square.stack.3d.up", "Shortcuts & Siri", "New entry, quick capture, Today and your progress from Shortcuts, Spotlight or Siri."),
         ("drop", "A fresh look", "Toolbars, the command palette and buttons use Liquid Glass on macOS 26 and later."),
-        ("bolt", "Smoother in big journals", "Screens only redraw what changed, so typing and scrolling stay light."),
+        ("heart.text.square", "Daily check-in", "Log sleep, energy, stress and habits from one quiet line on Today."),
+        ("magnifyingglass", "Sharper search", "\"Exact phrases\" and -words to leave out, the same in every search."),
         ("checkmark.shield", "Safer saving", "A failed save stays visible, keeps your text and retries. Quitting warns first."),
     ]
 
