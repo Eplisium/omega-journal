@@ -90,6 +90,8 @@ final class NotificationManager {
     var reminderMinute = 0
 
     private let db: DatabaseManager
+    /// Re-checks the schedule on activation; held for the manager's lifetime.
+    @ObservationIgnored private var becameActiveObserver: NSObjectProtocol?
 
     /// How many upcoming one-shot reminders are kept scheduled. Each carries a
     /// different prompt; the set is topped up every launch/activation.
@@ -109,7 +111,7 @@ final class NotificationManager {
         guard Self.centerAvailable else { return }
         NotificationDelegateInstaller.install()   // normally already done at launch; idempotent
         checkAuthorization()
-        NotificationCenter.default.addObserver(
+        becameActiveObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshScheduleIfNeeded() }

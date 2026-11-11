@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 // The original `ExportManager.showExportPanel` returned a status string from inside
 // `panel.begin`'s async completion handler, so it always returned "". These helpers use
 // `runModal()` and report the outcome through the view model's toast instead.
+// Export writes run inside `save(vm:suggested:type:write:)`, which catches every thrown
+// error and shows it as an error toast — nothing thrown in these Tasks is dropped.
 
 @MainActor
 enum ImportExportPanels {
@@ -14,6 +16,7 @@ enum ImportExportPanels {
     // MARK: Export
 
     static func exportMarkdown(vm: JournalViewModel) {
+        // swiftlint:disable:next unhandled_throwing_task - the only `try` is in save()'s write closure; save() catches and shows it
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
             guard !readingExportEntries(entries).isEmpty else {
@@ -27,6 +30,7 @@ enum ImportExportPanels {
     }
 
     static func exportJSON(vm: JournalViewModel) {
+        // swiftlint:disable:next unhandled_throwing_task - the only `try` is in save()'s write closure; save() catches and shows it
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
             guard !entries.isEmpty else {
@@ -42,6 +46,7 @@ enum ImportExportPanels {
 
     @MainActor
     static func exportPDF(vm: JournalViewModel) {
+        // swiftlint:disable:next unhandled_throwing_task - the only `try` is in save()'s write closure; save() catches and shows it
         Task {
             let (entries, omitted) = await entriesForExport(vm: vm)
             guard !readingExportEntries(entries).isEmpty else {
@@ -161,6 +166,7 @@ enum ImportExportPanels {
     @MainActor
     static func exportEntryPDF(vm: JournalViewModel) {
         guard let entry = vm.selectedEntry else { vm.showToast("No entry selected", isError: true); return }
+        // swiftlint:disable:next unhandled_throwing_task - the only `try` is in save()'s write closure; save() catches and shows it
         Task {
             if entry.isHidden, !(await BiometricAuth.shared.authenticate()) { return }
             let safeName = entry.displayTitle.replacingOccurrences(of: "/", with: "-").prefix(60)
@@ -219,6 +225,7 @@ enum ImportExportPanels {
             vm.showToast("No entry selected", isError: true)
             return
         }
+        // swiftlint:disable:next unhandled_throwing_task - the only `try` is in save()'s write closure; save() catches and shows it
         Task { @MainActor in
             guard await vm.revealIfNeeded(entry) else { return }
             // Re-read after unlocking so the export uses the revealed entry.

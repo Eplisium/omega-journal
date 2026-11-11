@@ -232,7 +232,16 @@ enum JournalCrypto {
     }
 
     static func decryptString(_ sealed: Data) throws -> String {
-        String(decoding: try decrypt(sealed), as: UTF8.self)
+        try utf8String(try decrypt(sealed))
+    }
+
+    /// Strict UTF-8: a body that does not decode is reported as unreadable
+    /// instead of being shown (and later re-saved) with replacement characters.
+    nonisolated static func utf8String(_ data: Data) throws -> String {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
+        }
+        return text
     }
 
     /// Opens `sealed` with an already-resolved key. Touches no shared state,
@@ -240,7 +249,7 @@ enum JournalCrypto {
     /// the key once, on the main actor, through `key()`).
     nonisolated static func decryptString(_ sealed: Data, using key: SymmetricKey) throws -> String {
         let box = try AES.GCM.SealedBox(combined: sealed)
-        return String(decoding: try AES.GCM.open(box, using: key), as: UTF8.self)
+        return try utf8String(try AES.GCM.open(box, using: key))
     }
 
     // MARK: - Files
@@ -311,13 +320,13 @@ enum JournalCrypto {
         }
     }
 
-    private static var cleanupInstalled = false
+    /// The app-lifetime terminate observer (kept so it is never deallocated).
+    private static var cleanupObserver: NSObjectProtocol?
     /// Sweeps now (launch) and again when the app terminates.
     static func installTemporaryFileCleanup() {
-        guard !cleanupInstalled else { return }
-        cleanupInstalled = true
+        guard cleanupObserver == nil else { return }
         cleanupTemporaryFiles()
-        NotificationCenter.default.addObserver(
+        cleanupObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: nil
         ) { _ in cleanupTemporaryFiles() }
     }
