@@ -10,8 +10,16 @@ import OmegaJournalCore
 final class JournalViewModel {
     // Library
     var entries: [JournalEntry] = [] {
-        didSet { recomputeMoodCounts() }
+        didSet {
+            entriesRevision &+= 1
+            recomputeMoodCounts()
+        }
     }
+    /// Bumped on every change to `entries`; a background search compares it
+    /// before publishing so it never shows results for an older library.
+    @ObservationIgnored var entriesRevision = 0
+    /// Bumped by every search run; only the newest may publish.
+    @ObservationIgnored var searchGeneration = 0
     /// Precomputed per-mood counts of active entries (sidebar badges) so views
     /// don't re-filter the whole library for every mood on every render.
     var moodCounts: [Mood: Int] = [:]
@@ -235,12 +243,14 @@ final class JournalViewModel {
             (.active, sortOrder),
             (.trashed, .dateDesc),
             (.archived, sortOrder),
-            (.hidden, .dateDesc),
         ], journalId: activeJournalId)
         entries = scopes[.active] ?? []
         trashedEntries = scopes[.trashed] ?? []
         archivedEntries = scopes[.archived] ?? []
-        hiddenEntries = scopes[.hidden] ?? []
+        // `.hidden` is exactly the hidden rows of active + archived (neither
+        // includes the trash), so it is derived instead of fetched and
+        // decrypted a second time.
+        hiddenEntries = Self.hiddenScope(active: entries, archived: archivedEntries)
         reapplyUnsavedSnapshots()
         // While the biometric session is locked, hidden entries must not
         // advertise their tags in the sidebar/filter chips.
@@ -280,21 +290,81 @@ final class JournalViewModel {
     /// in-memory library. FTS5 (titles and tags only — bodies never reach the
     /// on-disk index) just ranks the matches: its hits come first, the rest
     /// keep list order. Locked hidden entries match on title only.
+    ///
+    /// Synchronous (callers and tests read `searchResults` right after); the
+    /// typing path, `searchTextChanged`, runs the same match off the main
+    /// actor instead. Supersedes any search still running in the background.
     func refreshQuery() {
+        searchGeneration &+= 1
         let q = searchText.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
             searchResults = nil
             return
         }
         let parsed = SearchQuery.parse(q)
-        let matched = operatorMatches(parsed, in: entries)
+        let matched = Self.indexedMatches(PreparedSearchQuery(parsed), in: entries, hiddenLocked: hiddenLocked)
+        publishSearch(matched, parsed: parsed)
+    }
+
+    /// FTS ranking on top of the in-memory matches (ids only — nothing is
+    /// decrypted for ranking).
+    private func publishSearch(_ matched: [JournalEntry], parsed: SearchQuery) {
         let ftsText = parsed.terms.joined(separator: " ")
         guard !ftsText.isEmpty else {
             searchResults = matched
             return
         }
-        let ranked = db.fullTextSearch(ftsText, scope: .active, journalId: activeJournalId).map(\.id)
+        let ranked = db.ftsRankedIds(ftsText, scope: .active, journalId: activeJournalId)
         searchResults = Self.rankedFirst(matched, rankedIds: ranked)
+    }
+
+    /// The query matched over `pool` with prepared terms and per-body cached
+    /// search eligibility. Same answer as `SearchQuery.matches` per entry
+    /// (see `IndexSearchText`). Pure; safe off the main actor. With
+    /// `stopsWhenCancelled` it returns early (a partial list the caller must
+    /// discard) once the surrounding task is cancelled.
+    nonisolated static func indexedMatches(_ prepared: PreparedSearchQuery, in pool: [JournalEntry],
+                                           hiddenLocked: Bool, stopsWhenCancelled: Bool = false) -> [JournalEntry] {
+        guard !prepared.isEmpty else { return pool }
+        var out: [JournalEntry] = []
+        for (i, entry) in pool.enumerated() {
+            if stopsWhenCancelled, i & 255 == 255, Task.isCancelled { break }
+            if prepared.matches(entry.indexedSearchRecord, hiddenLocked: hiddenLocked) { out.append(entry) }
+        }
+        return out
+    }
+
+    /// Background half of the typing path: matches an immutable snapshot of
+    /// the library off the main actor, then publishes on the main actor only
+    /// if nothing changed meanwhile (same query, same library revision, no
+    /// newer search). If the library changed, it falls back to the
+    /// synchronous `refreshQuery()` so results are never stale.
+    func refreshQueryInBackground() async {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else {
+            refreshQuery()
+            return
+        }
+        searchGeneration &+= 1
+        let generation = searchGeneration
+        let revision = entriesRevision
+        let pool = entries
+        let locked = hiddenLocked
+        let parsed = SearchQuery.parse(q)
+        let matched = await Self.matchOffMain(PreparedSearchQuery(parsed), in: pool, hiddenLocked: locked)
+        guard !Task.isCancelled, generation == searchGeneration,
+              q == searchText.trimmingCharacters(in: .whitespaces) else { return }
+        guard revision == entriesRevision, locked == hiddenLocked else {
+            refreshQuery()
+            return
+        }
+        publishSearch(matched, parsed: parsed)
+    }
+
+    @concurrent
+    nonisolated static func matchOffMain(_ prepared: PreparedSearchQuery, in pool: [JournalEntry],
+                                         hiddenLocked: Bool) async -> [JournalEntry] {
+        indexedMatches(prepared, in: pool, hiddenLocked: hiddenLocked, stopsWhenCancelled: true)
     }
 
     /// `matches` with the ids in `rankedIds` moved to the front, in that order;
@@ -330,13 +400,18 @@ final class JournalViewModel {
         return operatorMatches(parsed, in: source)
     }
 
-    /// Debounced search — called on every keystroke, hits the DB at most every 250ms.
+    /// Debounced search — called on every keystroke. After 250 ms of quiet
+    /// the query is matched off the main actor (`refreshQueryInBackground`);
+    /// a newer keystroke cancels both the wait and the running match.
     func searchTextChanged() {
         searchDebounce?.cancel()
         searchDebounce = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshQueryInBackground()
             guard !Task.isCancelled else { return }
-            await MainActor.run { self?.refreshQuery(); if let q = self?.searchText, q.count >= 3 { self?.recordRecentSearch(q) } }
+            let q = self.searchText
+            if q.count >= 3 { self.recordRecentSearch(q) }
         }
     }
 
@@ -397,7 +472,19 @@ final class JournalViewModel {
     }
 
     func sort(_ collection: inout [JournalEntry]) {
-        let order = sortOrder
+        Self.sort(&collection, by: sortOrder)
+    }
+
+    /// The Hidden list: hidden entries of the active and archived scopes,
+    /// in the `.hidden` fetch order (pinned first, newest first).
+    static func hiddenScope(active: [JournalEntry], archived: [JournalEntry]) -> [JournalEntry] {
+        var hidden = (active + archived).filter(\.isHidden)
+        sort(&hidden, by: .dateDesc)
+        return hidden
+    }
+
+    /// Sorts with an explicit order (Trash and Hidden always use `.dateDesc`).
+    static func sort(_ collection: inout [JournalEntry], by order: SortOrder) {
         collection.sort { a, b in
             if a.isPinned != b.isPinned { return a.isPinned }
             switch order {

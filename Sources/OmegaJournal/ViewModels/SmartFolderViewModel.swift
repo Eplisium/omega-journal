@@ -37,10 +37,12 @@ extension JournalViewModel {
         let locked = hiddenLocked
         let visible = entries.filter { ContentMasking.canShowContent(isHidden: $0.isHidden, hiddenLocked: locked) }
         tagTree = TagTree.build(entryTags: visible.map(\.tags))
-        let records = entries.map(\.searchRecord)
         var counts: [String: Int] = [:]
-        for folder in smartFolders {
-            counts[folder.id] = folder.count(in: records, hiddenLocked: locked)
+        if !smartFolders.isEmpty {
+            let records = entries.map(\.searchRecord)
+            for folder in smartFolders {
+                counts[folder.id] = Self.smartFolderMatches(folder, records: records, pool: entries, hiddenLocked: locked).count
+            }
         }
         smartFolderCounts = counts
         journalCounts = db.journalEntryCounts(includeHidden: !locked)
@@ -94,8 +96,26 @@ extension JournalViewModel {
 
     /// Entries matching a folder from a given pool, hidden-locked entries excluded.
     func smartFolderEntries(_ folder: SmartFolder, from pool: [JournalEntry]) -> [JournalEntry] {
-        let locked = hiddenLocked
-        return pool.filter { folder.matches($0.searchRecord, hiddenLocked: locked) }
+        Self.smartFolderMatches(folder, records: pool.map(\.searchRecord), pool: pool, hiddenLocked: hiddenLocked)
+    }
+
+    /// `folder.matches` for every entry, with the folder's free-text query
+    /// parsed once and matched on the indexed path: the folder's other
+    /// criteria are checked with the query blanked, then the query with
+    /// `PreparedSearchQuery` — the same two conditions `SmartFolder.matches`
+    /// ANDs, without re-parsing the query per entry.
+    static func smartFolderMatches(_ folder: SmartFolder, records: [SearchQuery.Record], pool: [JournalEntry],
+                                   hiddenLocked: Bool, now: Date = Date()) -> [JournalEntry] {
+        let trimmed = folder.query.trimmingCharacters(in: .whitespaces)
+        var criteria = folder
+        criteria.query = ""
+        let prepared = trimmed.isEmpty ? nil : PreparedSearchQuery(SearchQuery.parse(trimmed, now: now))
+        var out: [JournalEntry] = []
+        for (record, entry) in zip(records, pool) where criteria.matches(record, hiddenLocked: hiddenLocked, now: now) {
+            if let prepared, !prepared.matches(entry.indexedSearchRecord, hiddenLocked: hiddenLocked) { continue }
+            out.append(entry)
+        }
+        return out
     }
 
     // MARK: - Recent searches
@@ -118,8 +138,7 @@ extension JournalViewModel {
 
     /// Operator-aware search over an in-memory pool (hidden-locked entries expose title/mood/date only).
     func operatorMatches(_ query: SearchQuery, in pool: [JournalEntry]) -> [JournalEntry] {
-        let locked = hiddenLocked
-        return pool.filter { query.matches($0.searchRecord, hiddenLocked: locked) }
+        Self.indexedMatches(PreparedSearchQuery(query), in: pool, hiddenLocked: hiddenLocked)
     }
 
     /// Highlighted body snippet for a row, or nil when none applies / the entry is masked.
@@ -134,8 +153,9 @@ extension JournalViewModel {
         let q = SearchQuery.parse(raw)
         guard !q.isEmpty else { return [] }
         let locked = hiddenLocked
+        let prepared = PreparedSearchQuery(q)
         var out: [(JournalEntry, SearchSnippet?)] = []
-        for e in entries where q.matches(e.searchRecord, hiddenLocked: locked) {
+        for e in entries where prepared.matches(e.indexedSearchRecord, hiddenLocked: locked) {
             out.append((e, SearchSnippet.forRecord(e.searchRecord, terms: q.terms, hiddenLocked: locked)))
             if out.count == limit { break }
         }

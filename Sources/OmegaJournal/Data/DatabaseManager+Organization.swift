@@ -177,11 +177,18 @@ extension DatabaseManager {
 }
 
 extension JournalEntry {
-    var searchRecord: SearchQuery.Record {
+    nonisolated var searchRecord: SearchQuery.Record {
+        // Body-derived values come from the per-body memo (counted once).
         SearchQuery.Record(id: id, title: title, body: body, tags: tags, moodName: mood.label, moodValue: mood.rawValue,
                            createdAt: createdAt, attachmentCount: attachments.count,
-                           hasImage: attachments.contains { $0.isImage } || body.contains("!["),
+                           hasImage: attachments.contains { $0.isImage } || derived.hasImageMarkup(in: body),
                            wordCount: wordCount, isHidden: isHidden)
+    }
+
+    /// `searchRecord` prepared for repeated matching (`PreparedSearchQuery`).
+    /// Safe off the main actor; the body's fast-path eligibility is memoized.
+    nonisolated var indexedSearchRecord: IndexedSearchRecord {
+        IndexedSearchRecord(searchRecord, bodyIsASCIIFoldable: derived.isSearchFoldable(body))
     }
 }
 

@@ -180,6 +180,24 @@ public struct SearchQuery: Equatable, Sendable {
     /// masked card already shows). Its body and tags never match, and `tag:` / `has:` operators
     /// cannot match it.
     public func matches(_ record: Record, hiddenLocked: Bool) -> Bool {
+        let terms = self.terms
+        return evaluate(record, hiddenLocked: hiddenLocked, terms: terms, excluded: excluded) { field, term in
+            switch field {
+            case .title: return Self.contains(record.title, term)
+            case .body: return Self.contains(record.body, term)
+            case .tag(let i): return Self.contains(record.tags[i], term)
+            }
+        }
+    }
+
+    /// Which text a free term is tested against.
+    enum Field { case title, body, tag(Int) }
+
+    /// The single matching rule set, shared by `matches(_:hiddenLocked:)` and the indexed
+    /// `PreparedSearchQuery` path so both always agree. `contains` answers "does this field
+    /// contain this term" (case- and diacritic-insensitive).
+    func evaluate<Term>(_ record: Record, hiddenLocked: Bool, terms: [Term], excluded: [Term],
+                        contains: (Field, Term) -> Bool) -> Bool {
         let masked = record.isHidden && hiddenLocked
         if masked && (!tags.isEmpty || !has.isEmpty) { return false }
 
@@ -200,20 +218,21 @@ public struct SearchQuery: Equatable, Sendable {
             case .task: if !record.body.contains("- [ ]") && !record.body.contains("- [x]") && !record.body.contains("- [X]") { return false }
             }
         }
+        let tagIndices = record.tags.indices
         for term in terms {
-            if Self.contains(record.title, term) { continue }
+            if contains(.title, term) { continue }
             if masked { return false }
-            if Self.contains(record.body, term) { continue }
-            if record.tags.contains(where: { Self.contains($0, term) }) { continue }
+            if contains(.body, term) { continue }
+            if tagIndices.contains(where: { contains(.tag($0), term) }) { continue }
             return false
         }
         // Exclusions look only at what may be shown: for a locked hidden entry that is the
         // title, so `-word` can't reveal what its body or tags contain by making it vanish.
         for term in excluded {
-            if Self.contains(record.title, term) { return false }
+            if contains(.title, term) { return false }
             if masked { continue }
-            if Self.contains(record.body, term) { return false }
-            if record.tags.contains(where: { Self.contains($0, term) }) { return false }
+            if contains(.body, term) { return false }
+            if tagIndices.contains(where: { contains(.tag($0), term) }) { return false }
         }
         return true
     }
