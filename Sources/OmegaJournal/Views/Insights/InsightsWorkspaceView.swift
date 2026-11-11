@@ -296,42 +296,39 @@ extension InsightsWorkspaceContent {
 
     // MARK: Hero metrics
 
+    /// Four tiles, one row on a normal window: how often, how much, how it
+    /// felt, and the standout day. (Entries-per-day and average length were
+    /// folded into details — they repeated the same numbers.)
     private var heroMetrics: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
             ReflectionMetric(
                 value: "\(data.writingDays)",
-                label: "Writing days",
-                detail: data.period.label,
+                label: data.writingDays == 1 ? "Writing day" : "Writing days",
+                detail: UIInsightsCopy.writingDaysDetail(writingDays: data.writingDays, periodDays: periodDayCount),
                 icon: "calendar.badge.checkmark",
                 tint: theme.accentColor
             )
             ReflectionMetric(
                 value: data.wordCount.formatted(),
                 label: "Words written",
-                detail: "Across \(entries.count) \(entries.count == 1 ? "entry" : "entries")",
+                detail: UIInsightsCopy.wordsDetail(entryCount: entries.count, averagePerEntry: data.averageWordsPerEntry),
                 icon: "text.word.spacing",
                 tint: .teal
             )
             ReflectionMetric(
                 value: averageMood.map { "\($0.face) \($0.label)" } ?? "—",
-                label: "Mood check-ins",
-                detail: averageMood == nil ? "No check-ins yet" : "A gentle average",
+                label: "Average mood",
+                detail: UIInsightsCopy.moodDetail(checkIns: checkInCount),
                 icon: "face.smiling",
                 tint: .orange
             )
             ReflectionMetric(
-                value: bestDay.map { "\($0.words.formatted())" } ?? "—",
-                label: "Best writing day",
-                detail: bestDay.map { $0.date.formatted(.dateTime.month(.abbreviated).day()) } ?? "Not yet in this period",
-                icon: "flame.fill",
+                value: bestDay.map { UIInsightsCopy.words($0.words) } ?? "—",
+                label: "Best day",
+                detail: bestDay.map { $0.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
+                    ?? "Not yet in this period",
+                icon: "star",
                 tint: .pink
-            )
-            ReflectionMetric(
-                value: entriesPerWritingDay.map { String(format: "%.1f", $0) } ?? "—",
-                label: "Entries per writing day",
-                detail: entriesPerWritingDay == nil ? "No rhythm yet" : "Your cadence",
-                icon: "square.stack.3d.up",
-                tint: .indigo
             )
         }
     }
@@ -339,13 +336,13 @@ extension InsightsWorkspaceContent {
     // MARK: Sections
 
     private var writingSection: some View {
-        InsightSection(title: "Writing volume", subtitle: "Words recorded across your selected period") {
+        InsightSection(title: "Words per day", subtitle: "How much you wrote each day in this period") {
             WritingVolumeChart(points: data.writingPoints)
         }
     }
 
     private var moodSection: some View {
-        InsightSection(title: "Mood check-ins", subtitle: "Hover a point to see the entries behind it · click to open the day") {
+        InsightSection(title: "Mood over time", subtitle: "Daily average · hover for the entries behind it, click to open the day") {
             MoodCheckInChart(points: data.moodPoints, hoverTitleProvider: { data.moodHoverTitle(for: $0) }, onOpenDay: { openDay($0.date) })
         }
     }
@@ -361,21 +358,15 @@ extension InsightsWorkspaceContent {
                 )
                 PatternRow(
                     icon: "clock",
-                    title: "Common writing time",
+                    title: "Usual writing time",
                     value: mostProductiveHour,
                     tint: .teal
                 )
                 PatternRow(
                     icon: "flame",
-                    title: "Current rhythm",
-                    value: data.streak > 0 ? "\(data.streak)-day streak" : "Start when ready",
+                    title: "Current streak",
+                    value: UIInsightsCopy.streak(data.streak),
                     tint: .orange
-                )
-                PatternRow(
-                    icon: "text.word.spacing",
-                    title: "Average entry",
-                    value: averageWordsPerEntry,
-                    tint: .indigo
                 )
             }
         }
@@ -389,13 +380,13 @@ extension InsightsWorkspaceContent {
     }
 
     private var distributionSection: some View {
-        InsightSection(title: "Mood distribution", subtitle: "How your check-ins lean across the scale") {
+        InsightSection(title: "Mood mix", subtitle: "How often each mood appears") {
             MoodDistributionRow(data: data.distribution, averageMood: averageMood)
         }
     }
 
     private var rhythmSection: some View {
-        InsightSection(title: "Weekday rhythm", subtitle: "Which days carry your writing") {
+        InsightSection(title: "Entries by weekday", subtitle: "Which days you write most") {
             WeekdayRhythmChart(data: data.weekdayCounts)
         }
     }
@@ -497,10 +488,15 @@ extension InsightsWorkspaceContent {
 
     private var averageMood: Mood? { data.averageMood }
     private var bestDay: WordPoint? { data.bestDay }
-    private var entriesPerWritingDay: Double? { data.entriesPerWritingDay }
+    /// Mood check-ins in the period (every entry with a mood counts once).
+    private var checkInCount: Int { data.distribution.reduce(0) { $0 + $1.count } }
 
-    private var averageWordsPerEntry: String {
-        data.averageWordsPerEntry.map { "\($0) words" } ?? "Not enough data"
+    /// Calendar days the selected period spans up to today; nil for All time.
+    private var periodDayCount: Int? {
+        guard let start = data.periodStart else { return nil }
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: start), to: cal.startOfDay(for: Date())).day ?? 0
+        return max(1, days + 1)
     }
 
     /// Deterministic on ties (lowest weekday wins).

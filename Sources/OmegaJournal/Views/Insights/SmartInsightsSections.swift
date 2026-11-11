@@ -69,7 +69,16 @@ struct SmartInsightsSections: View {
                     }
                 }
                 .chartYScale(domain: 1...5)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: [1, 3, 5]) { value in
+                        AxisGridLine().foregroundStyle(theme.secondaryTextColor.opacity(0.08))
+                        AxisValueLabel {
+                            Text(UIMoodGlyph.face(forLevel: value.as(Int.self) ?? 3)).font(OmegaTheme.font(.meta))
+                        }
+                    }
+                }
                 .frame(height: 150)
+                .accessibilityLabel("Average mood for each weekday")
             }
         }
     }
@@ -86,10 +95,11 @@ struct SmartInsightsSections: View {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(rows) { row in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            OmegaChip(title: String(format: "r = %+.2f", row.result.r),
+                            OmegaChip(title: UIInsightsCopy.correlationChip(strength: row.result.strength.rawValue),
                                       tone: row.result.strength == .none ? .neutral : (row.result.r >= 0 ? .success : .warning))
                             Text(row.result.sentence(metric: row.name))
                                 .font(OmegaTheme.captionFont).foregroundColor(theme.titleTextColor)
+                                .help(String(format: "Correlation r = %+.2f over %d days", row.result.r, row.result.n))
                         }
                     }
                     if let sleep = sleepSplit {
@@ -183,7 +193,7 @@ struct SmartInsightsSections: View {
         let runs = vm.streakRuns(for: entries).prefix(5)
         return section("Streak history", "Your longest runs of consecutive writing days") {
             if runs.isEmpty {
-                Text("Your streaks will be listed here.").font(OmegaTheme.captionFont).foregroundColor(theme.secondaryTextColor)
+                Text("Write on two days in a row to start your first streak.").font(OmegaTheme.captionFont).foregroundColor(theme.secondaryTextColor)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(runs.enumerated()), id: \.offset) { _, run in

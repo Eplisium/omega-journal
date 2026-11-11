@@ -26,7 +26,7 @@ struct CalendarView: View {
     @State private var presentedEntryID: String?
 
     private let calendar = Calendar.current
-    private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
+    private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
 
     /// The ViewModel owns the actual privacy rule. This defensive filter makes
     /// the Calendar safe even during an auth-state transition.
@@ -164,6 +164,8 @@ struct CalendarView: View {
                 workspaceControls
             }
         }
+        // Pinned leading: the stacked fallback used to float centred.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 28)
         .padding(.vertical, 18)
         .background(theme.backgroundColor)
@@ -349,24 +351,11 @@ struct CalendarView: View {
     }
 
     private func monthGridCard(_ snap: CalendarMonthSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Month at a glance")
-                        .font(OmegaTheme.font(.bodyLarge, .semibold))
-                        .foregroundColor(theme.titleTextColor)
-                    Text("Select any day to inspect its writing.")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
-                }
-                Spacer()
-                Text("\(snap.monthEntries.count) \(entryWord(for: snap.monthEntries.count))")
-                    .font(OmegaTheme.font(.meta, .medium))
-                    .foregroundColor(theme.secondaryTextColor)
-            }
-
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
+        // The month name lives in the toolbar and the totals in the summary
+        // strip above, so the grid gets the space (no "Month at a glance" row).
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
                     ForEach(Self.weekdayHeaders(calendar: calendar)) { header in
                         Text(header.symbol.uppercased())
                             .font(OmegaTheme.font(.meta, .semibold))
@@ -376,7 +365,7 @@ struct CalendarView: View {
                     }
                 }
 
-                LazyVGrid(columns: gridColumns, spacing: 8) {
+                LazyVGrid(columns: gridColumns, spacing: 6) {
                     ForEach(Array(gridDays.enumerated()), id: \.offset) { _, day in
                         if let day {
                             CalendarDayCell(
@@ -388,7 +377,7 @@ struct CalendarView: View {
                             )
                         } else {
                             Color.clear
-                                .frame(minHeight: 82)
+                                .frame(minHeight: CalendarDayCell.minHeight)
                                 .accessibilityHidden(true)
                         }
                     }

@@ -350,6 +350,7 @@ struct WeekdayRhythmChart: View {
                     .font(OmegaTheme.font(.meta))
             }
         }
+        .chartYAxisLabel("entries", position: .leading)
         .frame(height: 150)
         .accessibilityLabel("Entries per weekday chart")
     }
@@ -488,7 +489,13 @@ struct WritingVolumeChart: View {
                 .foregroundStyle(theme.accentColor.gradient)
                 .cornerRadius(4)
             }
-            .chartYAxis { AxisMarks(position: .leading) }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in
+                    AxisGridLine().foregroundStyle(theme.secondaryTextColor.opacity(0.08))
+                    AxisValueLabel().font(OmegaTheme.font(.meta))
+                }
+            }
+            .chartYAxisLabel("words", position: .leading)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 5)) { _ in
                     AxisGridLine().foregroundStyle(.clear)
@@ -497,7 +504,7 @@ struct WritingVolumeChart: View {
                 }
             }
             .frame(height: 190)
-            .accessibilityLabel("Writing volume chart")
+            .accessibilityLabel("Words per day chart")
         }
     }
 }

@@ -95,6 +95,9 @@ struct CalendarDayCell: View {
         safeEntries.count == 1 ? "1 entry" : "\(safeEntries.count) entries"
     }
 
+    /// Compact enough that a six-week month fits a normal window without scrolling.
+    static let minHeight: CGFloat = 62
+
     private var accessibilityDescription: String {
         let date = day.formatted(date: .complete, time: .omitted)
         guard !safeEntries.isEmpty else { return "\(date), no entries" }
@@ -115,12 +118,7 @@ struct CalendarDayCell: View {
                     Text("\(calendar.component(.day, from: day))")
                         .font(OmegaTheme.font(.bodyLarge, isToday ? .bold : .semibold, design: .rounded))
                         .foregroundColor(isFuture ? theme.secondaryTextColor.opacity(0.55) : theme.titleTextColor)
-                    Spacer(minLength: 4)
-                    if !safeEntries.isEmpty {
-                        Text("\(safeEntries.count)")
-                            .font(OmegaTheme.font(.meta, .bold, design: .rounded))
-                            .foregroundColor(theme.accentColor)
-                    }
+                    Spacer(minLength: 0)
                 }
 
                 Spacer(minLength: 2)
@@ -135,15 +133,20 @@ struct CalendarDayCell: View {
                                 .fill(mood.color)
                                 .frame(width: 7, height: 7)
                         }
-                        Text(entryLabel)
-                            .font(OmegaTheme.font(.meta, .medium))
-                            .foregroundColor(theme.secondaryTextColor)
-                            .lineLimit(1)
+                        // "1 entry" when it fits; a bare count in narrow cells
+                        // (never a truncated "1 en…").
+                        ViewThatFits(in: .horizontal) {
+                            Text(entryLabel)
+                            Text("\(safeEntries.count)")
+                        }
+                        .font(OmegaTheme.font(.meta, .medium))
+                        .foregroundColor(theme.secondaryTextColor)
+                        .lineLimit(1)
                     }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
+            .padding(8)
+            .frame(maxWidth: .infinity, minHeight: CalendarDayCell.minHeight, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(fillColor))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
