@@ -150,6 +150,10 @@ final class ContextService {
         self.photos = photos
     }
 
+    /// App-wide instance for the editor and Settings. Created on first use;
+    /// creating it asks for nothing.
+    static let shared = ContextService.live()
+
     /// Real system providers. Creating them asks for nothing.
     static func live(settings: ContextSettings = ContextSettings()) -> ContextService {
         ContextService(settings: settings, place: LiveContextPlace(), calendar: LiveContextCalendar(), photos: LiveContextPhotos())
