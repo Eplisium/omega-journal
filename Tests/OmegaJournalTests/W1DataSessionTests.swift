@@ -10,7 +10,7 @@ import OmegaJournalCore
 // state in between — still re-derives at once. Uses the per-VM lock-state
 // seam: BiometricAuth.shared is process-global and parallel suites poll it.
 
-@Suite("W1Data session changes: re-derive only what is stale", .serialized)
+@Suite("W1Data session changes: re-derive only what is stale", .serialized, .lockState)
 @MainActor
 struct W1DataSessionTests {
     init() { TestSharedEnvironment.pin() }

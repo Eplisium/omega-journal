@@ -85,7 +85,7 @@ struct W1EditorPrivacyTests {
 
     // MARK: App Lock sweep
 
-    @Test("engaging App Lock sweeps decrypted temp files; a disabled lock does nothing")
+    @Test("engaging App Lock sweeps decrypted temp files; a disabled lock does nothing", .lockState)
     func appLockSweeps() async throws {
         let (root, db) = Self.makeDB()
         defer { try? FileManager.default.removeItem(at: root) }

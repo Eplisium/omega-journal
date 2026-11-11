@@ -7,7 +7,7 @@ import OmegaJournalCore
 // lists instead of re-reading (and re-decrypting) every row. The result must
 // be exactly what a full `reload()` would show.
 
-@Suite("W1Data targeted refresh: same state as a full reload", .serialized)
+@Suite("W1Data targeted refresh: same state as a full reload", .serialized, .lockState)
 @MainActor
 struct W1DataTargetedRefreshTests {
     init() { TestSharedEnvironment.pin() }

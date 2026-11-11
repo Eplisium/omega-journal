@@ -179,7 +179,7 @@ struct W1IntIntentCommandTests {
         #expect(vm.db.fetchEntry(id: created.id)?.mood == .awful)
     }
 
-    @Test func bridgeAnswersOnlyWhileAttached() async throws {
+    @Test(.lockState) func bridgeAnswersOnlyWhileAttached() async throws {
         let (vm, root) = try makeVM()
         defer { try? FileManager.default.removeItem(at: root) }
         IntentJournalBridge.detach()

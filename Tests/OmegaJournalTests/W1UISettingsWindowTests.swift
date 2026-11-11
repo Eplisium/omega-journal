@@ -25,7 +25,7 @@ struct W1UISettingsWindowTests {
 
     @Test("Settings is a tabbed pane view, not a sized sheet")
     func tabbed() throws {
-        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        let (vm, _) = try BrowseSupport.makeVM()
         let typeName = String(describing: type(of: SettingsView(vm: vm).body))
         #expect(typeName.contains("TabView"))
         #expect(typeName.contains("WindowToastHost"))
@@ -40,7 +40,7 @@ struct W1UISettingsWindowTests {
 
     @Test("navigation state picks the pane")
     func navigation() throws {
-        let (vm, _) = try AuditFixBrowseSupport.makeVM()
+        let (vm, _) = try BrowseSupport.makeVM()
         let view = SettingsView(vm: vm, initialSection: .about)
         #expect(view.navigation.section == .about)
         #expect(view.navigation !== SettingsNavigation.shared)
@@ -51,8 +51,8 @@ struct W1UISettingsWindowTests {
     func host() throws {
         let host = SettingsHost()
         #expect(host.activeModel == nil)
-        let (a, _) = try AuditFixBrowseSupport.makeVM()
-        let (b, _) = try AuditFixBrowseSupport.makeVM()
+        let (a, _) = try BrowseSupport.makeVM()
+        let (b, _) = try BrowseSupport.makeVM()
         host.register(a)
         host.register(b)
         #expect(host.activeModel === b)
