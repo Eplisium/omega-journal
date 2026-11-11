@@ -56,119 +56,129 @@ struct TodayView: View {
         let todays = Self.todaysEntry(in: vm.entries, now: now)
         // Reflective scope: a future-dated entry is not "recent writing".
         let recent = vm.recentReflectiveEntries(limit: 3, relativeTo: now)
+            .filter { $0.id != todays?.id }
         let memory = vm.reflectiveOnThisDay(relativeTo: now).first
         return ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 28) {
                 welcomeHeader(now: now)
-                // Writing comes first: either continue today's entry or start one.
+                // One clear focus: today's writing. Everything else is quieter below.
                 if let todays { heroCard(todays) } else { startWritingCard }
-                if !vm.entries.isEmpty { statLine }
-                if hasDailyGoals { progressCard }
-                // One folded line under the writing; opens to the check-in and habits.
-                if showCheckin { TodayCheckinSection(now: now) }
 
-                if !recent.isEmpty {
-                    recentWriting(recent)
+                VStack(alignment: .leading, spacing: 12) {
+                    // One folded line under the writing; opens to the check-in and habits.
+                    if showCheckin { TodayCheckinSection(now: now) }
+                    if let memory { memoryMoment(memory) }
                 }
 
-                if let memory {
-                    memoryMoment(memory)
-                }
+                if !recent.isEmpty { recentWriting(recent) }
             }
-            .padding(.horizontal, 36)
-            .padding(.vertical, 32)
-            .frame(maxWidth: 1_120, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 40)
+            .padding(.vertical, 36)
+            // A readable column, centred: the page no longer stretches cards edge to edge.
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden)
         .background(theme.backgroundColor)
     }
 
-    /// Greeting + date + one gentle status line. The primary Write action
-    /// lives in the hero card directly below, not floating at the far right.
+    /// Date (with the current streak) + greeting + one gentle line. Totals
+    /// live in the sidebar footer and Insights, not here.
     private func welcomeHeader(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(now.formatted(.dateTime.weekday(.wide).month(.wide).day()).uppercased())
-                .font(OmegaTheme.font(.meta, .semibold))
-                .tracking(0.9)
+        let dateText = now.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        let streak = vm.entries.isEmpty ? 0 : vm.streakSummary.current
+        let unit = vm.streakSummary.unit
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(UITodayCopy.dateLine(dateText: dateText, streak: streak, unit: unit))
+                .font(OmegaTheme.font(.caption, .medium))
                 .foregroundColor(theme.secondaryTextColor)
+                .accessibilityLabel(UITodayCopy.dateLineAccessibility(dateText: dateText, streak: streak, unit: unit))
 
             Text(Self.greeting(at: now))
-                .font(OmegaTheme.font(.title, .bold, design: .serif))
+                .font(OmegaTheme.font(.display, .semibold, design: .serif))
                 .foregroundColor(theme.titleTextColor)
                 .accessibilityAddTraits(.isHeader)
 
             Text(StreakCopy.welcomeBack(daysAway: vm.entries.isEmpty ? nil : vm.streakSummary.daysSinceLastEntry))
                 .font(OmegaTheme.font(.body))
-                .foregroundColor(theme.bodyTextColor)
+                .foregroundColor(theme.secondaryTextColor)
         }
     }
 
     // MARK: Hero — start writing
 
-    /// Shown when nothing has been written today: one clear invitation with a
-    /// primary action, plus today's prompt and templates as quieter options.
+    /// Shown when nothing has been written today: today's prompt as the
+    /// invitation, one primary Write action, templates as a quiet option.
     private var startWritingCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("What's on your mind?")
-                .font(OmegaTheme.font(.heading, .semibold, design: .serif))
-                .foregroundColor(theme.titleTextColor)
+        let prompt = PromptGenerator.today()
+        return VStack(alignment: .leading, spacing: 14) {
+            Text(UITodayCopy.promptHeading)
+                .font(OmegaTheme.font(.meta, .semibold))
+                .foregroundColor(theme.accentColor)
 
             Button {
                 openJournal()
                 vm.createEntryFromPrompt()
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundColor(theme.accentColor)
-                    Text(PromptGenerator.today())
-                        .font(OmegaTheme.font(.body, design: .serif))
-                        .foregroundColor(theme.bodyTextColor)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .contentShape(Rectangle())
+                Text(prompt)
+                    .font(OmegaTheme.font(.title, .regular, design: .serif))
+                    .foregroundColor(theme.titleTextColor)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .omegaTooltip("Start an entry with today's prompt")
-            .accessibilityLabel("Write about today's prompt: \(PromptGenerator.today())")
+            .accessibilityLabel("Write about today's prompt: \(prompt)")
 
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Button {
+                    openJournal()
+                    vm.createEntryFromPrompt()
+                } label: {
+                    Label("Write", systemImage: "square.and.pencil")
+                        .font(OmegaTheme.font(.body, .semibold))
+                        .foregroundColor(theme.onAccentColor)
+                        .ojAccentCapsule(theme.accentColor, horizontal: 18, vertical: 9)
+                }
+                .ojGlassButtonStyle(prominent: true, height: 38)
+                .accessibilityLabel("Write about today's prompt")
+
                 Button {
                     openJournal()
                     vm.createEntry()
                 } label: {
-                    Label("Write entry", systemImage: "square.and.pencil")
-                        .font(OmegaTheme.font(.body, .semibold))
-                        .foregroundColor(theme.onAccentColor)
-                        .ojAccentCapsule(theme.accentColor, horizontal: 18, vertical: 10)
+                    Text("Blank entry")
+                        .font(OmegaTheme.font(.body, .medium))
+                        .foregroundColor(theme.accentColor)
                 }
-                .ojGlassButtonStyle(prominent: true, height: 40)
-                .accessibilityLabel("Write a new journal entry")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Write a new blank entry")
 
                 Button {
                     NotificationCenter.default.post(name: .newFromTemplate, object: nil)
                 } label: {
-                    Label("Use a template", systemImage: "doc.text")
+                    Text("Template…")
                         .font(OmegaTheme.font(.body, .medium))
-                        .foregroundColor(theme.accentColor)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Capsule().strokeBorder(theme.accentColor.opacity(0.45), lineWidth: 1))
+                        .foregroundColor(theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Start an entry from a template")
+                Spacer(minLength: 0)
             }
+
+            goalProgress
         }
-        .padding(24)
+        .padding(26)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(theme.cardColor.opacity(0.62))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(theme.accentColor.opacity(0.22), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(theme.accentColor.opacity(0.16), lineWidth: 1)
         )
     }
 
@@ -184,243 +194,130 @@ struct TodayView: View {
 
     private func heroCard(_ entry: JournalEntry) -> some View {
         let hero = TodayHeroContent(entry: entry, hiddenLocked: !biometricAuth.isAuthenticated)
-        return Button { openEntry(entry) } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(entry.mood.color)
-                        .frame(width: 7, height: 7)
-                    Text("Today · \(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
-                        .font(OmegaTheme.font(.meta, .medium))
-                        .foregroundColor(theme.secondaryTextColor)
-                    Spacer()
-                    if !hero.tags.isEmpty {
-                        ForEach(hero.tags.prefix(2), id: \.self) { tag in
-                            Text("#\(tag)")
-                                .font(OmegaTheme.font(.meta, .medium))
-                                .foregroundColor(theme.accentColor.opacity(0.9))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(theme.accentColor.opacity(0.14)))
-                        }
-                    }
-                }
-
-                Text("Today's entry")
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .tracking(1.0)
-                    .foregroundColor(theme.secondaryTextColor)
-
-                Text(entry.displayTitle)
-                    .font(OmegaTheme.font(.caption, .semibold, design: .serif))
-                    .foregroundColor(theme.titleTextColor)
-                    .lineLimit(1)
-
-                Text(hero.preview)
-                    .font(OmegaTheme.font(.caption))
-                    .foregroundColor(theme.bodyTextColor)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-
-                HStack(spacing: 10) {
-                    Label("Continue writing", systemImage: "pencil.line")
-                        .font(OmegaTheme.font(.caption, .semibold))
-                        .foregroundColor(theme.onAccentColor)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        // The card is the button; its call to action
-                        // reads as a prominent glass capsule on macOS 26.
-                        .ojGlass(.primaryAction, in: Capsule(), tint: theme.accentColor) {
-                            $0.background(Capsule().fill(theme.accentColor))
-                        }
-                    if let words = hero.wordCountText {
-                        Text(words)
+        return VStack(alignment: .leading, spacing: 12) {
+            Button { openEntry(entry) } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Text(UITodayCopy.entryHeading)
+                            .font(OmegaTheme.font(.meta, .semibold))
+                            .foregroundColor(theme.accentColor)
+                        Text("· \(entry.mood.face) \(UIRowMetaFormat.dateText(for: entry.createdAt))")
                             .font(OmegaTheme.font(.meta))
                             .foregroundColor(theme.secondaryTextColor)
+                        Spacer()
                     }
-                    Spacer()
-                }
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(theme.cardColor.opacity(0.72))
-            )
-            .shadow(color: theme.accentColor.opacity(0.18), radius: 20, x: 0, y: 6)
-            .contentShape(Rectangle())
-            .hoverGlow(radius: 16, glow: 0.4, border: 0.55)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Continue today's entry: \(entry.displayTitle)")
-    }
 
-    /// One quiet line instead of three cards: the numbers stay, the visual weight goes.
-    private var statLine: some View {
-        HStack(spacing: 14) {
-            streakRing
-            statText
-        }
-    }
-
-    private var streakRing: some View {
-        let s = vm.streakSummary
-        let progress = StreakRing.progress(current: s.current)
-        return ZStack {
-            Circle().stroke(theme.secondaryTextColor.opacity(0.18), lineWidth: 5)
-            Circle().trim(from: 0, to: progress)
-                .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(OmegaTheme.Motion.standard.animation(reduceMotion: reduceMotion), value: progress)
-            VStack(spacing: -1) {
-                Text("\(s.current)").font(OmegaTheme.font(.bodyLarge, .bold, design: .rounded)).foregroundColor(theme.titleTextColor)
-                Text(s.unit == "week" ? "wk" : "day").font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor)
-            }
-        }
-        .frame(width: 54, height: 54)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Writing streak: \(s.current) \(s.unit)\(s.current == 1 ? "" : "s"). \(StreakRing.caption(current: s.current, unit: s.unit))")
-    }
-
-    private var statText: some View {
-        Text("\(vm.entriesThisWeek) this week  ·  \(vm.entriesThisMonth) this month  ·  \(vm.totalWordCount.formatted()) words written")
-            .font(OmegaTheme.font(.caption))
-            .foregroundColor(theme.secondaryTextColor)
-            .accessibilityElement(children: .combine)
-    }
-
-    private var hasDailyGoals: Bool {
-        goals.goals.contains { $0.type == .dailyWords || $0.type == .dailyEntries }
-    }
-
-    /// Daily goals only; the old "Return to" shortcuts duplicated the sidebar and were removed.
-    private var progressCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("TODAY'S PROGRESS")
-                .font(OmegaTheme.font(.meta, .semibold))
-                .tracking(0.8)
-                .foregroundColor(theme.secondaryTextColor)
-                .accessibilityAddTraits(.isHeader)
-            ForEach(goals.goals.filter { $0.type == .dailyWords || $0.type == .dailyEntries }) { goal in
-                TodayGoalRow(goal: goal)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.42)))
-    }
-
-    private func recentWriting(_ recentEntries: [JournalEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Recent writing")
-                        .font(OmegaTheme.font(.heading, .semibold, design: .serif))
+                    Text(entry.displayTitle)
+                        .font(OmegaTheme.font(.title, .semibold, design: .serif))
                         .foregroundColor(theme.titleTextColor)
-                    Text("A few places to return to")
-                        .font(OmegaTheme.font(.caption))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    Text(hero.preview)
+                        .font(OmegaTheme.font(.body))
+                        .foregroundColor(theme.bodyTextColor)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open today's entry: \(entry.displayTitle)")
+
+            HStack(spacing: 14) {
+                Button { openEntry(entry); vm.startEditing(entry) } label: {
+                    Label("Continue writing", systemImage: "pencil.line")
+                        .font(OmegaTheme.font(.body, .semibold))
+                        .foregroundColor(theme.onAccentColor)
+                        .ojAccentCapsule(theme.accentColor, horizontal: 16, vertical: 8)
+                }
+                .ojGlassButtonStyle(prominent: true, height: 36)
+                .accessibilityLabel("Continue today's entry")
+                if let words = hero.wordCountText {
+                    Text(words)
+                        .font(OmegaTheme.font(.meta))
                         .foregroundColor(theme.secondaryTextColor)
                 }
                 Spacer()
-                Button("See all") { openJournal() }
-                    .buttonStyle(.plain)
-                    .font(OmegaTheme.font(.caption, .semibold))
-                    .foregroundColor(theme.accentColor)
-            }
-
-            HStack(alignment: .top, spacing: 14) {
-                ForEach(recentEntries) { entry in
-                    Button { openEntry(entry) } label: {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(entry.mood.color)
-                                    .frame(width: 7, height: 7)
-                                Text(entry.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                                    .font(OmegaTheme.font(.meta))
-                                    .foregroundColor(theme.secondaryTextColor)
-                                Spacer(minLength: 4)
-                                if entry.isFavorite {
-                                    Image(systemName: "star.fill")
-                                        .font(OmegaTheme.font(.meta))
-                                        .foregroundColor(.yellow)
-                                }
-                            }
-
-                            Text(entry.displayTitle)
-                                .font(OmegaTheme.font(.bodyLarge, .semibold, design: .serif))
-                                .foregroundColor(theme.titleTextColor)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-
-                            Text(entry.preview)
-                                .font(OmegaTheme.font(.meta))
-                                .foregroundColor(theme.secondaryTextColor)
-                                .lineLimit(3)
-                                .multilineTextAlignment(.leading)
-                                .frame(minHeight: 42, alignment: .top)
-
-                            Spacer(minLength: 0)
-
-                            HStack(spacing: 4) {
-                                ForEach(entry.tags.prefix(2), id: \.self) { tag in
-                                    Text("#\(tag)")
-                                        .font(OmegaTheme.font(.meta, .medium))
-                                        .foregroundColor(theme.accentColor.opacity(0.9))
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1.5)
-                                        .background(Capsule().fill(theme.accentColor.opacity(0.12)))
-                                }
-                                Spacer(minLength: 2)
-                                Text("\(entry.wordCount)w")
-                                    .font(OmegaTheme.font(.meta))
-                                    .foregroundColor(theme.secondaryTextColor.opacity(0.6))
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .fill(theme.cardColor.opacity(0.5))
-                        )
-                        .contentShape(Rectangle())
-                        .hoverGlow(radius: 13, glow: 0.3, border: 0.4)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Open \(entry.displayTitle)")
+                ForEach(hero.tags.prefix(2), id: \.self) { tag in
+                    Text("#\(TagPath.leaf(of: tag))")
+                        .font(OmegaTheme.font(.meta, .medium))
+                        .foregroundColor(theme.secondaryTextColor)
                 }
             }
+
+            goalProgress
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(theme.cardColor.opacity(0.62))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(theme.accentColor.opacity(0.16), lineWidth: 1)
+        )
+    }
+
+    // MARK: Goals (inside the hero)
+
+    private var dailyGoals: [WritingGoal] {
+        goals.goals.filter { $0.type == .dailyWords || $0.type == .dailyEntries }
+    }
+
+    /// Today's goal progress as thin bars at the foot of the hero (it used to
+    /// be a separate "TODAY'S PROGRESS" card).
+    @ViewBuilder
+    private var goalProgress: some View {
+        let daily = dailyGoals
+        if !daily.isEmpty {
+            Divider().opacity(0.25)
+            HStack(alignment: .top, spacing: 18) {
+                ForEach(daily) { goal in TodayGoalRow(goal: goal) }
+            }
+        }
+    }
+
+    // MARK: Secondary — quiet rows
+
+    /// Up to three recent entries as a compact list (title + relative date).
+    private func recentWriting(_ recentEntries: [JournalEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Recently")
+                    .font(OmegaTheme.font(.caption, .semibold))
+                    .foregroundColor(theme.secondaryTextColor)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button("See all") { openJournal() }
+                    .buttonStyle(.plain)
+                    .font(OmegaTheme.font(.caption, .medium))
+                    .foregroundColor(theme.accentColor)
+                    .accessibilityLabel("See all entries")
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(recentEntries.enumerated()), id: \.element.id) { index, entry in
+                    if index > 0 { Divider().opacity(0.18).padding(.leading, 34) }
+                    TodayQuietRow(face: entry.mood.face,
+                                  title: entry.displayTitle,
+                                  trailing: UIRowMetaFormat.dateText(for: entry.createdAt),
+                                  isFavorite: entry.isFavorite) { openEntry(entry) }
+                        .accessibilityLabel("Open \(entry.displayTitle)")
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.32)))
         }
     }
 
     private func memoryMoment(_ entry: JournalEntry) -> some View {
-        Button { openEntry(entry) } label: {
-            HStack(spacing: 13) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(OmegaTheme.font(.heading, .medium))
-                    .foregroundColor(.teal)
-                    .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color.teal.opacity(0.12)))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("On This Day")
-                        .font(OmegaTheme.font(.caption, .semibold))
-                        .foregroundColor(theme.titleTextColor)
-                    Text(entry.displayTitle)
-                        .font(OmegaTheme.font(.body))
-                        .foregroundColor(theme.secondaryTextColor)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "arrow.right")
-                    .font(OmegaTheme.font(.meta, .semibold))
-                    .foregroundColor(theme.accentColor)
-            }
-            .padding(15)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(theme.cardColor.opacity(0.34)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Open memory from this day: \(entry.displayTitle)")
+        TodayQuietRow(systemImage: "clock.arrow.circlepath",
+                      title: "On this day: \(entry.displayTitle)",
+                      trailing: entry.createdAt.formatted(.dateTime.year()),
+                      isFavorite: false) { openEntry(entry) }
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(theme.cardColor.opacity(0.32)))
+            .accessibilityLabel("Open memory from this day: \(entry.displayTitle)")
     }
 
     /// Changes at the hours `TodayRolloverSchedule.boundaryHours` lists.
@@ -461,6 +358,67 @@ nonisolated struct TodayRolloverSchedule: TimelineSchedule {
             defer { next = Self.nextBoundary(after: next, calendar: calendar) }
             return next
         }
+    }
+}
+
+/// One compact, hoverable line on Today (recent entries, On This Day).
+private struct TodayQuietRow: View {
+    var face: String?
+    var systemImage: String?
+    let title: String
+    let trailing: String
+    let isFavorite: Bool
+    let action: () -> Void
+    private let theme = ThemeManager.shared
+    @State private var hover = false
+
+    init(face: String? = nil, systemImage: String? = nil, title: String, trailing: String,
+         isFavorite: Bool, action: @escaping () -> Void) {
+        self.face = face; self.systemImage = systemImage
+        self.title = title; self.trailing = trailing; self.isFavorite = isFavorite; self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Group {
+                    if let face { Text(face).font(OmegaTheme.font(.body)) }
+                    else if let systemImage {
+                        Image(systemName: systemImage)
+                            .font(OmegaTheme.font(.body, .medium))
+                            .foregroundColor(theme.accentColor)
+                    }
+                }
+                .frame(width: 22)
+                .accessibilityHidden(true)
+                Text(title)
+                    .font(OmegaTheme.font(.body, .medium, design: .serif))
+                    .foregroundColor(theme.titleTextColor)
+                    .lineLimit(1)
+                if isFavorite {
+                    Image(systemName: "star.fill").font(OmegaTheme.font(.meta)).foregroundColor(.yellow)
+                        .accessibilityHidden(true)
+                }
+                Spacer(minLength: 8)
+                Text(trailing)
+                    .font(OmegaTheme.font(.meta))
+                    .foregroundColor(theme.secondaryTextColor)
+                    .lineLimit(1).fixedSize()
+                Image(systemName: "chevron.right")
+                    .font(OmegaTheme.font(.meta, .semibold))
+                    .foregroundColor(theme.secondaryTextColor.opacity(hover ? 0.9 : 0.4))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(hover ? theme.cardColor.opacity(0.55) : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
 
