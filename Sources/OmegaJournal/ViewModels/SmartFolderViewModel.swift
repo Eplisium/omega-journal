@@ -35,6 +35,7 @@ extension JournalViewModel {
     func refreshOrganization() {
         tagColors = db.tagColors()
         let locked = hiddenLocked
+        organizationDerivedLocked = locked
         let visible = entries.filter { ContentMasking.canShowContent(isHidden: $0.isHidden, hiddenLocked: locked) }
         tagTree = TagTree.build(entryTags: visible.map(\.tags))
         var counts: [String: Int] = [:]

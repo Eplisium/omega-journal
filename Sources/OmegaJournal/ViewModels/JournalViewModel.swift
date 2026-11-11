@@ -86,6 +86,13 @@ final class JournalViewModel {
     /// The notebook the lists were last loaded for: a failed reload keeps the
     /// previous lists only when they belong to the same notebook.
     @ObservationIgnored var loadedJournalId: String??
+    /// The hidden-lock state each lock-dependent product was last derived
+    /// under (nil = never). `sessionDidChange` re-derives only when one of
+    /// them differs from the current state: a lock that flips and flips back
+    /// before the notification arrives changes nothing on screen.
+    @ObservationIgnored var tagCountsDerivedLocked: Bool?
+    @ObservationIgnored var organizationDerivedLocked: Bool?
+    @ObservationIgnored var searchDerivedLocked: Bool?
 
     // Reflection scope
     var analyticsPeriod: AnalyticsPeriod = .thirtyDays
@@ -215,8 +222,14 @@ final class JournalViewModel {
         }
     }
 
-    /// Delivered after every real lock-state change.
+    /// Delivered after every real lock-state change (to every live view
+    /// model). Skipped when everything on screen was already derived under
+    /// the current lock state, so a burst of changes costs one refresh.
     func sessionDidChange() {
+        let locked = hiddenLocked
+        guard tagCountsDerivedLocked != locked
+                || organizationDerivedLocked != locked
+                || searchDerivedLocked != locked else { return }
         refreshTagCounts()
         refreshQuery()
     }
@@ -271,6 +284,7 @@ final class JournalViewModel {
         reapplyUnsavedSnapshots()
         // While the biometric session is locked, hidden entries must not
         // advertise their tags in the sidebar/filter chips.
+        tagCountsDerivedLocked = hiddenLocked
         allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
         refreshOrganization()
         GoalManager.shared.loadGoals()
@@ -318,6 +332,7 @@ final class JournalViewModel {
     /// session is locked. Every mutation path refreshes counts through this so
     /// the privacy rule holds regardless of where the refresh happens.
     func refreshTagCounts() {
+        tagCountsDerivedLocked = hiddenLocked
         allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
         refreshOrganization()
     }
@@ -337,6 +352,7 @@ final class JournalViewModel {
         searchGeneration &+= 1
         let q = searchText.trimmingCharacters(in: .whitespaces)
         if q.isEmpty {
+            searchDerivedLocked = hiddenLocked
             searchResults = nil
             return
         }
@@ -348,6 +364,7 @@ final class JournalViewModel {
     /// FTS ranking on top of the in-memory matches (ids only — nothing is
     /// decrypted for ranking).
     private func publishSearch(_ matched: [JournalEntry], parsed: SearchQuery) {
+        searchDerivedLocked = hiddenLocked
         let ftsText = parsed.terms.joined(separator: " ")
         guard !ftsText.isEmpty else {
             searchResults = matched
