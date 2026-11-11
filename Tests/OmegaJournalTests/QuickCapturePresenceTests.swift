@@ -11,7 +11,7 @@ import Observation
 /// own key. `@Observable` setters notify even on equal values, so these tests
 /// count actual Observation change notifications on `isInserted`.
 @MainActor
-@Suite("Quick capture menu bar presence")
+@Suite("Quick capture menu bar presence", .serialized)
 struct QuickCapturePresenceTests {
 
     /// Records whether Observation reported a change to `isInserted` while
@@ -24,9 +24,15 @@ struct QuickCapturePresenceTests {
         return flag.fired
     }
 
+    /// One fixed suite, emptied before each test. A fresh UUID suite per test
+    /// left an empty plist in ~/Library/Preferences on every run (cfprefsd
+    /// keeps the file after removePersistentDomain), hundreds of them over time.
+    private static let suite = "omega.qc.tests"
+
     private func makeDefaults() -> (UserDefaults, String) {
-        let suite = "omega.qc.tests.\(UUID().uuidString)"
-        return (UserDefaults(suiteName: suite)!, suite)
+        let d = UserDefaults(suiteName: Self.suite)!
+        d.removePersistentDomain(forName: Self.suite)
+        return (d, Self.suite)
     }
 
     @Test("defaults to inserted and reads a stored value")
