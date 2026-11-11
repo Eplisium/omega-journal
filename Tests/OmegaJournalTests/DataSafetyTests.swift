@@ -341,10 +341,13 @@ struct DataSafetyTests {
 
     // MARK: #16 idle relock
 
-    @Test("noteActivity pushes the idle relock deadline out")
+    // .lockState: `.lockHiddenEntries` is a process-wide notification, and App Lock /
+    // idle-relock tests in other suites post it while the suite runs in parallel.
+    // Margins are ~0.2s or more so a loaded machine can't flip the result either.
+    @Test("noteActivity pushes the idle relock deadline out", .lockState)
     func idleRelockRearms() async throws {
         let auth = BiometricAuth(forTesting: ())
-        auth.idleSecondsOverride = 0.5
+        auth.idleSecondsOverride = 1.0
         auth.activityThrottle = 0
         auth.setAuthenticatedForTesting(true)
         defer { auth.idleSecondsOverride = nil; auth.activityThrottle = 1; auth.lock() }
@@ -353,9 +356,9 @@ struct DataSafetyTests {
         defer { NotificationCenter.default.removeObserver(token) }
 
         auth.scheduleIdleRelock()
-        try await Task.sleep(nanoseconds: 300_000_000)
-        auth.noteActivity()                      // deadline moves to ~0.8s
-        try await Task.sleep(nanoseconds: 350_000_000) // t=0.65 — original would have fired
+        try await Task.sleep(nanoseconds: 400_000_000)
+        auth.noteActivity()                      // deadline moves to ~1.4s
+        try await Task.sleep(nanoseconds: 800_000_000) // t≈1.2 — original would have fired at 1.0
         #expect(!fired)
         try await Task.sleep(nanoseconds: 2_000_000_000)
         #expect(fired)
