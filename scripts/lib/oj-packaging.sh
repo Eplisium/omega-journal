@@ -93,8 +93,11 @@ oj_swift_build_args() {
         # App Intents: have the compiler describe AppIntent/AppShortcutsProvider/AppEnum
         # conformers (*.swiftconstvalues), as Xcode does; oj_appintents_metadata feeds
         # them to appintentsmetadataprocessor.
+        # -const-gather-protocols-list is a frontend-only flag in Swift 6.3 (Xcode 26.x
+        # driver rejects it), so pass it through -Xfrontend; newer drivers accept both.
         -Xswiftc -emit-const-values
-        -Xswiftc -const-gather-protocols-list -Xswiftc "$OJ_PACKAGING_DIR/appintents-const-protocols.json")
+        -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-list
+        -Xswiftc -Xfrontend -Xswiftc "$OJ_PACKAGING_DIR/appintents-const-protocols.json")
     if [ "$1" = "universal" ]; then
         OJ_SWIFT_ARGS+=(--arch arm64 --arch x86_64)
     fi
