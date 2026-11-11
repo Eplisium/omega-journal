@@ -80,7 +80,15 @@ public enum AssistResponseParser {
         while t.hasSuffix(".") { t.removeLast() }
         let words = t.split(whereSeparator: { $0.isWhitespace })
         if words.count > maxTitleWords { t = words.prefix(maxTitleWords).joined(separator: " ") }
-        return t.trimmingCharacters(in: .whitespaces)
+        t = t.trimmingCharacters(in: .whitespaces)
+        // The on-device model often answers in all lowercase; titles read as
+        // sentence case everywhere else in the app. Leave words like "iPhone" alone.
+        if let first = t.first, first.isLowercase,
+           let firstWord = t.split(separator: " ").first,
+           !firstWord.contains(where: { $0.isUppercase }) {
+            t = first.uppercased() + t.dropFirst()
+        }
+        return t
     }
 
     /// Tags: single words (the model is asked for single-word tags), split on

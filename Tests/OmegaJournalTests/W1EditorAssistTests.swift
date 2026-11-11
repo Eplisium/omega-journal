@@ -82,6 +82,10 @@ struct W1EditorAssistTests {
         #expect(b.tags.isEmpty && b.summary == nil)
         #expect(AssistResponseParser.parseTitleTags("I can't help with that.").isEmpty)
         #expect(AssistResponseParser.cleanTags("a b c d e f g").count == AssistResponseParser.maxTags)
+        // The on-device model often replies in lowercase; titles come back sentence case.
+        #expect(AssistResponseParser.cleanTitle("phone habits and quiet nights") == "Phone habits and quiet nights")
+        #expect(AssistResponseParser.cleanTitle("iPhone-free evenings") == "iPhone-free evenings")
+        #expect(AssistResponseParser.cleanTitle("Évening walk") == "Évening walk")
         // Legacy entry point still parses the same way.
         let legacy = SmartAssist.parse("TITLE: \"A good walk\"\nTAGS: Walk, #nature health\nSUMMARY: You walked.")
         #expect(legacy.title == "A good walk" && legacy.tags == ["walk", "nature", "health"] && legacy.summary == "You walked.")
