@@ -49,6 +49,16 @@ struct EditorView: View {
     @State private var showRecorder = false
     @State private var showHistory = false
 
+    // On-device writing help: shown only when switched on AND Apple Intelligence is
+    // available, never for hidden entries (re-checked on every request).
+    @State private var assistOffered = false
+    @State private var writingHelp = WritingHelpModel()
+    @State private var showWritingHelp = false
+    @State private var goDeeper = GoDeeperModel()
+    @State private var showGoDeeper = false
+    /// The voice memo being transcribed (sheet).
+    @State private var transcribing: Attachment?
+
     // Slash / [[ popover.
     @State private var suggestion: EditorSuggestion?
     @State private var suggestionIndex = 0
@@ -158,6 +168,8 @@ struct EditorView: View {
             vm.editorFontSize = new
         }
         .onDisappear {
+            writingHelp.cancel()
+            goDeeper.cancel()
             vm.flushPendingSave()
             // Edit session over: take a (throttled) version-history snapshot of the in-memory entry,
             // which `autoSave` keeps current. Hidden entries' revisions are sealed like their bodies.
@@ -173,7 +185,17 @@ struct EditorView: View {
             // Menu shortcuts only format the body when it (or nothing text-like) has focus.
             if let cmd = note.object as? MarkdownCommand { controller.applyMenuCommand(cmd) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .smartAssistSettingChanged)) { _ in refreshAssistOffer() }
+        // Hiding the entry while it's open withdraws writing help at once.
+        .onChange(of: liveEntry.isHidden) { _, _ in refreshAssistOffer() }
+        .onReceive(NotificationCenter.default.publisher(for: .suggestTitleAndTags)) { _ in openWritingHelp() }
+        .onReceive(NotificationCenter.default.publisher(for: .goDeeperInEntry)) { _ in openGoDeeper() }
+        .sheet(item: $transcribing) { memo in
+            MemoTranscriptPanel(attachment: memo, db: vm.db, onInsert: { insertTranscript($0) },
+                                onClose: { transcribing = nil })
+        }
         .onAppear {
+            refreshAssistOffer()
             if title.isEmpty { titleFocused = true }
             loadGoalBaseline()
             // Entries from before version history existed get a kept baseline so the first edit is undoable.
@@ -215,9 +237,10 @@ struct EditorView: View {
     /// clipped prose, the formatting row and the save status on the right.
     private var topBar: some View {
         ViewThatFits(in: .horizontal) {
-            topBarRow(compactMood: false, iconModes: false)
-            topBarRow(compactMood: true, iconModes: false)
-            topBarRow(compactMood: true, iconModes: true)
+            topBarRow(Self.topBarVariants[0])
+            topBarRow(Self.topBarVariants[1])
+            topBarRow(Self.topBarVariants[2])
+            topBarRow(Self.topBarVariants[3])
         }
         .padding(.horizontal, 14)
         .padding(.vertical, GlassSupport.usesGlass(.toolbarControl) ? 7 : 9)
@@ -241,7 +264,25 @@ struct EditorView: View {
         }
     }
 
-    private func topBarRow(compactMood: Bool, iconModes: Bool) -> some View {
+    /// Top bar layouts from widest to narrowest. The last one folds Focus and
+    /// Attach into the More menu, so the bar fits the narrowest detail column
+    /// (414pt) even with the writing-help button, and never clips.
+    struct TopBarVariant: Hashable {
+        let compactMood: Bool, iconModes: Bool, compactTools: Bool
+    }
+
+    static let topBarVariants: [TopBarVariant] = [
+        TopBarVariant(compactMood: false, iconModes: false, compactTools: false),
+        TopBarVariant(compactMood: true, iconModes: false, compactTools: false),
+        TopBarVariant(compactMood: true, iconModes: true, compactTools: false),
+        TopBarVariant(compactMood: true, iconModes: true, compactTools: true),
+    ]
+
+    private func topBarRow(_ variant: TopBarVariant) -> some View {
+        topBarRow(compactMood: variant.compactMood, iconModes: variant.iconModes, compactTools: variant.compactTools)
+    }
+
+    private func topBarRow(compactMood: Bool, iconModes: Bool, compactTools: Bool) -> some View {
         HStack(spacing: 10) {
             Button {
                 vm.stopEditing()
@@ -268,17 +309,26 @@ struct EditorView: View {
             modePicker(iconOnly: iconModes)
 
             HStack(spacing: 4) {
-            ActionButton(icon: "text.alignleft", color: theme.accentColor, active: isTypewriter || dimOthers || columnWidth > 0, tooltip: "Focus & typography") {
-                showFocusPopover.toggle()
+            if assistOffered {
+                ActionButton(icon: "sparkles", color: theme.accentColor, active: showWritingHelp, tooltip: "Suggest title & tags (on this Mac)") {
+                    openWritingHelp()
+                }
+                .accessibilityLabel("Suggest title and tags")
             }
-            .accessibilityLabel("Focus and typography")
 
-            ActionButton(icon: "paperclip", color: theme.accentColor, active: !entry.attachments.isEmpty, tooltip: "Attach file") {
-                attachFile()
+            if !compactTools {
+                ActionButton(icon: "text.alignleft", color: theme.accentColor, active: isTypewriter || dimOthers || columnWidth > 0, tooltip: "Focus & typography") {
+                    showFocusPopover.toggle()
+                }
+                .accessibilityLabel("Focus and typography")
+
+                ActionButton(icon: "paperclip", color: theme.accentColor, active: !currentAttachments.isEmpty, tooltip: "Attach file") {
+                    attachFile()
+                }
+                .accessibilityLabel(currentAttachments.isEmpty ? "Attach file" : "Attach file, \(currentAttachments.count) attached")
             }
-            .accessibilityLabel(entry.attachments.isEmpty ? "Attach file" : "Attach file, \(entry.attachments.count) attached")
 
-            moreMenu
+            moreMenu(includesPrimaryTools: compactTools)
             }
             .ojGlassCluster()
         }
@@ -347,14 +397,35 @@ struct EditorView: View {
     /// Less frequent tools share one menu: place/weather, voice memo, history,
     /// text size, find & replace and Zen. Their keyboard shortcuts still work
     /// (hidden buttons + app menus) and are shown here.
-    private var moreMenu: some View {
+    private func moreMenu(includesPrimaryTools: Bool) -> some View {
         Menu {
+            if includesPrimaryTools {
+                Button { showFocusPopover = true } label: {
+                    Label("Focus & Typography…", systemImage: "text.alignleft")
+                }
+                Button { attachFile() } label: {
+                    Label(currentAttachments.isEmpty ? "Attach File…" : "Attach File… (\(currentAttachments.count) attached)",
+                          systemImage: "paperclip")
+                }
+                Divider()
+            }
+            if assistOffered {
+                Button { openWritingHelp() } label: {
+                    Label("Suggest Title & Tags…", systemImage: "sparkles")
+                }
+                Button { openGoDeeper() } label: {
+                    Label("Go Deeper…", systemImage: "text.bubble")
+                }
+                .disabled(body_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Divider()
+            }
             Button { showStampPopover = true } label: {
                 Label(stamp.isEmpty ? "Add Place & Weather…" : "Edit Place & Weather…", systemImage: "mappin.and.ellipse")
             }
             Button { showRecorder = true } label: {
                 Label("Record Voice Memo…", systemImage: "mic")
             }
+            transcribeMenu
             Button {
                 vm.flushPendingSave()
                 if let current = vm.entry(id: entry.id) { vm.snapshotRevision(of: current) }
@@ -402,6 +473,31 @@ struct EditorView: View {
         .fixedSize()
         .help("More: place & weather, voice memo, version history, text size, find & replace, Zen mode")
         .accessibilityLabel("More editor tools")
+    }
+
+    /// Voice memos on this entry, newest first.
+    private var currentAttachments: [Attachment] { entry.attachments }
+
+    /// "Transcribe Voice Memo" (one memo) or a submenu (several). Hidden when
+    /// on-device transcription isn't available or there's no memo.
+    @ViewBuilder
+    private var transcribeMenu: some View {
+        let memos = currentAttachments.filter(\.isAudio).sorted { $0.createdAt > $1.createdAt }
+        if !memos.isEmpty && MemoTranscription.availability.isAvailable {
+            if memos.count == 1, let memo = memos.first {
+                Button { transcribing = memo } label: {
+                    Label("Transcribe Voice Memo…", systemImage: "text.bubble")
+                }
+            } else {
+                Menu {
+                    ForEach(memos) { memo in
+                        Button(memo.createdAt.formatted(date: .abbreviated, time: .shortened)) { transcribing = memo }
+                    }
+                } label: {
+                    Label("Transcribe Voice Memo", systemImage: "text.bubble")
+                }
+            }
+        }
     }
 
     // MARK: Formatting toolbar
@@ -595,6 +691,32 @@ struct EditorView: View {
             // Coming back from the preview: the caret is where the writer left it.
             if shows && !vm.isZenMode { DispatchQueue.main.async { controller.focus() } }
         }
+        // Writing help hangs off the top-trailing corner of the page (present in
+        // Zen mode too, where the toolbar is hidden).
+        .overlay(alignment: .topTrailing) {
+            Color.clear.frame(width: 1, height: 1)
+                .padding(.trailing, 28)
+                .popover(isPresented: $showWritingHelp, arrowEdge: .top) {
+                    WritingHelpPopover(model: writingHelp, currentTitle: title, currentTags: tags,
+                                       onRetry: { startWritingHelp() },
+                                       onApply: { applyWritingHelp() },
+                                       onClose: { showWritingHelp = false })
+                }
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
+        }
+        .onChange(of: showWritingHelp) { _, shown in if !shown { writingHelp.cancel() } }
+        .overlay(alignment: .bottomTrailing) {
+            if showGoDeeper {
+                GoDeeperPanel(model: goDeeper,
+                              onInsert: { question, style in insertFollowUp(question, style: style) },
+                              onRetry: { startGoDeeper() },
+                              onClose: { closeGoDeeper() })
+                    .padding(16)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showGoDeeper)
     }
 
     /// Split in a column too narrow for two readable panes: one pane at a time.
@@ -753,7 +875,8 @@ struct EditorView: View {
                 sprintNotified = false
             },
             onStopSprint: { sprint = nil },
-            onRetrySave: { vm.retryFailedSaves() })
+            onRetrySave: { vm.retryFailedSaves() },
+            onGoDeeper: offersGoDeeper ? { openGoDeeper() } : nil)
     }
 
     // MARK: Slash / wiki suggestions
@@ -762,7 +885,7 @@ struct EditorView: View {
         guard let suggestion else { return [] }
         switch suggestion {
         case .slash(let ctx, _):
-            var items = SlashCommands.filter(ctx.query)
+            var items = SlashCommands.filter(ctx.query, in: SlashCommands.visible(assistOffered: assistOffered))
                 .filter { $0.kind != .template }
                 .map { SuggestionItem(id: $0.id, icon: $0.icon, title: $0.title, subtitle: $0.subtitle, action: .command($0.kind)) }
             let q = ctx.query.trimmingCharacters(in: .whitespaces)
@@ -805,6 +928,12 @@ struct EditorView: View {
         suggestion = nil
         let text = controller.text
         switch (current, item.action) {
+        case (.slash(let ctx, _), .command(let kind)) where kind.isAssist:
+            // Writing help: remove the "/query" token, then open the panel.
+            controller.apply(MarkdownLogic.slashEdit(context: ctx, expansion: SlashExpansion(text: "", caretOffset: 0)))
+            DispatchQueue.main.async {
+                if kind == .suggestTitleTags { openWritingHelp() } else { openGoDeeper() }
+            }
         case (.slash(let ctx, _), .command(let kind)):
             let lineStart = (text as NSString).lineRange(for: NSRange(location: ctx.range.location, length: 0)).location
             let before = (text as NSString).substring(with: NSRange(location: lineStart, length: ctx.range.location - lineStart))
@@ -828,6 +957,97 @@ struct EditorView: View {
             controller.apply(MarkdownLogic.wikiCompletionEdit(in: text, context: ctx, title: title))
         default: break
         }
+    }
+
+    // MARK: Writing help
+
+    private var liveEntry: JournalEntry { vm.entry(id: entry.id) ?? entry }
+
+    private var offersGoDeeper: Bool {
+        assistOffered && wordCount >= AssistEntryPoint.goDeeperMinimumWords
+    }
+
+    private func refreshAssistOffer() {
+        let offered = SmartAssist.isOffered(for: liveEntry, db: vm.db)
+        if offered != assistOffered { assistOffered = offered }
+        if !offered {
+            showWritingHelp = false
+            closeGoDeeper()
+        }
+    }
+
+    private func openWritingHelp() {
+        refreshAssistOffer()
+        guard assistOffered else { return }
+        startWritingHelp()
+        showWritingHelp = true
+    }
+
+    private func startWritingHelp() {
+        writingHelp.start(body: body_, isHidden: liveEntry.isHidden, enabled: SmartAssist.isEnabled(vm.db),
+                          currentTitle: title, currentTags: tags)
+    }
+
+    /// Applies the kept parts through the editor's own fields: title and tags
+    /// via their state (autosave picks them up like typing), the summary as an
+    /// undoable edit at the top of the body.
+    private func applyWritingHelp() {
+        defer { showWritingHelp = false }
+        guard let out = writingHelp.applied(to: AssistDraft(title: title, body: body_, tags: tags)) else { return }
+        if out.title != title { title = out.title }
+        if out.tags != tags { tags = out.tags }
+        if out.body != body_ {
+            let prefix = out.body.hasSuffix(body_) ? String(out.body.dropLast(body_.count)) : ""
+            if !prefix.isEmpty, controller.text == body_ {
+                let caret = (controller.caretLocation ?? 0) + (prefix as NSString).length
+                controller.apply(CompletionEdit(range: NSRange(location: 0, length: 0), replacement: prefix, caret: caret))
+            } else {
+                body_ = out.body
+            }
+        }
+        vm.showToast("Writing help applied")
+    }
+
+    private func openGoDeeper() {
+        refreshAssistOffer()
+        guard assistOffered else { return }
+        startGoDeeper()
+        showGoDeeper = true
+    }
+
+    private func startGoDeeper() {
+        goDeeper.start(body: body_, isHidden: liveEntry.isHidden, enabled: SmartAssist.isEnabled(vm.db))
+    }
+
+    private func closeGoDeeper() {
+        goDeeper.cancel()
+        showGoDeeper = false
+    }
+
+    private func insertFollowUp(_ question: String, style: AssistFollowUps.InsertStyle) {
+        insertBlock { atLineStart in AssistFollowUps.insertion(question, style: style, atLineStart: atLineStart) }
+        closeGoDeeper()
+    }
+
+    private func insertTranscript(_ transcript: String) {
+        insertBlock { atLineStart in TranscriptText.block(transcript, atLineStart: atLineStart) }
+        vm.showToast("Transcript added to the entry")
+    }
+
+    /// Inserts block text at the caret (end of the entry when there's no caret).
+    private func insertBlock(_ make: (Bool) -> String) {
+        let text = controller.text
+        let ns = text as NSString
+        guard text == body_ else {
+            // No live text view (e.g. not laid out yet): append through the binding.
+            let block = make(body_.isEmpty || body_.hasSuffix("\n"))
+            body_ += block
+            return
+        }
+        let loc = min(controller.caretLocation ?? ns.length, ns.length)
+        let atLineStart = loc == 0 || ns.character(at: loc - 1) == 10
+        controller.insert(make(atLineStart))
+        controller.focus()
     }
 
     // MARK: Actions

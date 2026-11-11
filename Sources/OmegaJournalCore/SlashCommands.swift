@@ -6,6 +6,11 @@ public enum SlashCommandKind: String, CaseIterable, Sendable {
     case heading1, heading2, heading3
     case task, bullet, numbered, quote, code, divider, table
     case date, time, mood, wikiLink, template
+    /// On-device writing help (shown only when it is switched on and available).
+    case suggestTitleTags, goDeeper
+
+    /// Commands that open on-device writing help instead of inserting text.
+    public var isAssist: Bool { self == .suggestTitleTags || self == .goDeeper }
 }
 
 public struct SlashCommand: Equatable, Sendable, Identifiable {
@@ -52,7 +57,14 @@ public enum SlashCommands {
         SlashCommand(kind: .mood, title: "Mood", subtitle: "Insert this entry's mood", icon: "face.smiling", keywords: ["feeling", "emotion"]),
         SlashCommand(kind: .wikiLink, title: "Link to entry", subtitle: "[[Wiki link]]", icon: "link", keywords: ["wiki", "backlink", "reference"]),
         SlashCommand(kind: .template, title: "Template snippet", subtitle: "Insert a template's body", icon: "doc.text", keywords: ["snippet", "insert"]),
+        SlashCommand(kind: .suggestTitleTags, title: "Suggest title & tags", subtitle: "On-device writing help", icon: "sparkles", keywords: ["ai", "assist", "summary", "summarize", "help"]),
+        SlashCommand(kind: .goDeeper, title: "Go deeper", subtitle: "Follow-up questions about this entry", icon: "text.bubble", keywords: ["ai", "questions", "prompt", "reflect", "help"]),
     ]
+
+    /// The commands to show: writing-help commands only when `assistOffered`.
+    public static func visible(assistOffered: Bool) -> [SlashCommand] {
+        assistOffered ? all : all.filter { !$0.kind.isAssist }
+    }
 
     /// A `/query` token ending at `caret`. The slash must start a line or follow whitespace
     /// (so URLs, `and/or`, `1/2` never trigger), the query has no whitespace and is short,
@@ -130,7 +142,7 @@ public enum SlashCommands {
         case .time: return simple(timeText)
         case .mood: return simple(moodText)
         case .wikiLink: return SlashExpansion(text: "[[]]", caretOffset: 2, selectionLength: 0)
-        case .template: return nil
+        case .template, .suggestTitleTags, .goDeeper: return nil
         }
     }
 }
@@ -142,6 +154,10 @@ public struct CompletionEdit: Equatable, Sendable {
     public let replacement: String
     /// Caret position (UTF-16, absolute) after applying the edit.
     public let caret: Int
+
+    public init(range: NSRange, replacement: String, caret: Int) {
+        self.range = range; self.replacement = replacement; self.caret = caret
+    }
 }
 
 extension MarkdownLogic {

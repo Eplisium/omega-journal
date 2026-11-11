@@ -193,6 +193,8 @@ struct WritingFooterView: View {
     var onStartSprint: (Int) -> Void
     var onStopSprint: () -> Void
     var onRetrySave: () -> Void = {}
+    /// "Go deeper" (on-device follow-up questions). Nil hides the button.
+    var onGoDeeper: (() -> Void)? = nil
     /// Test seam: the save indicator's frame in window coordinates whenever it lays out.
     var onSaveIndicatorFrame: ((CGRect) -> Void)? = nil
 
@@ -240,6 +242,19 @@ struct WritingFooterView: View {
                     sessionLabel(now: context.date)
                 }
                 .fixedSize()
+            }
+
+            if let onGoDeeper {
+                Button(action: onGoDeeper) {
+                    Label("Go deeper", systemImage: "sparkles")
+                        .labelStyle(showSession ? AnyLabelStyle(.titleAndIcon) : AnyLabelStyle(.iconOnly))
+                        .foregroundColor(theme.accentColor)
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Go deeper: follow-up questions about what you've written, made on this Mac")
+                .accessibilityLabel("Go deeper")
+                .accessibilityHint("Suggests follow-up questions about this entry")
             }
 
             sprintMenu
@@ -367,4 +382,11 @@ struct WritingFooterView: View {
             .accessibilityLabel("Start writing sprint")
         }
     }
+}
+
+/// Type-erased label style so one footer button can switch between title+icon and icon-only.
+struct AnyLabelStyle: LabelStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: LabelStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
