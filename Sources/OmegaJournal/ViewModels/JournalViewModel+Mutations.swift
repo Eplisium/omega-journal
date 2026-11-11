@@ -172,7 +172,7 @@ extension JournalViewModel {
     func toggleHidden(_ entry: JournalEntry) {
         let newValue = !entry.isHidden
         // Unhiding reveals that the entry exists as a normal card — require auth.
-        if !newValue && !BiometricAuth.shared.isAuthenticated {
+        if !newValue && !isSessionUnlocked {
             Task {
                 guard await BiometricAuth.shared.authenticate() else { return }
                 applyHidden(entry, hidden: false)

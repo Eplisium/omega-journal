@@ -63,7 +63,7 @@ extension JournalViewModel {
     /// Private entries contribute to reflective views only after an explicit
     /// inclusion choice and an active biometric session.
     var effectiveAnalyticsVisibility: AnalyticsVisibility {
-        analyticsVisibility == .includePrivate && BiometricAuth.shared.isAuthenticated
+        analyticsVisibility == .includePrivate && isSessionUnlocked
             ? .includePrivate
             : .visibleOnly
     }

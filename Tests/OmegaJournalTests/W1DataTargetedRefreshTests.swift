@@ -78,9 +78,7 @@ struct W1DataTargetedRefreshTests {
     func singleEntryMutations(sort: OmegaJournal.SortOrder) throws {
         let (root, _, vm) = Self.makeVM(sort: sort)
         defer { try? FileManager.default.removeItem(at: root) }
-        let wasUnlocked = BiometricAuth.shared.isAuthenticated
-        BiometricAuth.shared.setAuthenticatedForTesting(true)
-        defer { BiometricAuth.shared.setAuthenticatedForTesting(wasUnlocked) }
+        vm.sessionUnlockedOverride = true
         vm.reload()
 
         let a = try #require(vm.entries.first { !$0.isPinned && !$0.tags.isEmpty })
@@ -119,9 +117,7 @@ struct W1DataTargetedRefreshTests {
     func searchingAndLocked() throws {
         let (root, _, vm) = Self.makeVM()
         defer { try? FileManager.default.removeItem(at: root) }
-        let wasUnlocked = BiometricAuth.shared.isAuthenticated
-        BiometricAuth.shared.setAuthenticatedForTesting(false)
-        defer { BiometricAuth.shared.setAuthenticatedForTesting(wasUnlocked) }
+        vm.sessionUnlockedOverride = false
         vm.searchText = "rain"
         vm.reload()
         defer { vm.searchText = ""; vm.refreshQuery() }
@@ -142,9 +138,7 @@ struct W1DataTargetedRefreshTests {
     func bulkActions() throws {
         let (root, _, vm) = Self.makeVM()
         defer { try? FileManager.default.removeItem(at: root) }
-        let wasUnlocked = BiometricAuth.shared.isAuthenticated
-        BiometricAuth.shared.setAuthenticatedForTesting(true)
-        defer { BiometricAuth.shared.setAuthenticatedForTesting(wasUnlocked) }
+        vm.sessionUnlockedOverride = true
         vm.reload()
 
         vm.bulkSelection = Set(vm.entries.prefix(4).map(\.id))

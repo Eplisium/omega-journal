@@ -119,7 +119,7 @@ extension JournalViewModel {
     /// Entries whose body links to `entry` via `[[Title]]`. Hidden entries only
     /// count while the biometric session is unlocked; trashed entries never do.
     func backlinks(for entry: JournalEntry) -> [JournalEntry] {
-        let unlocked = BiometricAuth.shared.isAuthenticated
+        let unlocked = isSessionUnlocked
         // `entries`/`archivedEntries` already include hidden rows (masked in
         // the UI); adding `hiddenEntries` listed each hidden linker twice.
         let pool = Self.uniqueById(entries + archivedEntries)
@@ -133,7 +133,7 @@ extension JournalViewModel {
     /// Lower-cased titles `[[links]]` can resolve to. Trashed entries never
     /// resolve; hidden entries only while the biometric session is unlocked.
     func linkableTitles() -> Set<String> {
-        let unlocked = BiometricAuth.shared.isAuthenticated
+        let unlocked = isSessionUnlocked
         let pool = (entries + archivedEntries + hiddenEntries).filter { unlocked || !$0.isHidden }
         return Set(pool.map { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })
     }
@@ -143,7 +143,7 @@ extension JournalViewModel {
     /// when nothing resolves.
     @discardableResult
     func openLinkedEntry(titled title: String) -> Bool {
-        let unlocked = BiometricAuth.shared.isAuthenticated
+        let unlocked = isSessionUnlocked
         let wanted = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let pool = (entries + archivedEntries + hiddenEntries).filter { unlocked || !$0.isHidden }
         guard let target = pool.filter({ $0.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == wanted })
@@ -162,7 +162,7 @@ extension JournalViewModel {
     /// current period's entries. Hidden entries are only summarised while unlocked.
     @discardableResult
     func createReviewEntry(period: ReviewPeriod, reference: Date = Date()) -> JournalEntry {
-        let unlocked = BiometricAuth.shared.isAuthenticated
+        let unlocked = isSessionUnlocked
         // `entries` already contains active hidden rows; the generator drops
         // them while locked. Adding `hiddenEntries` double-counted them.
         let pool = Self.uniqueById(entries)

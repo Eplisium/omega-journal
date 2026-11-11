@@ -14,7 +14,7 @@ extension JournalViewModel {
     /// Entries whose body-derived stats (words, reading time) may be shown:
     /// while hidden entries are locked they contribute title/mood/date only.
     var bodyStatsEntries: [JournalEntry] {
-        BiometricAuth.shared.isAuthenticated ? entries : entries.filter { !$0.isHidden }
+        isSessionUnlocked ? entries : entries.filter { !$0.isHidden }
     }
     var totalWordCount: Int { bodyStatsEntries.reduce(0) { $0 + $1.wordCount } }
     var averageMood: Double { entries.isEmpty ? 0 : Double(entries.reduce(0) { $0 + $1.mood.rawValue }) / Double(entries.count) }
@@ -90,7 +90,7 @@ extension JournalViewModel {
     /// Locked hidden entries keep their date (they still count as a writing
     /// day / weekday) but never reveal their word count.
     private var activitySamples: [ActivitySample] {
-        let unlocked = BiometricAuth.shared.isAuthenticated
+        let unlocked = isSessionUnlocked
         return entries.map { ActivitySample(date: $0.createdAt, words: unlocked || !$0.isHidden ? $0.wordCount : 0) }
     }
 

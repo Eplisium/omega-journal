@@ -93,6 +93,12 @@ final class JournalViewModel {
     @ObservationIgnored var tagCountsDerivedLocked: Bool?
     @ObservationIgnored var organizationDerivedLocked: Bool?
     @ObservationIgnored var searchDerivedLocked: Bool?
+    #if DEBUG
+    /// Test seam for `isSessionUnlocked` (nil = follow BiometricAuth.shared).
+    /// Like the real session, a change is only applied by `sessionDidChange()`
+    /// (or any refresh); tests call it where the notification would arrive.
+    @ObservationIgnored var sessionUnlockedOverride: Bool?
+    #endif
 
     // Reflection scope
     var analyticsPeriod: AnalyticsPeriod = .thirtyDays
@@ -285,7 +291,7 @@ final class JournalViewModel {
         // While the biometric session is locked, hidden entries must not
         // advertise their tags in the sidebar/filter chips.
         tagCountsDerivedLocked = hiddenLocked
-        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
+        allTags = db.tagsWithCounts(includeHidden: isSessionUnlocked, journalId: activeJournalId)
         refreshOrganization()
         GoalManager.shared.loadGoals()
         refreshQuery()
@@ -333,7 +339,7 @@ final class JournalViewModel {
     /// the privacy rule holds regardless of where the refresh happens.
     func refreshTagCounts() {
         tagCountsDerivedLocked = hiddenLocked
-        allTags = db.tagsWithCounts(includeHidden: BiometricAuth.shared.isAuthenticated, journalId: activeJournalId)
+        allTags = db.tagsWithCounts(includeHidden: isSessionUnlocked, journalId: activeJournalId)
         refreshOrganization()
     }
 
@@ -698,7 +704,7 @@ final class JournalViewModel {
     /// Prompts for biometrics when a hidden entry's content would otherwise leak.
     @discardableResult
     func revealIfNeeded(_ entry: JournalEntry) async -> Bool {
-        if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
+        if entry.isHidden && !isSessionUnlocked {
             return await BiometricAuth.shared.authenticate()
         }
         return true
@@ -707,7 +713,7 @@ final class JournalViewModel {
     /// Re-masks every hidden entry. Safe to call from a walk-by — no auth required.
     /// Also fires from the idle-relock timer in BiometricAuth.
     func lockHiddenEntries() {
-        guard BiometricAuth.shared.isAuthenticated else { return }
+        guard isSessionUnlocked else { return }
         flushPendingSave()
         if let editing = editingEntry, editing.isHidden {
             stopEditing()
@@ -733,7 +739,7 @@ final class JournalViewModel {
     func startEditing(_ entry: JournalEntry) {
         flushPendingSave()
         selectedEntryId = entry.id
-        if entry.isHidden && !BiometricAuth.shared.isAuthenticated {
+        if entry.isHidden && !isSessionUnlocked {
             Task {
                 guard await BiometricAuth.shared.authenticate() else { return }
                 openEditor(on: entry.id)

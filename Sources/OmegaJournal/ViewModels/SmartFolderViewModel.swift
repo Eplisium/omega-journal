@@ -9,7 +9,18 @@ extension JournalViewModel {
     // MARK: - Hidden-entry gate
 
     /// True while hidden entries must stay masked in every derived surface.
-    var hiddenLocked: Bool { !BiometricAuth.shared.isAuthenticated }
+    var hiddenLocked: Bool { !isSessionUnlocked }
+
+    /// Whether hidden entries are unlocked for this view model: the
+    /// biometric session, or (debug builds, tests only) a per-VM override so
+    /// tests never flip the process-wide `BiometricAuth.shared` that
+    /// parallel suites share.
+    var isSessionUnlocked: Bool {
+        #if DEBUG
+        if let override = sessionUnlockedOverride { return override }
+        #endif
+        return BiometricAuth.shared.isAuthenticated
+    }
 
     // MARK: - Loading
 
