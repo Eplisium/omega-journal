@@ -413,11 +413,7 @@ extension DatabaseManager {
     /// Opens every blob with `key` (nil = could not be decrypted) and derives
     /// its memoized values (word count, image markup, search eligibility). Pure and nonisolated: runs on worker threads.
     nonisolated static func openBodies(_ blobs: [Data], key: SymmetricKey, parallel: Bool) -> [OpenedBody?] {
-        func open(_ blob: Data) -> OpenedBody? {
-            guard let text = try? JournalCrypto.decryptString(blob, using: key) else { return nil }
-            return OpenedBody(body: text)
-        }
-        guard parallel else { return blobs.map(open) }
+        guard parallel else { return blobs.map { openBody($0, key: key) } }
         var out = [OpenedBody?](repeating: nil, count: blobs.count)
         out.withUnsafeMutableBufferPointer { buffer in
             nonisolated(unsafe) let results = buffer
@@ -427,10 +423,17 @@ extension DatabaseManager {
                 let lower = worker * chunk
                 let upper = min(lower + chunk, blobs.count)
                 guard lower < upper else { return }
-                for i in lower..<upper { results[i] = open(blobs[i]) }
+                for i in lower..<upper { results[i] = openBody(blobs[i], key: key) }
             }
         }
         return out
+    }
+
+    /// Opens one blob (nil = could not be decrypted). A static function rather
+    /// than a local closure so the concurrent workers capture nothing mutable.
+    nonisolated static func openBody(_ blob: Data, key: SymmetricKey) -> OpenedBody? {
+        guard let text = try? JournalCrypto.decryptString(blob, using: key) else { return nil }
+        return OpenedBody(body: text)
     }
 
     /// Drops cached plaintext for ids that are gone (hard delete) or for
