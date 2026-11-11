@@ -27,6 +27,14 @@ struct CommandPaletteView: View {
         let icon: String
         let group: String
         let run: () -> Void
+        /// ⌘↩ action and its hint label (entries: open in the editor).
+        var secondary: (label: String, run: () -> Void)?
+        /// Body snippet with its own match highlight (content hits).
+        var snippet: SearchSnippet?
+        /// Matched character ranges in `title`, highlighted in the row.
+        var titleRanges: [Range<Int>] = []
+        /// Entries open; commands run (the ↩ hint).
+        var isEntry: Bool { group == "Entries" || group == "In entries" }
 
         init(title: String, subtitle: String, icon: String, group: String, key: String? = nil,
              run: @escaping () -> Void) {
@@ -37,6 +45,38 @@ struct CommandPaletteView: View {
             self.group = group
             self.run = run
         }
+    }
+
+    /// Title with matched characters emphasised.
+    static func highlightedTitle(_ title: String, ranges: [Range<Int>], accent: Color, base: Color) -> AttributedString {
+        var out = AttributedString()
+        let chars = Array(title)
+        var i = 0
+        for r in ranges.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            let lo = min(max(r.lowerBound, i), chars.count), hi = min(max(r.upperBound, lo), chars.count)
+            if lo > i { var plain = AttributedString(String(chars[i..<lo])); plain.foregroundColor = base; out += plain }
+            if hi > lo {
+                var hit = AttributedString(String(chars[lo..<hi]))
+                hit.foregroundColor = accent
+                hit.inlinePresentationIntent = .stronglyEmphasized
+                out += hit
+            }
+            i = hi
+        }
+        if i < chars.count { var rest = AttributedString(String(chars[i...])); rest.foregroundColor = base; out += rest }
+        return out
+    }
+
+    /// ⌘↩ for an entry row: open it in the editor. Never offered for a
+    /// locked hidden entry or one in the trash.
+    private func editAction(for entry: JournalEntry) -> (label: String, run: () -> Void)? {
+        guard !entry.isTrashed,
+              ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: vm.hiddenLocked) else { return nil }
+        return ("edit", {
+            selection = .all
+            vm.select(entry)
+            vm.startEditing(entry)
+        })
     }
 
     /// Jump-to-entry subtitle. Word count is body-derived, so it is omitted
@@ -192,7 +232,7 @@ struct CommandPaletteView: View {
         // Jump-to-entry
         let locked = vm.hiddenLocked
         for entry in vm.entries.prefix(200) {
-            list.append(Command(
+            var cmd = Command(
                 title: entry.displayTitle,
                 subtitle: Self.entrySubtitle(for: entry, hiddenLocked: locked),
                 icon: "doc.text",
@@ -201,15 +241,12 @@ struct CommandPaletteView: View {
             ) {
                 selection = .all
                 vm.select(entry)
-            })
+            }
+            cmd.secondary = editAction(for: entry)
+            list.append(cmd)
         }
 
         return list
-    }
-
-    /// Subsequence fuzzy match — "nte" matches "New Template".
-    private func fuzzyScore(_ needle: String, _ haystack: String) -> Int? {
-        OmegaCore.fuzzyScore(needle, haystack)
     }
 
     private var results: [Command] {
@@ -218,26 +255,31 @@ struct CommandPaletteView: View {
         guard !q.isEmpty else {
             return Array(all.filter { $0.group != "Entries" }.prefix(24))
         }
-        let fuzzy = all
-            .compactMap { cmd -> (Command, Int)? in
-                guard let s = fuzzyScore(q, cmd.title) ?? fuzzyScore(q, cmd.subtitle).map({ $0 / 2 }) else { return nil }
-                return (cmd, s)
-            }
-            .sorted { $0.1 > $1.1 }
-            .prefix(24)
-            .map(\.0)
+        // One relevance score for commands, entry titles and content hits,
+        // so a weak command match never sits above the entry you meant.
+        var scored: [(Command, Int)] = all.compactMap { cmd in
+            guard let m = UIPaletteRanking.score(q, title: cmd.title, subtitle: cmd.subtitle) else { return nil }
+            var c = cmd
+            c.titleRanges = m.ranges
+            return (c, m.score)
+        }
         // Content matches (body/tags/operators). Masked while locked: hidden entries match title only
         // and never contribute a body snippet.
-        let shown = Set(fuzzy.filter { $0.group == "Entries" }.map(\.title))
-        let content = vm.contentSearchHits(q, limit: 8).filter { !shown.contains($0.entry.displayTitle) }.map { hit in
-            Command(title: hit.entry.displayTitle,
-                    subtitle: hit.snippet?.text ?? "\(hit.entry.mood.face) \(hit.entry.createdAt.formatted(date: .abbreviated, time: .omitted))",
-                    icon: "text.magnifyingglass", group: "In entries", key: hit.entry.id) {
+        let titled = Set(scored.filter { $0.0.group == "Entries" }.map { $0.0.id.replacingOccurrences(of: "Entries|", with: "") })
+        for (rank, hit) in vm.contentSearchHits(q, limit: 8).enumerated() where !titled.contains(hit.entry.id) {
+            var cmd = Command(title: hit.entry.displayTitle,
+                              subtitle: hit.snippet?.text ?? "\(hit.entry.mood.face) \(hit.entry.createdAt.formatted(date: .abbreviated, time: .omitted))",
+                              icon: "text.magnifyingglass", group: "In entries", key: hit.entry.id) {
                 selection = .all
                 vm.select(hit.entry)
             }
+            cmd.snippet = hit.snippet
+            cmd.titleRanges = UIPaletteRanking.match(q, in: hit.entry.displayTitle, allowFuzzy: false)?.ranges ?? []
+            cmd.secondary = editAction(for: hit.entry)
+            // Search already ordered these; keep that order within the tier.
+            scored.append((cmd, UIPaletteRanking.Tier.contentHit.rawValue - rank))
         }
-        return fuzzy + content
+        return Array(UIPaletteRanking.ranked(scored).prefix(30))
     }
 
     var body: some View {
@@ -314,8 +356,10 @@ struct CommandPaletteView: View {
                 Divider().opacity(0.3)
 
                 HStack(spacing: 12) {
+                    let current = rows.indices.contains(highlighted) ? rows[highlighted] : nil
                     hint("↑↓", "navigate")
-                    hint("↩", "run")
+                    hint("↩", current?.isEntry == true ? "open" : "run")
+                    if let secondary = current?.secondary { hint("⌘↩", secondary.label) }
                     hint("esc", "close")
                     Spacer()
                     Text(A11yDescriptions.paletteResultCount(rows.count))
@@ -350,6 +394,13 @@ struct CommandPaletteView: View {
             }
             .padding(.top, 90)
         }
+        .background {
+            // ⌘↩ runs the highlighted row's secondary action (entries: edit).
+            Button("") { runSecondary() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .opacity(0).frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
         .onAppear { focused = true; highlighted = 0 }
         .onExitCommand { vm.showCommandPalette = false }
         .onKeyPress(.upArrow) {
@@ -379,14 +430,20 @@ struct CommandPaletteView: View {
                     .foregroundColor(isOn ? theme.accentColor : theme.secondaryTextColor)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(cmd.title)
+                    Text(Self.highlightedTitle(cmd.title, ranges: cmd.titleRanges,
+                                               accent: theme.accentColor, base: theme.titleTextColor))
                         .font(OmegaTheme.font(.caption, isOn ? .semibold : .regular))
-                        .foregroundColor(theme.titleTextColor)
                         .lineLimit(1)
-                    Text(cmd.subtitle)
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
-                        .lineLimit(1)
+                    if let snippet = cmd.snippet {
+                        Text(EntryRow.highlighted(snippet, accent: theme.accentColor, base: theme.secondaryTextColor))
+                            .font(OmegaTheme.font(.meta))
+                            .lineLimit(1)
+                    } else {
+                        Text(cmd.subtitle)
+                            .font(OmegaTheme.font(.meta))
+                            .foregroundColor(theme.secondaryTextColor)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Text(cmd.group)
@@ -424,6 +481,13 @@ struct CommandPaletteView: View {
                 .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
         }
+    }
+
+    private func runSecondary() {
+        let rows = results
+        guard rows.indices.contains(highlighted), let secondary = rows[highlighted].secondary else { return }
+        vm.showCommandPalette = false
+        DispatchQueue.main.async { secondary.run() }
     }
 
     private func runHighlighted() {
