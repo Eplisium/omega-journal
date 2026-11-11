@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
+import ImageIO
 import OmegaJournalCore
 
 // MARK: - Export Manager
@@ -248,6 +249,141 @@ enum ExportManager {
         try ExportFormats.indexPage(title: title, entries: index, theme: theme)
             .write(to: dir.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
         return entries.count
+    }
+
+    // MARK: EPUB book
+
+    /// What goes into an EPUB book.
+    enum EPUBScope: Equatable {
+        /// Specific entries (e.g. the list selection).
+        case selection(Set<String>)
+        /// One notebook.
+        case notebook(id: String, name: String)
+        /// One calendar year.
+        case year(Int)
+        /// The whole journal.
+        case all
+
+        var bookTitle: String {
+            switch self {
+            case .selection(let ids): ids.count == 1 ? "Omega Journal — 1 entry" : "Omega Journal — \(ids.count) entries"
+            case .notebook(_, let name): name.isEmpty ? "Omega Journal" : name
+            case .year(let y): "Omega Journal \(y)"
+            case .all: "Omega Journal"
+            }
+        }
+    }
+
+    /// Entries for an EPUB (a reading copy, like the PDF): Trash is never
+    /// included; hidden entries only when `includeHidden` (the caller
+    /// authenticated). Oldest first. Returns how many hidden entries were left out.
+    nonisolated static func epubEntries(_ all: [JournalEntry], scope: EPUBScope, includeHidden: Bool,
+                                        calendar: Calendar = .current) -> (entries: [JournalEntry], omittedHidden: Int) {
+        var seen = Set<String>()
+        let inScope = all.filter { e in
+            guard !e.isTrashed, seen.insert(e.id).inserted else { return false }
+            switch scope {
+            case .selection(let ids): return ids.contains(e.id)
+            case .notebook(let id, _): return e.journalId == id
+            case .year(let y): return calendar.component(.year, from: e.createdAt) == y
+            case .all: return true
+            }
+        }
+        let kept = includeHidden ? inScope : inScope.filter { !$0.isHidden }
+        return (kept.sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }, inScope.count - kept.count)
+    }
+
+    /// Image bytes an EPUB reader can show: JPEG/PNG/GIF/WebP up to 4 MB pass
+    /// through; anything else (HEIC, TIFF, huge photos) becomes a JPEG at most
+    /// 2048 px on the long side. nil = not an image ImageIO can read.
+    nonisolated static func epubImage(_ data: Data, mimeType: String) -> (data: Data, mimeType: String)? {
+        let passthrough: Set<String> = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+        if passthrough.contains(mimeType), data.count <= 4 << 20 { return (data, mimeType) }
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2048,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return (out as Data, "image/jpeg")
+    }
+
+    /// Builds the book in memory. `attachmentData` reads decrypted attachment bytes.
+    static func epubData(_ entries: [JournalEntry], title: String, subtitle: String = "", author: String = "",
+                         attachmentData: ((Attachment) -> Data?)? = nil, modified: Date = Date(),
+                         identifier: String = UUID().uuidString, calendar: Calendar = .current) throws -> Data {
+        let book = EPUBBook(
+            title: title, subtitle: subtitle, author: author,
+            language: Locale.current.language.languageCode?.identifier ?? "en",
+            identifier: identifier, modified: modified,
+            entries: entries.map { e in
+                let images: [EPUBImage] = attachmentData.map { read in
+                    e.attachments.filter(\.isImage).compactMap { a -> EPUBImage? in
+                        guard let raw = read(a), let img = epubImage(raw, mimeType: a.mimeType) else { return nil }
+                        return EPUBImage(originalName: a.filename, data: img.data, mediaType: img.mimeType)
+                    }
+                } ?? []
+                return EPUBEntry(id: e.id, title: e.title, date: e.createdAt, moodLabel: "\(e.mood.emoji) \(e.mood.label)",
+                                 tags: e.tags, markdown: e.body, images: images)
+            })
+        return try EPUBBuilder.build(book, calendar: calendar)
+    }
+
+    /// Writes the book atomically; returns the number of entries in it.
+    @discardableResult
+    static func exportEPUB(_ entries: [JournalEntry], to url: URL, title: String,
+                           attachmentData: ((Attachment) -> Data?)? = nil) throws -> Int {
+        let subtitle: String
+        if let first = entries.first?.createdAt, let last = entries.last?.createdAt {
+            let a = first.formatted(date: .abbreviated, time: .omitted), b = last.formatted(date: .abbreviated, time: .omitted)
+            subtitle = (a == b ? a : "\(a) – \(b)") + " · \(entries.count) \(entries.count == 1 ? "entry" : "entries")"
+        } else {
+            subtitle = ""
+        }
+        try epubData(entries, title: title, subtitle: subtitle, attachmentData: attachmentData).write(to: url, options: .atomic)
+        return entries.count
+    }
+
+    /// Full flow for a menu/Settings button: gathers the scope from the whole
+    /// journal, asks to unlock when hidden entries are in it (leaving them out
+    /// if that's cancelled), then asks where to save.
+    @MainActor
+    static func exportEPUB(vm: JournalViewModel, scope: EPUBScope) {
+        Task { @MainActor in
+            var all = vm.db.fetchAllEntriesForExport()
+            var seen = Set<String>()
+            all.removeAll { !seen.insert($0.id).inserted }
+            let probe = epubEntries(all, scope: scope, includeHidden: true)
+            var includeHidden = BiometricAuth.shared.isAuthenticated
+            if probe.entries.contains(where: \.isHidden), !includeHidden {
+                includeHidden = await BiometricAuth.shared.authenticate()
+            }
+            let (entries, omitted) = epubEntries(all, scope: scope, includeHidden: includeHidden)
+            guard !entries.isEmpty else {
+                vm.showToast(omitted > 0 ? "Nothing to export — every entry here is hidden" : "Nothing to export", isError: true)
+                return
+            }
+            let panel = NSSavePanel()
+            panel.title = "Export Book"
+            panel.message = "Save these entries as an EPUB book for Apple Books or any e-reader."
+            panel.allowedContentTypes = [UTType(filenameExtension: "epub") ?? .data]
+            panel.nameFieldStringValue = scope.bookTitle.replacingOccurrences(of: "/", with: "-") + ".epub"
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            do {
+                let n = try exportEPUB(entries, to: url, title: scope.bookTitle, attachmentData: { vm.db.readAttachmentData($0) })
+                vm.showToast("Book saved with \(n) \(n == 1 ? "entry" : "entries")" + (omitted > 0 ? " — \(omitted) hidden not included" : ""),
+                             isError: omitted > 0)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                vm.showToast("Export failed: \(error.localizedDescription)", isError: true)
+            }
+        }
     }
 
     // MARK: PDF Export
