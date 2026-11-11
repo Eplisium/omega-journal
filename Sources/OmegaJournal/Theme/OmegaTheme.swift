@@ -25,20 +25,29 @@ enum OmegaTheme {
         static func nearest(to size: CGFloat) -> TypeSize {
             allCases.min { abs($0.rawValue - size) < abs($1.rawValue - size) } ?? .body
         }
+
+        /// Point size at the app-wide text size (Settings › Appearance › Text size).
+        /// Reading it inside a view body makes that view follow size changes.
+        var points: CGFloat { TextSizeSettings.shared.points(rawValue) }
     }
 
+    /// The app's font for a type token, scaled by the app-wide text size.
     static func font(_ size: TypeSize, _ weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
-        Font.system(size: size.rawValue, weight: weight, design: design)
+        Font.system(size: size.points, weight: weight, design: design)
     }
 
-    static let metaFont = font(.meta)
-    static let captionFont = font(.caption, .semibold)
-    static let bodyFont = font(.body)
-    static let bodyLargeFont = font(.bodyLarge)
-    static let headingFont = font(.heading, .semibold)
-    static let titleFont = font(.title, .bold, design: .serif)
-    static let displayFont = font(.display, .light)
-    static let serifTitleFont = font(.heading, .semibold, design: .serif)
+    /// Any point size (e.g. a hero numeral) scaled by the app-wide text size.
+    static func scaled(_ points: CGFloat) -> CGFloat { TextSizeSettings.shared.points(points) }
+
+    // Computed (not stored) so they follow the text size setting.
+    static var metaFont: Font { font(.meta) }
+    static var captionFont: Font { font(.caption, .semibold) }
+    static var bodyFont: Font { font(.body) }
+    static var bodyLargeFont: Font { font(.bodyLarge) }
+    static var headingFont: Font { font(.heading, .semibold) }
+    static var titleFont: Font { font(.title, .bold, design: .serif) }
+    static var displayFont: Font { font(.display, .light) }
+    static var serifTitleFont: Font { font(.heading, .semibold, design: .serif) }
 
     // MARK: Spacing
 
