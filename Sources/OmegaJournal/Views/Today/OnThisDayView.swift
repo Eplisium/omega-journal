@@ -166,5 +166,7 @@ struct OnThisDayView: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Open memory: \(entry.displayTitle)")
+        // A tap gesture isn't something VoiceOver can press; this is.
+        .accessibilityAction { onOpenEntry(entry) }
     }
 }

@@ -17,7 +17,7 @@ struct CheckinCard: View {
     var body: some View {
         OmegaCard {
             VStack(alignment: .leading, spacing: OmegaTheme.Spacing.m) {
-                OmegaSectionHeader(title: "Daily check-in", subtitle: "How are you today?", systemImage: "heart.text.square") {
+                OmegaSectionHeader(title: "How are you today?", subtitle: "Sleep, energy, stress and your own metrics", systemImage: "heart.text.square") {
                     HStack(spacing: OmegaTheme.Spacing.s) {
                         OmegaIconButton(systemImage: isEditing ? "checkmark" : "slider.horizontal.3",
                                         accessibilityLabel: isEditing ? "Done editing metrics" : "Edit metrics") { isEditing.toggle() }
@@ -112,6 +112,8 @@ private struct MetricInput: View {
                 TextField("–", text: $text)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 64)
+                    // The placeholder is a dash; VoiceOver would read "en dash".
+                    .accessibilityLabel(metric.unit.isEmpty ? metric.name : "\(metric.name) (\(metric.unit))")
                     .onSubmit(commit)
                     .onAppear { text = format(store.value(metric.id)) }
                     .onChange(of: text) { _, _ in commit() }

@@ -287,6 +287,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// view. With `.width` autoresizing the text view only ever grows by the
     /// clip view's *delta*, so it stayed 400pt wider than the pane forever and
     /// every line wrapped past the right edge (prose was clipped, never visible).
+    static let bodyAccessibilityLabel = "Entry text"
+    static let bodyAccessibilityHelp = "Markdown. Type a slash for formatting, dates, moods and links."
+
     static func makeScrollableTextView() -> (NSScrollView, OmegaTextView) {
         let scrollView = WrappingScrollView()
         let contentSize = scrollView.contentSize
@@ -298,6 +301,9 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        // VoiceOver: without this the body is announced as a bare "text area".
+        textView.setAccessibilityLabel(Self.bodyAccessibilityLabel)
+        textView.setAccessibilityHelp(Self.bodyAccessibilityHelp)
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.documentView = textView
