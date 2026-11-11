@@ -123,7 +123,9 @@ struct AuditFixModernWidgetSnapshotTests {
         let store = WidgetSnapshotStore(directory: dir)
         try store.write(snapshot)
         let text = try String(contentsOf: store.fileURL, encoding: .utf8)
-        for secret in ["XYZZY", "PLUGH", "FROBOZZ", "GRUE", "title", "body"] {
+        // Field names are matched as JSON keys: the daily prompts are plain text and one of them
+        // ("What's your body telling you today?") contains the word "body".
+        for secret in ["XYZZY", "PLUGH", "FROBOZZ", "GRUE", "\"title\":", "\"body\":"] {
             #expect(!text.contains(secret), "snapshot leaked \(secret)")
         }
     }
