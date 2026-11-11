@@ -13,7 +13,7 @@ public enum SettingsGroup: String, CaseIterable, Sendable {
 
 public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
     // Appearance
-    case theme, systemAppearance, reading, customColors
+    case theme, systemAppearance, textSize, reading, customColors
     // Writing
     case writingGoals, dailyCheckin, quickCapture, reviewReminders, periodicReview, aiAssist
     // Privacy
@@ -27,7 +27,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
 
     public var group: SettingsGroup {
         switch self {
-        case .theme, .systemAppearance, .reading, .customColors: .appearance
+        case .theme, .systemAppearance, .textSize, .reading, .customColors: .appearance
         case .writingGoals, .dailyCheckin, .quickCapture, .reviewReminders, .periodicReview, .aiAssist: .writing
         case .whatsProtected, .appLock, .hiddenEntries: .privacy
         case .backups, .export, .moreExports, .encryptedExport, .importEntries, .importOtherApps,
@@ -41,6 +41,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .theme: "Theme"
         case .systemAppearance: "Light & Dark Mode"
+        case .textSize: "Text Size"
         case .reading: "Reading"
         case .customColors: "Custom Colors"
         case .writingGoals: "Writing Goals"
@@ -48,7 +49,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         case .quickCapture: "Quick Capture"
         case .reviewReminders: "Review Reminders"
         case .periodicReview: "Weekly & Monthly Review"
-        case .aiAssist: "On-Device Writing Help"
+        case .aiAssist: "Writing Suggestions"
         case .whatsProtected: "What's Protected"
         case .appLock: "App Lock"
         case .hiddenEntries: "Hidden Entries & Spotlight"
@@ -69,6 +70,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .theme: "paintpalette"
         case .systemAppearance: "circle.lefthalf.filled"
+        case .textSize: "textformat.size"
         case .reading: "textformat"
         case .customColors: "eyedropper"
         case .writingGoals: "target"

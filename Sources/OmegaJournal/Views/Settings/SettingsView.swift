@@ -52,11 +52,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     var vm: JournalViewModel
-    @Environment(\.dismiss) private var dismiss
     private let theme = ThemeManager.shared
     private let goals = GoalManager.shared
 
-    @State private var section: SettingsSection
     @State private var customAccent = ThemeManager.shared.accentColor
     @State private var customBackground = ThemeManager.shared.backgroundColor
     @State private var customSidebar = ThemeManager.shared.sidebarColor
@@ -71,39 +69,36 @@ struct SettingsView: View {
     @AppStorage(QuickCapture.insertedKey) private var menuBarQuickCapture = true
     @AppStorage(TodayCheckinPrefs.showKey) private var showCheckinOnToday = true
 
-    /// Sized from the journal window (never the sheet itself, which would feed
-    /// back into its own size) and captured once per presentation. When the app
-    /// is not active (Settings opened from the menu while another app is key)
-    /// there is no main/key window; fall back to any visible journal window and
-    /// then to the minimum window size — never a guessed larger size, which made
-    /// the sheet hang off the bottom of a small window.
-    static var preferredSize: CGSize {
-        let focused = [NSApp.mainWindow, NSApp.keyWindow].compactMap { $0 }.map { $0.sheetParent ?? $0 }
-        let visible = NSApp.windows.filter {
-            $0.isVisible && $0.sheetParent == nil && !($0 is NSPanel) && $0.styleMask.contains(.titled)
-        }
-        return SettingsSheetSizing.size(forHost: (focused + visible).first?.frame.size)
+    /// Which pane is showing; shared with the Help menu and the sidebar so
+    /// they can open the Settings window on a given pane.
+    let navigation: SettingsNavigation
+
+    init(vm: JournalViewModel, navigation: SettingsNavigation = .shared) {
+        self.vm = vm
+        self.navigation = navigation
     }
 
-    @State private var sheetSize = SettingsView.preferredSize
-
-    init(vm: JournalViewModel, initialSection: SettingsSection = .appearance) {
-        self.vm = vm
-        self._section = State(initialValue: initialSection)
+    /// Opens on `initialSection` with its own navigation state (previews, tests).
+    init(vm: JournalViewModel, initialSection: SettingsSection) {
+        self.init(vm: vm, navigation: SettingsNavigation(section: initialSection))
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Divider().opacity(0.2)
-            content
+        // In a `Settings` scene a TabView becomes the native toolbar of panes.
+        TabView(selection: Binding(get: { navigation.section }, set: { navigation.section = $0 })) {
+            ForEach(SettingsSection.allCases) { pane in
+                paneView(pane)
+                    .tabItem { Label(pane.tabTitle, systemImage: pane.icon) }
+                    .tag(pane)
+                    .accessibilityLabel(pane.rawValue)
+            }
         }
-        // Use the room the main window offers (the old fixed 680×540 sheet hid
-        // most theme cards and data controls below the fold).
-        .frame(width: sheetSize.width, height: sheetSize.height)
-        .background(theme.backgroundColor)
-        // The sheet covers the window's toast; results of Settings actions
-        // (export, import, Empty Trash) and their errors show here instead.
+        .frame(minWidth: SettingsWindowSizing.minWidth, idealWidth: SettingsWindowSizing.idealWidth,
+               maxWidth: SettingsWindowSizing.maxWidth,
+               minHeight: SettingsWindowSizing.minHeight, idealHeight: SettingsWindowSizing.idealHeight,
+               maxHeight: SettingsWindowSizing.maxHeight)
+        // Results of Settings actions (export, import, Empty Trash) and their
+        // errors toast in this window while it is in front.
         .modifier(WindowToastHost(vm: vm))
         .confirmationDialog(
             "Empty Trash?",
@@ -119,96 +114,25 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Sidebar
+    // MARK: Pane
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 9) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [theme.accentColor, theme.accentColor.opacity(0.55)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 30, height: 30)
-                    Text("Ω")
-                        .font(OmegaTheme.font(.bodyLarge, .bold, design: .serif))
-                        .foregroundColor(theme.onAccentColor)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Settings")
-                        .font(OmegaTheme.font(.body, .semibold))
-                        .foregroundColor(theme.titleTextColor)
-                    Text("Omega Journal")
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
+    private func paneView(_ pane: SettingsSection) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(pane.subtitle)
+                    .font(OmegaTheme.font(.meta))
+                    .foregroundColor(theme.secondaryTextColor)
+                    .padding(.horizontal, 4)
+                if pane == .about { aboutHeader }
+                ForEach(SettingsCatalog.cards(in: pane.group)) { card in
+                    cardView(card)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-
-            VStack(spacing: 2) {
-                ForEach(SettingsSection.allCases) { s in
-                    SettingsSidebarRow(section: s, isSelected: section == s) { section = s }
-                }
-            }
-            .padding(.horizontal, 8)
-
-            Spacer()
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 186)
-        .frame(maxHeight: .infinity)
-        .background(theme.sidebarColor.opacity(0.45))
-    }
-
-    // MARK: Content
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(section.rawValue)
-                        .font(OmegaTheme.font(.heading, .semibold))
-                        .foregroundColor(theme.titleTextColor)
-                    Text(section.subtitle)
-                        .font(OmegaTheme.font(.meta))
-                        .foregroundColor(theme.secondaryTextColor)
-                }
-                Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(OmegaTheme.font(.meta, .bold))
-                        .foregroundColor(theme.secondaryTextColor)
-                        .frame(width: 24, height: 24)
-                        .background(Circle().fill(theme.secondaryTextColor.opacity(0.12)))
-                }
-                .accessibilityLabel("Close")
-                .buttonStyle(.plain)
-                .help("Close settings")
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 16)
-
-            Divider().opacity(0.2)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if section == .about { aboutHeader }
-                    ForEach(SettingsCatalog.cards(in: section.group)) { card in
-                        cardView(card)
-                    }
-                }
-                .padding(20)
-            }
-            // New identity per pane: switching panes starts at the top instead of
-            // keeping the previous pane's scroll offset.
-            .id(section)
-            .scrollContentBackground(.hidden)
-        }
+        .scrollContentBackground(.hidden)
+        .background(theme.backgroundColor)
     }
 
     // MARK: Cards
@@ -219,6 +143,7 @@ struct SettingsView: View {
         switch card {
         case .theme: themeCard(card)
         case .systemAppearance: systemAppearanceCard(card)
+        case .textSize: textSizeCard(card)
         case .reading: readingCard(card)
         case .customColors: customColorsCard(card)
         case .writingGoals: goalsCard(card)
@@ -226,7 +151,8 @@ struct SettingsView: View {
         case .quickCapture: quickCaptureCard(card)
         case .reviewReminders: ReviewRemindersPanel()
         case .periodicReview: PeriodicReviewPanel(vm: vm)
-        case .aiAssist: AIAssistPanel()
+        // Hidden entirely on Macs without Apple Intelligence.
+        case .aiAssist: if SmartAssist.availability.isAvailable { AIAssistPanel() }
         case .whatsProtected: protectionCard(card)
         case .appLock: AppLockPanel()
         case .hiddenEntries: hiddenEntriesCard(card)
@@ -271,6 +197,26 @@ struct SettingsView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private func textSizeCard(_ card: SettingsCardID) -> some View {
+        SettingsCard(
+            title: card.title,
+            icon: card.icon,
+            footnote: "Scales the sidebar, lists, reader and labels. The editor keeps its own size control and scales with this too."
+        ) {
+            SettingsRow(title: "Text size") {
+                Picker("Text size", selection: Binding(
+                    get: { TextSizeSettings.shared.size },
+                    set: { TextSizeSettings.shared.set($0) }
+                )) {
+                    ForEach(UITextSize.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 300)
             }
         }
     }

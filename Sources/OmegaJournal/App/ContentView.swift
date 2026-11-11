@@ -68,7 +68,10 @@ struct ContentView: View {
                 onboarding.evaluateOnLaunch(hasEntries: !vm.entries.isEmpty)
             }
             QuitGuard.check = { [weak vm = self.vm] in vm?.quitDecision() ?? .terminate }
+            // The Settings window edits the most recently shown journal window.
+            SettingsHost.shared.register(vm)
         }
+        .onDisappear { SettingsHost.shared.unregister(vm) }
         .alert("Bring over your earlier journal?", isPresented: $showLegacyImportOffer) {
             Button("Choose Folder…") {
                 JournalViewModel.markLegacyImportOfferHandled()

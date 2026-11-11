@@ -304,22 +304,22 @@ struct PeriodicReviewPanel: View {
 }
 
 struct AIAssistPanel: View {
-    private let theme = ThemeManager.shared
     @State private var aiEnabled = SmartAssist.isEnabled()
 
+    /// Row copy (pure, tested).
+    static let rowTitle = "Writing suggestions"
+    static let rowSubtitle = "Suggest titles, tags and follow-up questions with Apple Intelligence. Runs on this Mac."
+
+    // Only shown when `SmartAssist.availability` is available (SettingsView
+    // hides the whole card otherwise). Stored key and API are unchanged.
     var body: some View {
         PanelCard(card: .aiAssist,
-                  footnote: "Off by default. Uses Apple's on-device model only (macOS 26+ with Apple Intelligence) — nothing leaves your Mac. Hidden entries are never used.") {
-            if SmartAssist.availability.isAvailable {
-                SettingsRow(title: "Suggest titles, tags and summaries") {
-                    Toggle("Suggest titles, tags and summaries", isOn: $aiEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: aiEnabled) { _, on in SmartAssist.setEnabled(on) }
-                }
-            } else if case .unavailable(let why) = SmartAssist.availability {
-                Text(why).font(OmegaTheme.captionFont).foregroundColor(theme.secondaryTextColor)
-                    .fixedSize(horizontal: false, vertical: true)
+                  footnote: "Off by default. Nothing leaves your Mac, and hidden entries are never used.") {
+            SettingsRow(title: Self.rowTitle, subtitle: Self.rowSubtitle) {
+                Toggle(Self.rowTitle, isOn: $aiEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: aiEnabled) { _, on in SmartAssist.setEnabled(on) }
             }
         }
     }

@@ -21,8 +21,7 @@ struct SidebarView: View {
     /// Newline-separated tag paths whose children are folded away.
     @AppStorage(ShellPrefs.sidebarCollapsedTags) private var collapsedTagsRaw = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showSettings = false
-    @State private var settingsSection: SettingsSection = .appearance
+    @Environment(\.openSettings) private var openSettings
     @State private var smartFolderDraft: SmartFolder?
     @State private var showTagManager = false
     @State private var journalDraft: JournalDraft?
@@ -109,9 +108,6 @@ struct SidebarView: View {
             footer
         }
         .background(theme.sidebarColor)
-        .sheet(isPresented: $showSettings) {
-            SettingsView(vm: vm, initialSection: settingsSection)
-        }
         .sheet(item: $smartFolderDraft) { draft in
             SmartFolderEditor(vm: vm, folder: draft) { saved in
                 if let saved { selection = .smartFolder(saved.id) }
@@ -125,13 +121,13 @@ struct SidebarView: View {
         .sheet(item: $journalDraft) { draft in
             NotebookEditor(vm: vm, journal: draft.journal)
         }
+        // Both open the native Settings window (one per app, not per window).
         .onReceive(NotificationCenter.default.publisher(for: .showSettings)) { _ in
-            settingsSection = .appearance
-            showSettings = true
+            openSettings()
         }
         .onReceive(NotificationCenter.default.publisher(for: .showShortcuts)) { _ in
-            settingsSection = .about
-            showSettings = true
+            SettingsNavigation.shared.section = .about
+            openSettings()
         }
     }
 
@@ -426,7 +422,7 @@ struct SidebarView: View {
             .ojGlassButtonStyle(prominent: true, height: 32)
             .omegaTooltip("New Entry (⌘N)")
 
-            Button { settingsSection = .appearance; showSettings = true } label: {
+            Button { openSettings() } label: {
                 Image(systemName: "gearshape")
                     .font(OmegaTheme.font(.caption))
                     .foregroundColor(theme.secondaryTextColor)

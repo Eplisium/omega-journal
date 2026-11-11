@@ -22,6 +22,14 @@ struct OmegaJournalApp: App {
         .defaultSize(width: 1200, height: 780)
         .commands { menuCommands }
 
+        // Native Settings window (⌘, via the standard app-menu item). Shows a
+        // placeholder until a journal window — and so the unlocked database —
+        // exists; see `SettingsWindowRoot`.
+        Settings {
+            SettingsWindowRoot()
+        }
+        .windowResizability(.contentMinSize)
+
         MenuBarExtra("Quick Capture", systemImage: "square.and.pencil", isInserted: quickCapture.binding) {
             QuickCaptureView()
         }
@@ -66,11 +74,6 @@ struct OmegaJournalApp: App {
             formatButton("Link", .link, "k", [.command, .shift])
             formatButton("Code Block", .codeBlock, "j", [.command, .shift])
             formatButton("Divider", .divider, "-", [.command, .shift])
-        }
-
-        CommandGroup(replacing: .appSettings) {
-            Button("Settings…") { post(.showSettings) }
-                .keyboardShortcut(",", modifiers: .command)
         }
 
         CommandGroup(after: .textEditing) {
