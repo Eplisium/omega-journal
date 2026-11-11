@@ -13,34 +13,39 @@ import SwiftUI
 @MainActor
 @propertyWrapper
 struct LazyState<Model: AnyObject & Observable>: DynamicProperty {
-    @State private var holder: Holder
+    @State private var holder: LazyStateHolder
 
     init(wrappedValue makeModel: @autoclosure @escaping () -> Model) {
-        _holder = State(initialValue: Holder(makeModel))
+        _holder = State(initialValue: LazyStateHolder { makeModel() })
     }
 
-    var wrappedValue: Model { holder.model }
+    var wrappedValue: Model { holder.model(as: Model.self) }
 
     /// `$model.property` bindings, like `@Bindable`.
-    var projectedValue: Bindable<Model> { Bindable(holder.model) }
+    var projectedValue: Bindable<Model> { Bindable(holder.model(as: Model.self)) }
 
     /// Materializes the model when SwiftUI installs the view, ahead of `body`.
     nonisolated func update() {
-        MainActor.assumeIsolated { _ = holder.model }
+        MainActor.assumeIsolated { _ = holder.model(as: Model.self) }
     }
+}
 
-    final class Holder {
-        private var makeModel: (() -> Model)?
-        private var instance: Model?
+/// Storage for `LazyState`. Top-level and non-generic on purpose: Swift
+/// 6.3.3's release optimizer crashes (signal 11 in EarlyPerfInliner,
+/// `isCallerAndCalleeLayoutConstraintsCompatible`) on the deinit of the
+/// generic `LazyState<Model>.Holder` this replaced. The cast back is sound
+/// because a holder only ever stores what its own `makeModel` returned.
+final class LazyStateHolder {
+    private var makeModel: (() -> AnyObject)?
+    private var instance: AnyObject?
 
-        init(_ makeModel: @escaping () -> Model) { self.makeModel = makeModel }
+    init(_ makeModel: @escaping () -> AnyObject) { self.makeModel = makeModel }
 
-        var model: Model {
-            if let instance { return instance }
-            let created = makeModel!()
-            instance = created
-            makeModel = nil
-            return created
-        }
+    func model<Model: AnyObject>(as _: Model.Type) -> Model {
+        if let instance { return unsafeDowncast(instance, to: Model.self) }
+        let created = makeModel!()
+        instance = created
+        makeModel = nil
+        return unsafeDowncast(created, to: Model.self)
     }
 }

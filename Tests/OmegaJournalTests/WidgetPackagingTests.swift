@@ -72,7 +72,7 @@ struct WidgetPackagingTests {
     func packagingLib() throws {
         let lib = try Self.text("scripts/lib/oj-packaging.sh")
         #expect(lib.contains("-emit-const-values"))
-        #expect(lib.contains("-const-gather-protocols-list"))
+        #expect(lib.contains("-Xfrontend -Xswiftc -const-gather-protocols-file"))
         #expect(lib.contains("appintentsmetadataprocessor"))
         #expect(lib.contains("--compile-time-extraction"))
         #expect(lib.contains("Contents/PlugIns/$OJ_WIDGET_APPEX"))
