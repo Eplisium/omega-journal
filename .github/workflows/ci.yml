@@ -4,24 +4,146 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
+# One run per branch / PR: a newer push cancels the run it supersedes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned toolchain: the newest stable Xcode on GitHub's macOS 26 runners (Swift 6.3).
+  # Bump after checking the runner image's Xcode list:
+  # https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
+  XCODE_VERSION: "26.6"
 
 jobs:
   build-and-test:
-    runs-on: macos-latest
+    name: Build and test
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Select latest Xcode
+      - uses: actions/checkout@v7
+        with:
+          # Full history: restore_mtimes.py reads it, and build numbers count commits.
+          fetch-depth: 0
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: ${{ env.XCODE_VERSION }}
+
       - name: Toolchain
-        run: swift --version
-      - name: Build
-        run: swift build
+        id: toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          # Cache key part that changes whenever the compiler does (runner image updates).
+          echo "id=$(swift --version 2>/dev/null | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # .build keyed on the toolchain and the package manifest (Package.resolved is
+      # listed for when the package gains dependencies). The source hash makes every
+      # commit save a fresh cache; restore-keys fall back to the newest cache for the
+      # same toolchain + manifest.
+      - name: Restore build cache
+        uses: actions/cache@v6
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**', 'Tests/**') }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      # A fresh checkout stamps every file "now", which would make the cache useless.
+      - name: Restore source modification times
+        run: python3 scripts/restore_mtimes.py
+
+      # Fails on any compiler warning above scripts/warnings-baseline.txt. On a cache
+      # hit only rebuilt files report warnings; the package job's clean release build
+      # checks the whole tree on every run.
+      - name: Build (warnings gate)
+        run: scripts/check_warnings.sh -- swift build --build-tests
+
+      # Serial on CI: see docs/architecture.md, "Testing".
       - name: Test
-        run: swift test --no-parallel
+        run: swift test --skip-build --no-parallel
+
+  package:
+    name: Package and verify bundles
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      # The dev packaging path, signed ad-hoc: no certificates, no secrets. A clean
+      # release build, so the warnings gate below sees every file.
+      - name: Build Omega Journal.app (direct, ad-hoc)
+        env:
+          OMEGA_JOURNAL_SIGN_IDENTITY: "-"
+        run: |
+          set -o pipefail
+          bash build_app.sh 2>&1 | tee "$RUNNER_TEMP/package.log"
+
+      - name: Warnings gate (clean release build)
+        run: scripts/check_warnings.sh "$RUNNER_TEMP/package.log"
+
+      - name: Verify direct bundle
+        run: scripts/verify_bundle.sh "Omega Journal.app" --channel direct
+
+      # The sandboxed App Store layout under the QA bundle id (never the production id),
+      # ad-hoc signed, no provisioning profiles. Reuses the release build above.
+      - name: Build App Store layout (dev mode, ad-hoc)
+        env:
+          OMEGA_JOURNAL_ARCHS: host
+          OMEGA_JOURNAL_MAS_APP_IDENTITY: "-"
+        run: scripts/make_mas.sh --dev
+
+      - name: Verify App Store bundle
+        run: scripts/verify_bundle.sh ".build/packaging/appstore-dev/Omega Journal.app" --channel appstore
+
+  lint:
+    name: SwiftLint (report only)
+    runs-on: macos-26
+    timeout-minutes: 10
+    env:
+      SWIFTLINT_VERSION: "0.65.1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install SwiftLint ${{ env.SWIFTLINT_VERSION }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/swiftlint.zip" \
+            "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip"
+          unzip -q -o "$RUNNER_TEMP/swiftlint.zip" -d "$RUNNER_TEMP/swiftlint"
+          "$RUNNER_TEMP/swiftlint/swiftlint" version
+
+      # Non-blocking for now: findings show as annotations and a count, never a failure.
+      - name: Lint (report only)
+        run: |
+          lint="$RUNNER_TEMP/swiftlint/swiftlint"
+          "$lint" lint --quiet --reporter github-actions-logging || true
+          count="$("$lint" lint --quiet --reporter json 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' || echo "?")"
+          echo "SwiftLint findings: $count"
+          echo "### SwiftLint: $count finding(s) (report only, see .swiftlint.yml)" >> "$GITHUB_STEP_SUMMARY"
+
+  scripts:
+    name: Script checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: ShellCheck the CI scripts
+        run: shellcheck scripts/check_warnings.sh scripts/verify_bundle.sh
+
+      - name: Python syntax
+        run: python3 -m py_compile scripts/restore_mtimes.py
