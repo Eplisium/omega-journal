@@ -61,14 +61,17 @@ extension DatabaseManager {
     }
 
     func orderClause(_ sort: SortOrder) -> String {
+        // `e.id` breaks ties so the order is fully determined: the view model
+        // re-creates it in memory when it moves single rows between lists
+        // (`JournalViewModel.storagePrecedes`) — keep the two in step.
         switch sort {
-        case .dateDesc: return "ORDER BY e.is_pinned DESC, e.created_at DESC"
-        case .dateAsc: return "ORDER BY e.is_pinned DESC, e.created_at ASC"
-        case .titleAsc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE ASC"
-        case .titleDesc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE DESC"
-        case .updatedDesc: return "ORDER BY e.is_pinned DESC, e.updated_at DESC"
-        case .wordsDesc: return "ORDER BY e.is_pinned DESC, e.word_count DESC"
-        case .moodDesc: return "ORDER BY e.is_pinned DESC, e.mood DESC, e.created_at DESC"
+        case .dateDesc: return "ORDER BY e.is_pinned DESC, e.created_at DESC, e.id ASC"
+        case .dateAsc: return "ORDER BY e.is_pinned DESC, e.created_at ASC, e.id ASC"
+        case .titleAsc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE ASC, e.id ASC"
+        case .titleDesc: return "ORDER BY e.is_pinned DESC, e.title COLLATE NOCASE DESC, e.id ASC"
+        case .updatedDesc: return "ORDER BY e.is_pinned DESC, e.updated_at DESC, e.id ASC"
+        case .wordsDesc: return "ORDER BY e.is_pinned DESC, e.word_count DESC, e.id ASC"
+        case .moodDesc: return "ORDER BY e.is_pinned DESC, e.mood DESC, e.created_at DESC, e.id ASC"
         }
     }
 
@@ -164,6 +167,40 @@ extension DatabaseManager {
         var ids: [String] = []
         while sqlite3_step(stmt) == SQLITE_ROW { ids.append(String(cString: sqlite3_column_text(stmt, 0))) }
         return ids
+    }
+
+    /// The rows `ids`, assembled exactly like a list fetch (junction tags,
+    /// attachments, batched decryption). Missing ids are simply absent.
+    func fetchEntries(ids: [String]) -> [JournalEntry] {
+        guard !ids.isEmpty else { return [] }
+        var out: [JournalEntry] = []
+        // A handful of rows: per-row lookups (indexed) instead of scanning the
+        // whole attachments and tags tables. Same rows, same order either way.
+        let maps: (attachments: [String: [Attachment]], tags: [String: [String]])
+        if ids.count <= 32 {
+            var attachments: [String: [Attachment]] = [:]
+            var tags: [String: [String]] = [:]
+            for id in ids {
+                let a = fetchAttachments(entryId: id)
+                if !a.isEmpty { attachments[id] = a }
+                if let t = fetchTagsForEntry(id) { tags[id] = t }
+            }
+            maps = (attachments, tags)
+        } else {
+            maps = (allAttachmentsByEntry(), allTagsByEntry())
+        }
+        var start = ids.startIndex
+        while start < ids.endIndex {
+            let end = min(start + 500, ids.endIndex)
+            let chunk = Array(ids[start..<end])
+            let marks = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE e.id IN (\(marks));"
+            guard let stmt = try? prepare(sql) else { return out }
+            for (i, id) in chunk.enumerated() { bindText(stmt, index: Int32(i + 1), value: id) }
+            out += collectEntries(stmt, preloaded: maps)
+            start = end
+        }
+        return out
     }
 
     func fetchEntry(id: String) -> JournalEntry? {

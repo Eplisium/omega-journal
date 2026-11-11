@@ -40,6 +40,58 @@ extension JournalViewModel {
         updateEntry(u)
     }
 
+    // MARK: - Targeted refresh
+
+    /// What `reload()` does, for a change confined to the rows `ids`: only
+    /// those rows are re-read (decrypting at most them) and moved into the
+    /// lists they now belong to — or out of every list when they are gone or
+    /// in another notebook. Every other row stays as it was. Sidebar tag
+    /// counts, the tag tree, smart-folder and notebook counts, goals, search
+    /// results and the selection are then refreshed exactly as `reload()`
+    /// refreshes them. `W1DataTargetedRefreshTests` pins the equivalence.
+    func relocateEntries(_ ids: [String]) {
+        persistPendingSnapshot()
+        let wanted = Set(ids)
+        if !wanted.isEmpty {
+            let fresh = db.fetchEntries(ids: Array(wanted)).filter { e in
+                activeJournalId.map { $0.isEmpty || e.journalId == $0 } ?? true
+            }.sorted { $0.id < $1.id }
+            var active = entries.filter { !wanted.contains($0.id) }
+            var archived = archivedEntries.filter { !wanted.contains($0.id) }
+            var trashed = trashedEntries.filter { !wanted.contains($0.id) }
+            // A few rows are inserted in place; many are appended and the
+            // list re-sorted once (inserting thousands one by one is quadratic).
+            let insertInPlace = fresh.count <= 16
+            func place(_ e: JournalEntry, _ list: inout [JournalEntry], _ order: SortOrder) {
+                if insertInPlace { Self.insert(e, into: &list, by: order) } else { list.append(e) }
+            }
+            for e in fresh {
+                if e.isTrashed {
+                    place(e, &trashed, .dateDesc)
+                } else if e.isArchived {
+                    place(e, &archived, sortOrder)
+                } else {
+                    place(e, &active, sortOrder)
+                }
+            }
+            if !insertInPlace {
+                let order = sortOrder
+                active.sort { Self.storagePrecedes($0, $1, by: order) }
+                archived.sort { Self.storagePrecedes($0, $1, by: order) }
+                trashed.sort { Self.storagePrecedes($0, $1, by: .dateDesc) }
+            }
+            entries = active
+            archivedEntries = archived
+            trashedEntries = trashed
+            hiddenEntries = Self.hiddenScope(active: entries, archived: archivedEntries)
+            reapplyUnsavedSnapshots()
+        }
+        refreshTagCounts()
+        GoalManager.shared.loadGoals()
+        refreshQuery()
+        dropDanglingSelectionAndEditor()
+    }
+
     // MARK: - Trash & archive
 
     /// Moves an entry to the trash (recoverable for 30 days).
@@ -53,17 +105,11 @@ extension JournalViewModel {
         // entry, and cancelling it would lose the edit. Save it now, THEN trash.
         flushBeforeImmediateMutation()
         db.trashEntry(id: entry.id)
-        entries.removeAll { $0.id == entry.id }
-        searchResults?.removeAll { $0.id == entry.id }
-        archivedEntries.removeAll { $0.id == entry.id }
-        hiddenEntries.removeAll { $0.id == entry.id }
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
-        trashedEntries = db.fetchAllEntries(sort: .dateDesc, scope: .trashed, journalId: activeJournalId)
+        relocateEntries([entry.id])
         pushUndo(.restoreTrashed(ids: [entry.id]))
-        refreshTagCounts()
         showToast(message, actionLabel: "Undo")
-        GoalManager.shared.loadGoals()
     }
 
     func restoreFromTrash(_ entry: JournalEntry) {
@@ -71,7 +117,7 @@ extension JournalViewModel {
         db.restoreEntry(id: entry.id)
         if selectedEntryId == entry.id { selectedEntryId = nil }
         if editingEntryId == entry.id { editingEntryId = nil }
-        reload()
+        relocateEntries([entry.id])
         showToast("Restored “\(entry.displayTitle)”")
     }
 
@@ -94,13 +140,14 @@ extension JournalViewModel {
     /// the toast — and other notebooks' Trash is never touched.
     func emptyTrash() {
         flushBeforeImmediateMutation()
-        guard let count = db.hardDeleteTrashedEntries(ids: trashedEntries.map(\.id)) else {
+        let ids = trashedEntries.map(\.id)
+        guard let count = db.hardDeleteTrashedEntries(ids: ids) else {
             showToast("Couldn't empty Trash — nothing was deleted", isError: true)
             reload()
             return
         }
-        // Re-read every scope (also drops a selection/editor on a deleted row).
-        reload()
+        // Re-read the emptied rows (also drops a selection/editor on one).
+        relocateEntries(ids)
         showToast("Emptied Trash (\(count) \(count == 1 ? "entry" : "entries"))", isError: true)
     }
 
@@ -112,7 +159,7 @@ extension JournalViewModel {
         let newValue = !entry.isArchived
         db.setArchived(id: entry.id, archived: newValue)
         if selectedEntryId == entry.id { selectedEntryId = nil }
-        reload()
+        relocateEntries([entry.id])
         if newValue { pushUndo(.unarchive(ids: [entry.id])) }
         showToast(newValue ? "Archived" : "Unarchived", actionLabel: newValue ? "Undo" : nil)
     }
@@ -136,7 +183,7 @@ extension JournalViewModel {
         // Close editor if hiding, but keep the entry selected so the card
         // stays visible (masked) in the list.
         if hidden && editingEntryId == entry.id { editingEntryId = nil }
-        reload()
+        relocateEntries([entry.id])
         showToast(hidden ? "Hidden" : "Unhidden")
     }
 
@@ -186,7 +233,7 @@ extension JournalViewModel {
         if let editing = editingEntryId, ids.contains(editing) { editingEntryId = nil }
         pushUndo(.restoreTrashed(ids: ids))
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast("Moved \(ids.count) \(ids.count == 1 ? "entry" : "entries") to Trash", actionLabel: "Undo")
     }
 
@@ -206,7 +253,7 @@ extension JournalViewModel {
         for id in ids { db.setArchived(id: id, archived: true) }
         pushUndo(.unarchive(ids: ids))
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast("Archived \(ids.count) \(ids.count == 1 ? "entry" : "entries")", actionLabel: "Undo")
     }
 
@@ -220,7 +267,7 @@ extension JournalViewModel {
         for id in ids { db.setArchived(id: id, archived: false) }
         if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast("Unarchived \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
     }
 
@@ -234,7 +281,7 @@ extension JournalViewModel {
         for id in ids { db.restoreEntry(id: id) }
         if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast("Restored \(ids.count) \(ids.count == 1 ? "entry" : "entries")")
     }
 
@@ -251,7 +298,7 @@ extension JournalViewModel {
         if let selected = selectedEntryId, ids.contains(selected) { selectedEntryId = nil }
         if let editing = editingEntryId, ids.contains(editing) { editingEntryId = nil }
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast("Deleted \(ids.count) \(ids.count == 1 ? "entry" : "entries") permanently", isError: true)
     }
 
@@ -271,7 +318,7 @@ extension JournalViewModel {
             return
         }
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast(changed == 0 ? "Selected entries were already favorites" : "Favorited \(changed) \(changed == 1 ? "entry" : "entries")")
     }
 
@@ -290,7 +337,7 @@ extension JournalViewModel {
             return
         }
         clearBulkSelection()
-        reload()
+        relocateEntries(ids)
         showToast(changed == 0 ? "Selected entries already have #\(trimmed)" : "Tagged \(changed) \(changed == 1 ? "entry" : "entries") with #\(trimmed)")
     }
 
@@ -300,10 +347,8 @@ extension JournalViewModel {
         let t = Toast(message: message, actionLabel: actionLabel, isError: isError)
         toast = t
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            await MainActor.run {
-                if self?.toast == t { self?.toast = nil }
-            }
+            try? await Task.sleep(for: .seconds(4))
+            if self?.toast == t { self?.toast = nil }
         }
     }
 
@@ -325,13 +370,14 @@ extension JournalViewModel {
         case .restoreTrashed(let ids):
             let restorable = ids.filter { db.fetchEntry(id: $0)?.isTrashed == true }
             for id in restorable { db.restoreEntry(id: id) }
+            relocateEntries(ids)
             showToast(Self.undoMessage(verb: "Restored", count: restorable.count, requested: ids.count))
         case .unarchive(let ids):
             let archived = ids.filter { db.fetchEntry(id: $0).map { $0.isArchived && !$0.isTrashed } == true }
             for id in archived { db.setArchived(id: id, archived: false) }
+            relocateEntries(ids)
             showToast(Self.undoMessage(verb: "Unarchived", count: archived.count, requested: ids.count))
         }
-        reload()
     }
 
     static func undoMessage(verb: String, count: Int, requested: Int) -> String {

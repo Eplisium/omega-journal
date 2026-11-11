@@ -479,26 +479,76 @@ final class JournalViewModel {
     /// in the `.hidden` fetch order (pinned first, newest first).
     static func hiddenScope(active: [JournalEntry], archived: [JournalEntry]) -> [JournalEntry] {
         var hidden = (active + archived).filter(\.isHidden)
-        sort(&hidden, by: .dateDesc)
+        hidden.sort { storagePrecedes($0, $1, by: .dateDesc) }
         return hidden
     }
 
     /// Sorts with an explicit order (Trash and Hidden always use `.dateDesc`).
     static func sort(_ collection: inout [JournalEntry], by order: SortOrder) {
-        collection.sort { a, b in
-            if a.isPinned != b.isPinned { return a.isPinned }
-            switch order {
-            case .dateDesc: return a.createdAt > b.createdAt
-            case .dateAsc: return a.createdAt < b.createdAt
-            case .updatedDesc: return a.updatedAt > b.updatedAt
-            case .titleAsc: return a.displayTitle.localizedCaseInsensitiveCompare(b.displayTitle) == .orderedAscending
-            case .titleDesc: return a.displayTitle.localizedCaseInsensitiveCompare(b.displayTitle) == .orderedDescending
-            case .wordsDesc: return a.wordCount > b.wordCount
-            case .moodDesc:
-                if a.mood != b.mood { return a.mood.rawValue > b.mood.rawValue }
-                return a.createdAt > b.createdAt
+        collection.sort { precedes($0, $1, by: order) }
+    }
+
+    /// The list order: pinned first, then `order`.
+    static func precedes(_ a: JournalEntry, _ b: JournalEntry, by order: SortOrder) -> Bool {
+        if a.isPinned != b.isPinned { return a.isPinned }
+        switch order {
+        case .dateDesc: return a.createdAt > b.createdAt
+        case .dateAsc: return a.createdAt < b.createdAt
+        case .updatedDesc: return a.updatedAt > b.updatedAt
+        case .titleAsc: return a.displayTitle.localizedCaseInsensitiveCompare(b.displayTitle) == .orderedAscending
+        case .titleDesc: return a.displayTitle.localizedCaseInsensitiveCompare(b.displayTitle) == .orderedDescending
+        case .wordsDesc: return a.wordCount > b.wordCount
+        case .moodDesc:
+            if a.mood != b.mood { return a.mood.rawValue > b.mood.rawValue }
+            return a.createdAt > b.createdAt
+        }
+    }
+
+    /// The database's list order (`DatabaseManager.orderClause`), re-created
+    /// in memory: pinned first, then `order` with SQLite's NOCASE title
+    /// collation, then id. A row inserted with this lands exactly where a
+    /// fresh fetch would put it.
+    static func storagePrecedes(_ a: JournalEntry, _ b: JournalEntry, by order: SortOrder) -> Bool {
+        if a.isPinned != b.isPinned { return a.isPinned }
+        func byId() -> Bool { a.id.utf8.lexicographicallyPrecedes(b.id.utf8) }
+        switch order {
+        case .dateDesc: return a.createdAt != b.createdAt ? a.createdAt > b.createdAt : byId()
+        case .dateAsc: return a.createdAt != b.createdAt ? a.createdAt < b.createdAt : byId()
+        case .updatedDesc: return a.updatedAt != b.updatedAt ? a.updatedAt > b.updatedAt : byId()
+        case .titleAsc, .titleDesc:
+            let c = sqliteNoCaseCompare(a.title, b.title)
+            if c == 0 { return byId() }
+            return order == .titleAsc ? c < 0 : c > 0
+        case .wordsDesc: return a.wordCount != b.wordCount ? a.wordCount > b.wordCount : byId()
+        case .moodDesc:
+            if a.mood != b.mood { return a.mood.rawValue > b.mood.rawValue }
+            return a.createdAt != b.createdAt ? a.createdAt > b.createdAt : byId()
+        }
+    }
+
+    /// SQLite's built-in NOCASE collation: UTF-8 bytes compared with only
+    /// ASCII A–Z folded; a shorter prefix sorts first.
+    static func sqliteNoCaseCompare(_ a: String, _ b: String) -> Int {
+        func fold(_ c: UInt8) -> UInt8 { (c >= 0x41 && c <= 0x5A) ? c | 0x20 : c }
+        var ia = a.utf8.makeIterator()
+        var ib = b.utf8.makeIterator()
+        while true {
+            switch (ia.next(), ib.next()) {
+            case (nil, nil): return 0
+            case (nil, _): return -1
+            case (_, nil): return 1
+            case let (x?, y?):
+                let fx = fold(x), fy = fold(y)
+                if fx != fy { return fx < fy ? -1 : 1 }
             }
         }
+    }
+
+    /// Inserts `entry` where a fresh fetch would put it, leaving every other
+    /// row in place (no full re-sort).
+    static func insert(_ entry: JournalEntry, into collection: inout [JournalEntry], by order: SortOrder) {
+        let index = collection.firstIndex { storagePrecedes(entry, $0, by: order) } ?? collection.endIndex
+        collection.insert(entry, at: index)
     }
 
     func setSortOrder(_ order: SortOrder) {

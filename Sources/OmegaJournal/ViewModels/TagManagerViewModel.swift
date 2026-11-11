@@ -35,9 +35,13 @@ extension JournalViewModel {
         let target = TagPath.normalize(new) ?? new
         fixFiltersAfterRename(old: old, new: target)
         // Unsaved snapshots carry their own tag list; rewrite it before the
-        // reload re-applies them, or a retry would resurrect the old tag.
+        // refresh re-applies them, or a retry would resurrect the old tag.
         applyTagRewriteToUnsavedSnapshots(.rename(from: old, to: target))
-        reload()
+        // Only rows that carried a renamed tag changed; re-read just those.
+        let touched = (entries + archivedEntries + trashedEntries)
+            .filter { $0.tags.contains { TagPath.renamed($0, from: old, to: target) != nil } }
+            .map(\.id)
+        relocateEntries(touched)
         showToast("Renamed to #\(TagPath.normalize(new) ?? new)")
     }
 

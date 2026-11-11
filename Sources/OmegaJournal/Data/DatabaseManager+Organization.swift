@@ -153,9 +153,11 @@ extension DatabaseManager {
         for name in affected {
             guard let dest = TagPath.renamed(name, from: old, to: target) else { continue }
             let inherited = colors[dest] == nil ? colors[name] : nil
-            renameTag(from: name, to: dest)
+            renameTag(from: name, to: dest, reindex: false)
             if let inherited { setTagColor(dest, hex: inherited) }
         }
+        // One search-index rebuild for the whole tree, inside the transaction.
+        rebuildFTS()
         _ = endTransaction()
         return affected.count
     }

@@ -166,7 +166,9 @@ extension DatabaseManager {
         return results
     }
 
-    func renameTag(from oldName: String, to newName: String) {
+    /// `reindex: false` leaves the search-index rebuild to the caller (a tree
+    /// rename rebuilds once after all its tags instead of once per tag).
+    func renameTag(from oldName: String, to newName: String, reindex: Bool = true) {
         // Renaming a tag to its own name must be a no-op: the merge path below
         // deletes the old tag row, which for a self-rename is the ONLY row — it
         // would sever every junction link and destroy the tag.
@@ -201,7 +203,8 @@ extension DatabaseManager {
         // Instead, fetch each affected entry, swap the exact tag token in Swift, and
         // write it back with a parameterized UPDATE.
         guard let affectedStmt = try? prepare("SELECT entry_id FROM entry_tags WHERE tag_id = ?;") else {
-            rebuildFTS(); return
+            if reindex { rebuildFTS() }
+            return
         }
         defer { sqlite3_finalize(affectedStmt) }
         sqlite3_bind_int(affectedStmt, 1, newTagId)
@@ -210,14 +213,23 @@ extension DatabaseManager {
             affectedIds.append(String(cString: sqlite3_column_text(affectedStmt, 0)))
         }
         for eid in affectedIds {
-            guard let e = fetchEntry(id: eid) else { continue }
-            let rewritten = e.tags.map { $0 == oldName ? newName : $0 }
+            // Only the tag list is needed: read the junction rows directly
+            // (what fetchEntry would return) instead of decrypting the body.
+            let tags: [String]
+            if let junction = fetchTagsForEntry(eid) {
+                tags = junction
+            } else if let e = fetchEntry(id: eid) {
+                tags = e.tags
+            } else {
+                continue
+            }
+            let rewritten = tags.map { $0 == oldName ? newName : $0 }
             execParameterized("UPDATE entries SET tags = ? WHERE id = ?;",
                               rewritten.joined(separator: ","), eid)
         }
 
         // Rebuild FTS to reflect the renamed tag.
-        rebuildFTS()
+        if reindex { rebuildFTS() }
     }
 
     func deleteTag(_ name: String) {
