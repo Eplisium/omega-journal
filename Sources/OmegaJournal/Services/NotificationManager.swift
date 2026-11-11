@@ -25,12 +25,51 @@ nonisolated final class NotificationPresenter: NSObject, UNUserNotificationCente
         let id = response.notification.request.identifier
         if id.hasPrefix(NotificationManager.reviewWeeklyPrefix) || id.hasPrefix(NotificationManager.reviewMonthlyPrefix) {
             let period: ReviewPeriod = id.hasPrefix(NotificationManager.reviewWeeklyPrefix) ? .week : .month
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .reviewRequested, object: nil, userInfo: ["period": period.rawValue])
-            }
+            Task { @MainActor in ReviewRequestInbox.submit(period) }
         }
         completionHandler()
     }
+}
+
+/// Installs the notification delegate as early as possible, without touching the DB.
+///
+/// macOS only hands a notification click that LAUNCHED the app to a delegate that is set
+/// before `applicationDidFinishLaunching` returns. `NotificationManager.shared` is created
+/// lazily (it reads settings from the DB, which the launch gate forbids), so the delegate
+/// can't wait for it: `AppDelegate.applicationWillFinishLaunching` calls `install()`.
+enum NotificationDelegateInstaller {
+    static let presenter = NotificationPresenter()
+
+    static func install() {
+        // UNUserNotificationCenter traps outside a real app bundle (e.g. `swift test`).
+        guard Bundle.main.bundlePath.hasSuffix(".app") else { return }
+        UNUserNotificationCenter.current().delegate = presenter
+    }
+}
+
+/// Holds a review-reminder click until a journal window can act on it.
+///
+/// A click that launches the app arrives before `ContentView` exists (the launch gate is
+/// still fetching the key), so a bare notification post would be lost. `submit` keeps the
+/// request and pings live windows; the shell takes it on `.reviewRequested` or when it
+/// first appears. `take()` hands it out once, so a second window can't save it twice.
+enum ReviewRequestInbox {
+    private static var pending: ReviewPeriod?
+
+    static var hasPending: Bool { pending != nil }
+
+    static func submit(_ period: ReviewPeriod) {
+        pending = period
+        NotificationCenter.default.post(name: .reviewRequested, object: nil, userInfo: ["period": period.rawValue])
+    }
+
+    /// The pending request as a `.reviewRequested` payload, at most once.
+    static func take() -> [AnyHashable: Any]? {
+        defer { pending = nil }
+        return pending.map { ["period": $0.rawValue] }
+    }
+
+    static func removeAll() { pending = nil }
 }
 
 extension Notification.Name {
@@ -51,7 +90,6 @@ final class NotificationManager {
     var reminderMinute = 0
 
     private let db: DatabaseManager
-    private let presenter = NotificationPresenter()
 
     /// How many upcoming one-shot reminders are kept scheduled. Each carries a
     /// different prompt; the set is topped up every launch/activation.
@@ -69,7 +107,7 @@ final class NotificationManager {
         reminderMinute = db.int(SettingKey.reminderMinute, default: 0)
         loadReviewSchedule()
         guard Self.centerAvailable else { return }
-        UNUserNotificationCenter.current().delegate = presenter
+        NotificationDelegateInstaller.install()   // normally already done at launch; idempotent
         checkAuthorization()
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main

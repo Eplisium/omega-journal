@@ -509,17 +509,24 @@ struct ShellLifecycle: ViewModifier {
 
 // MARK: - Review reminder receiver
 
-/// Tapping a weekly/monthly review notification posts `.reviewRequested`
-/// (see `NotificationPresenter`); open Today and save that period's review.
+/// Tapping a weekly/monthly review notification queues it in `ReviewRequestInbox` and
+/// posts `.reviewRequested` (see `NotificationPresenter`); open Today and save that
+/// period's review. A click that launched the app arrives before this view exists,
+/// so the shell also drains the inbox when it first appears.
 struct ShellReviewRequests: ViewModifier {
     var vm: JournalViewModel
     @Binding var selection: SidebarItem?
 
     func body(content: Content) -> some View {
-        content.onReceive(NotificationCenter.default.publisher(for: .reviewRequested)) { note in
-            guard JournalViewModel.reviewPeriod(fromRequest: note.userInfo) != nil else { return }
-            selection = .today
-            vm.handleReviewRequest(userInfo: note.userInfo)
-        }
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .reviewRequested)) { _ in handlePending() }
+            .onAppear { handlePending() }
+    }
+
+    private func handlePending() {
+        guard let request = ReviewRequestInbox.take(),
+              JournalViewModel.reviewPeriod(fromRequest: request) != nil else { return }
+        selection = .today
+        vm.handleReviewRequest(userInfo: request)
     }
 }

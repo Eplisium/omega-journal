@@ -149,6 +149,11 @@ struct OmegaJournalApp: App {
 // MARK: - App Delegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before launch finishes, or a review-reminder click that launched the app is dropped.
+        NotificationDelegateInstaller.install()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         // Only a raw `.build` binary run from a shell needs this; a bundled

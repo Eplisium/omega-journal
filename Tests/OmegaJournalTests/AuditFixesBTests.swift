@@ -297,6 +297,20 @@ struct AuditFixesBTests {
         #expect(vm.handleReviewRequest(userInfo: [:]) == nil)
     }
 
+    @Test("a review click that arrives before the shell exists is kept and handed out once (issue #3)")
+    func reviewRequestInboxHoldsColdLaunchClick() throws {
+        ReviewRequestInbox.removeAll()
+        defer { ReviewRequestInbox.removeAll() }
+        // Delivered while no window is listening (app launched by the notification click).
+        ReviewRequestInbox.submit(.month)
+        #expect(ReviewRequestInbox.hasPending)
+
+        let request = try #require(ReviewRequestInbox.take())
+        #expect(JournalViewModel.reviewPeriod(fromRequest: request) == .month)
+        #expect(ReviewRequestInbox.take() == nil, "a second window must not save the review again")
+        #expect(!ReviewRequestInbox.hasPending)
+    }
+
     // MARK: 9. Quick capture before the journal window exists
 
     @Test("quick captures queued before the shell exists are saved when it drains")
