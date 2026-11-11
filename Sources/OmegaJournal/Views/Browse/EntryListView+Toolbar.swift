@@ -245,6 +245,12 @@ extension EntryListView {
                 ForEach(bulkActions, id: \.self) { action in
                     bulkActionButton(action)
                 }
+                // A reading copy of just the selection (Trash never goes into a book).
+                if bulkStorage != .trash {
+                    bulkButton("book", "Export as Book (EPUB)") {
+                        ExportManager.exportEPUB(vm: vm, scope: .selection(vm.bulkSelection))
+                    }
+                }
             }
 
             if showBulkTagField {

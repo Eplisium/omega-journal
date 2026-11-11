@@ -15,7 +15,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
     // Appearance
     case theme, systemAppearance, textSize, reading, customColors
     // Writing
-    case writingGoals, dailyCheckin, quickCapture, reviewReminders, periodicReview, aiAssist
+    case writingGoals, dailyCheckin, quickCapture, context, reviewReminders, periodicReview, aiAssist
     // Privacy
     case whatsProtected, appLock, hiddenEntries
     // Data
@@ -28,7 +28,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
     public var group: SettingsGroup {
         switch self {
         case .theme, .systemAppearance, .textSize, .reading, .customColors: .appearance
-        case .writingGoals, .dailyCheckin, .quickCapture, .reviewReminders, .periodicReview, .aiAssist: .writing
+        case .writingGoals, .dailyCheckin, .quickCapture, .context, .reviewReminders, .periodicReview, .aiAssist: .writing
         case .whatsProtected, .appLock, .hiddenEntries: .privacy
         case .backups, .export, .moreExports, .encryptedExport, .importEntries, .importOtherApps,
              .storage, .dangerZone: .data
@@ -47,6 +47,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         case .writingGoals: "Writing Goals"
         case .dailyCheckin: "Daily Check-in"
         case .quickCapture: "Quick Capture"
+        case .context: "Add Context"
         case .reviewReminders: "Review Reminders"
         case .periodicReview: "Weekly & Monthly Review"
         case .aiAssist: "Writing Suggestions"
@@ -76,6 +77,7 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         case .writingGoals: "target"
         case .dailyCheckin: "heart.text.square"
         case .quickCapture: "bolt"
+        case .context: "location.viewfinder"
         case .reviewReminders: "bell.badge"
         case .periodicReview: "calendar.badge.clock"
         case .aiAssist: "sparkles"
@@ -101,6 +103,8 @@ public enum SettingsCardID: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .reading: ["readingFontDesign", "readingShowCover", "readingMaxWidth"]
         case .quickCapture: ["shell.menuBarQuickCapture", "shell.globalHotkeyEnabled"]
+        case .context: ["context.place.enabled", "context.calendar.enabled", "context.photos.enabled",
+                        "context.autoOnNewEntry"]
         case .aiAssist: ["smartAssistEnabled"]
         case .dailyCheckin: ["today.showCheckin"]
         case .appLock: ["appLockEnabled", "appLockTimeoutSeconds"]

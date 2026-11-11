@@ -196,7 +196,7 @@ struct MoreExportsPanel: View {
     var vm: JournalViewModel
     var body: some View {
         PanelCard(card: .moreExports,
-                  footnote: "Markdown folder: one .md file per entry plus an attachments folder. Static website: self-contained HTML you can open or host anywhere. Hidden entries are only included after you unlock them.") {
+                  footnote: "Markdown folder: one .md file per entry plus an attachments folder. Static website: self-contained HTML you can open or host anywhere. Book: an EPUB for Apple Books or any e-reader. Hidden entries are only included after you unlock them.") {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { buttons; Spacer(minLength: 0) }
                 VStack(alignment: .leading, spacing: 8) { buttons }
@@ -208,6 +208,7 @@ struct MoreExportsPanel: View {
         Button { ImportExportPanels.exportMarkdownFolder(vm: vm) } label: { Label("Markdown folder", systemImage: "folder") }
         Button { ImportExportPanels.exportHTMLSite(vm: vm) } label: { Label("Static website", systemImage: "globe") }
         Button { ImportExportPanels.exportEntryPDF(vm: vm) } label: { Label("Selected entry as PDF", systemImage: "doc.richtext") }
+        Button { ExportManager.exportEPUB(vm: vm, scope: .all) } label: { Label("Book (EPUB)", systemImage: "book") }
     }
 }
 
@@ -242,7 +243,7 @@ struct ImportOtherAppsPanel: View {
     var vm: JournalViewModel
     var body: some View {
         PanelCard(card: .importOtherApps,
-                  footnote: "Day One: choose Export → JSON in Day One. Obsidian or notes: pick the vault or folder; titles, dates and tags in front matter are kept and images are attached. Duplicates are skipped and imported entries are never hidden.") {
+                  footnote: "Day One: choose Export → JSON in Day One. Apple Journal: in Journal choose File › Export, then pick the folder or its .zip. Obsidian or notes: pick the vault or folder; titles, dates and tags in front matter are kept and images are attached. Duplicates are skipped and imported entries are never hidden.") {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { buttons; Spacer(minLength: 0) }
                 VStack(alignment: .leading, spacing: 8) { buttons }
@@ -252,7 +253,21 @@ struct ImportOtherAppsPanel: View {
 
     @ViewBuilder private var buttons: some View {
         Button { ImportExportPanels.importDayOne(vm: vm) } label: { Label("Day One JSON…", systemImage: "book") }
+        Button { vm.chooseAndImportAppleJournal() } label: { Label("Apple Journal…", systemImage: "book.closed") }
         Button { ImportExportPanels.importNotesFolder(vm: vm) } label: { Label("Obsidian / notes folder…", systemImage: "folder.badge.plus") }
+    }
+}
+
+// MARK: Context sources (place, calendar, photos)
+
+/// Writing pane: which sources the editor's "Add context" may use. All off
+/// by default; turning one on asks macOS for that permission.
+struct ContextSourcesPanel: View {
+    var body: some View {
+        PanelCard(card: .context,
+                  footnote: "Used only when you choose Add context in the editor, or on new entries if you turn that on. Your place name is looked up with Apple Maps; nothing else leaves your Mac.") {
+            ContextSourcesSection(service: .shared)
+        }
     }
 }
 

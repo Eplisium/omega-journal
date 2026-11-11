@@ -48,6 +48,7 @@ struct SettingsCatalogTests {
             AppLockManager.enabledKey, AppLockManager.timeoutKey,
             ShellPrefs.lockOnResignKey, SpotlightIndexer.enabledKey,
             TodayCheckinPrefs.showKey,
+            ContextSettings.placeKey, ContextSettings.calendarKey, ContextSettings.photosKey, ContextSettings.autoKey,
         ]
         for key in appKeys {
             let owners = SettingsCardID.allCases.filter { $0.storageKeys.contains(key) }

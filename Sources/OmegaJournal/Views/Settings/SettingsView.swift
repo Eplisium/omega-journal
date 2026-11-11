@@ -149,6 +149,7 @@ struct SettingsView: View {
         case .writingGoals: goalsCard(card)
         case .dailyCheckin: dailyCheckinCard(card)
         case .quickCapture: quickCaptureCard(card)
+        case .context: ContextSourcesPanel()
         case .reviewReminders: ReviewRemindersPanel()
         case .periodicReview: PeriodicReviewPanel(vm: vm)
         // Hidden entirely on Macs without Apple Intelligence.

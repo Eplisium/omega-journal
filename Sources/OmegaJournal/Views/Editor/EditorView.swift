@@ -48,6 +48,7 @@ struct EditorView: View {
     @State private var showFocusPopover = false
     @State private var showRecorder = false
     @State private var showHistory = false
+    @State private var showContext = false
 
     // On-device writing help: shown only when switched on AND Apple Intelligence is
     // available, never for hidden entries (re-checked on every request).
@@ -262,6 +263,17 @@ struct EditorView: View {
                 stamp = parts.stamp ?? EntryStamp()
             }
         }
+        .sheet(isPresented: $showContext) {
+            ContextSheet(service: .shared) { transform, photos in
+                applyContext(transform)
+                for p in photos {
+                    insertImageReference(for: vm.addAttachment(to: entry, data: p.data, filename: p.filename, mimeType: p.mimeType))
+                }
+            }
+        }
+        // Automatic context for a brand-new, still-empty entry — only when
+        // the user turned that on (and the sources) in Settings › Writing.
+        .task(id: entry.id) { await addAutomaticContextIfWanted() }
     }
 
     /// Top bar layouts from widest to narrowest. The last one folds Focus and
@@ -326,6 +338,11 @@ struct EditorView: View {
                     attachFile()
                 }
                 .accessibilityLabel(currentAttachments.isEmpty ? "Attach file" : "Attach file, \(currentAttachments.count) attached")
+
+                ActionButton(icon: "location.viewfinder", color: theme.accentColor, active: false, tooltip: "Add context") {
+                    showContext = true
+                }
+                .accessibilityLabel("Add context")
             }
 
             moreMenu(includesPrimaryTools: compactTools)
@@ -406,6 +423,9 @@ struct EditorView: View {
                 Button { attachFile() } label: {
                     Label(currentAttachments.isEmpty ? "Attach File…" : "Attach File… (\(currentAttachments.count) attached)",
                           systemImage: "paperclip")
+                }
+                Button { showContext = true } label: {
+                    Label("Add Context…", systemImage: "location.viewfinder")
                 }
                 Divider()
             }
@@ -1067,6 +1087,24 @@ struct EditorView: View {
         updated.mood = mood
         updated.tags = tags
         vm.autoSave(updated)
+    }
+
+    /// Runs a context transform (place stamp, today's events) over the full
+    /// body — text plus stamp — and splits the result back into the editor's
+    /// separate body and stamp state.
+    private func applyContext(_ transform: (String) -> String) {
+        let parts = EntryStampCodec.split(transform(EntryStampCodec.join(stamp: stamp, rest: body_)))
+        body_ = parts.rest
+        stamp = parts.stamp ?? EntryStamp()
+    }
+
+    private func addAutomaticContextIfWanted() async {
+        let service = ContextService.shared
+        guard vm.newDraftId == entry.id, body_.isEmpty, stamp.isEmpty,
+              service.autoOnNewEntry, !service.enabled.isEmpty else { return }
+        let snap = await service.gather(.newEntry)
+        guard !Task.isCancelled, !snap.isEmpty, vm.editingEntryId == entry.id else { return }
+        applyContext { ContextService.apply(snap, to: $0) }
     }
 
     /// Pasted images become attachments (there is no inline image storage in the body).
