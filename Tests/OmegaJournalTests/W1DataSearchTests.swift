@@ -212,7 +212,8 @@ struct W1DataSearchVMTests {
         vm.searchTextChanged()
         vm.searchText = "harbor"
         vm.searchTextChanged()
-        for _ in 0..<100 where vm.searchResults == nil { try await Task.sleep(for: .milliseconds(20)) }
+        let pending = try #require(vm.searchDebounce)
+        await pending.value
         #expect(vm.searchResults?.map(\.title) == ["lantern"])
         #expect(vm.recentSearches.first == "harbor")
     }
