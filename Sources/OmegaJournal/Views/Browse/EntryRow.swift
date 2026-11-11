@@ -47,14 +47,9 @@ struct EntryRow: View {
     var canShowContent: Bool { ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: !biometricAuth.isAuthenticated) }
 
     var body: some View {
+        // No mood rail or resting border: mood shows as its face in the meta
+        // line, and only hover / selection draw a fill — a calmer, native list.
         HStack(spacing: 0) {
-            // Mood color rail.
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(entry.mood.color.opacity(isContentLocked ? 0.35 : 0.9))
-                .frame(width: 3)
-                .padding(.vertical, density == .compact ? 3 : 2)
-                .accessibilityHidden(true)
-
             HStack(spacing: 9) {
                 if isBulkSelecting {
                     Image(systemName: isBulkSelected ? "checkmark.circle.fill" : "circle")
@@ -76,7 +71,7 @@ struct EntryRow: View {
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 10)
             .padding(.vertical, density == .compact ? 4 : (density == .cards ? 12 : 8))
         }
         .background(
@@ -86,7 +81,7 @@ struct EntryRow: View {
         .overlay(alignment: .topTrailing) {
             if hover && !isBulkSelecting && !isTrash { quickActions.padding(6).transition(.opacity) }
         }
-        .hoverGlow(radius: 11, glow: density == .cards ? 0.2 : 0.12, border: 0.3, lift: false)
+        .hoverGlow(radius: 11, glow: density == .cards ? 0.12 : 0.06, border: 0.15, lift: false)
         .opacity(isContentLocked ? 0.82 : 1)
         .contentShape(Rectangle())
         .draggable(EntryDragPayload.encode(vm.dragIDs(for: entry))) {
@@ -96,7 +91,7 @@ struct EntryRow: View {
         }
         .overlay(
             // Visible selection edge (not just a faint fill) so keyboard
-            // navigation with ↑/↓ shows where the cursor is.
+            // navigation with ↑/↓ shows where the cursor is. No edge at rest.
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(rowBorder, lineWidth: isSelected ? 1.5 : 1)
                 .accessibilityHidden(true)
@@ -146,6 +141,11 @@ struct EntryRow: View {
 
     var titleLine: some View {
         HStack(spacing: 5) {
+            if density == .compact {
+                // Compact rows hide the meta line, so the mood face leads.
+                Text(entry.mood.face).font(OmegaTheme.font(.meta)).fixedSize()
+                    .accessibilityHidden(true)
+            }
             if vm.hasUnsavedChanges(entryId: entry.id) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(OmegaTheme.font(.meta))
@@ -167,7 +167,7 @@ struct EntryRow: View {
                 .lineLimit(1)
             Spacer(minLength: 2)
             if density == .compact {
-                Text(entry.createdAt.formatted(.dateTime.month(.abbreviated).day()))
+                Text(UIRowMetaFormat.dateText(for: entry.createdAt))
                     .font(OmegaTheme.font(.meta)).foregroundColor(theme.secondaryTextColor.opacity(0.8))
                     // The title truncates instead; the date never wraps.
                     .lineLimit(1).fixedSize()
@@ -221,14 +221,14 @@ struct EntryRow: View {
 
     func metaLine(_ candidate: RowsMetaLayout.Candidate) -> some View {
         HStack(spacing: 6) {
-            Text(entry.mood.emoji).font(OmegaTheme.font(.meta)).fixedSize()
+            Text(entry.mood.face).font(OmegaTheme.font(.meta)).fixedSize()
             Text(metaDateText(candidate.dateStyle))
                 .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor.opacity(0.8))
                 .lineLimit(1)
                 .fixedSize()
             if candidate.showsWordCount {
-                Text("· \(entry.wordCount)w")
+                Text("· \(UIRowMetaFormat.wordCountText(entry.wordCount))")
                     .font(OmegaTheme.font(.meta))
                     .foregroundColor(theme.secondaryTextColor.opacity(0.6))
                     .lineLimit(1)
@@ -245,8 +245,8 @@ struct EntryRow: View {
     func metaDateText(_ style: RowsMetaLayout.DateStyle) -> String {
         if isTrash { return trashLabel }
         switch style {
-        case .dateAndTime: return entry.createdAt.formatted(date: .abbreviated, time: .shortened)
-        case .dateOnly: return entry.createdAt.formatted(date: .abbreviated, time: .omitted)
+        case .dateAndTime: return UIRowMetaFormat.dateText(for: entry.createdAt, includeTime: true)
+        case .dateOnly: return UIRowMetaFormat.dateText(for: entry.createdAt)
         }
     }
 
@@ -254,15 +254,15 @@ struct EntryRow: View {
     /// whole chip into "+N" instead).
     func tagChip(_ tag: String) -> some View {
         let c = vm.color(forTag: tag) ?? theme.accentColor
+        // A colored dot + name; no pill fill (rows were busy with borders,
+        // rails and pills all at once).
         return HStack(spacing: 3) {
-            Circle().fill(c).frame(width: 5, height: 5)
+            Circle().fill(c).frame(width: 6, height: 6)
             Text(TagPath.leaf(of: tag))
                 .font(OmegaTheme.font(.meta, .medium))
-                .foregroundColor(theme.bodyTextColor.opacity(0.9))
+                .foregroundColor(theme.bodyTextColor.opacity(0.85))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 5).padding(.vertical, 1)
-        .background(Capsule().fill(c.opacity(0.14)))
         .fixedSize()
     }
 
@@ -276,8 +276,6 @@ struct EntryRow: View {
             .font(OmegaTheme.font(.meta, .medium))
             .foregroundColor(theme.secondaryTextColor.opacity(0.85))
             .lineLimit(1)
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(Capsule().fill(theme.secondaryTextColor.opacity(0.12)))
             .fixedSize()
             .accessibilityLabel(label ?? "")
             .help(label ?? "")
@@ -378,14 +376,15 @@ struct EntryRow: View {
         if isBulkSelected { return theme.accentColor.opacity(0.14) }
         if isSelected { return theme.accentColor.opacity(0.12) }
         if isContentLocked { return theme.cardColor.opacity(hover ? 0.28 : 0.18) }
-        if hover { return theme.cardColor.opacity(0.75) }
-        return theme.cardColor.opacity(0.4)
+        if hover { return theme.cardColor.opacity(0.6) }
+        // Cards density keeps a soft card; list densities rest on the background.
+        return density == .cards ? theme.cardColor.opacity(0.4) : .clear
     }
 
     var rowBorder: Color {
-        if isSelected { return theme.accentColor.opacity(0.6) }
-        if isContentLocked { return theme.accentColor.opacity(0.22) }
-        return theme.titleTextColor.opacity(0.06)
+        if isSelected { return theme.accentColor.opacity(0.55) }
+        if isContentLocked { return theme.accentColor.opacity(0.18) }
+        return .clear
     }
 
     @ViewBuilder
@@ -411,9 +410,9 @@ struct EntryRow: View {
                     Button { vm.setMood(mood, for: entry) } label: {
                         // Checkmark follows THIS row's entry, not the selection.
                         if let icon = Self.moodMenuIcon(for: mood, current: entry.mood) {
-                            Label("\(mood.emoji)  \(mood.label)", systemImage: icon)
+                            Label("\(mood.face)  \(mood.label)", systemImage: icon)
                         } else {
-                            Text("\(mood.emoji)  \(mood.label)")
+                            Text("\(mood.face)  \(mood.label)")
                         }
                     }
                 }

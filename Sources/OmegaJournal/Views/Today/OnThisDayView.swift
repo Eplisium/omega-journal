@@ -107,7 +107,7 @@ struct OnThisDayView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                Text(entry.mood.emoji)
+                Text(entry.mood.face)
                     .font(OmegaTheme.font(.caption))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.title.isEmpty ? "Untitled" : entry.title)

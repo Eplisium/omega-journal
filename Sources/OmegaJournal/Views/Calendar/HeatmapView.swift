@@ -297,7 +297,7 @@ struct HeatmapView: View {
                             Text("·").foregroundColor(Color.white.opacity(0.35))
                             HStack(spacing: 2) {
                                 ForEach(Array(moods.prefix(6).enumerated()), id: \.offset) { _, mood in
-                                    Text(mood.emoji).font(OmegaTheme.font(.caption))
+                                    Text(mood.face).font(OmegaTheme.font(.caption))
                                 }
                             }
                         }

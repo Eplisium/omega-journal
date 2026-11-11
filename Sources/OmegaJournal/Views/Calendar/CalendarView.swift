@@ -293,7 +293,7 @@ struct CalendarView: View {
                 summaryMetric(value: snap.monthWordCount.formatted(), label: "Words", icon: "text.word.spacing")
                 summaryMetric(value: "\(snap.writingDays.count)", label: "Writing days", icon: "calendar")
                 summaryMetric(
-                    value: snap.averageMood.map { "\($0.emoji) \($0.label)" } ?? "—",
+                    value: snap.averageMood.map { "\($0.face) \($0.label)" } ?? "—",
                     label: "Average mood",
                     icon: "face.smiling"
                 )
@@ -534,7 +534,7 @@ struct CalendarView: View {
                     if let metrics {
                         HStack(spacing: 6) {
                             if let mood {
-                                Text(mood.emoji)
+                                Text(mood.face)
                                     .accessibilityLabel("Average mood \(mood.label)")
                             }
                             Text(metrics)

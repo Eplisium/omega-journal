@@ -41,7 +41,7 @@ struct SmartFolderEditor: View {
                 HStack(spacing: 6) {
                     ForEach(Mood.allCases) { m in
                         let on = folder.moods.contains(m.rawValue)
-                        OmegaChip(title: "\(m.emoji) \(m.label)", isSelected: on) {
+                        OmegaChip(title: "\(m.face) \(m.label)", isSelected: on) {
                             if on { folder.moods.removeAll { $0 == m.rawValue } } else { folder.moods.append(m.rawValue) }
                         }
                     }

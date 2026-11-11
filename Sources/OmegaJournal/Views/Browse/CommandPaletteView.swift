@@ -42,7 +42,7 @@ struct CommandPaletteView: View {
     /// Jump-to-entry subtitle. Word count is body-derived, so it is omitted
     /// for a locked hidden entry (title/mood/date only).
     nonisolated static func entrySubtitle(for entry: JournalEntry, hiddenLocked: Bool) -> String {
-        let base = "\(entry.mood.emoji) \(entry.createdAt.formatted(date: .abbreviated, time: .omitted))"
+        let base = "\(entry.mood.face) \(entry.createdAt.formatted(date: .abbreviated, time: .omitted))"
         guard ContentMasking.canShowContent(isHidden: entry.isHidden, hiddenLocked: hiddenLocked) else { return base }
         return base + " · \(entry.wordCount)w"
     }
@@ -231,7 +231,7 @@ struct CommandPaletteView: View {
         let shown = Set(fuzzy.filter { $0.group == "Entries" }.map(\.title))
         let content = vm.contentSearchHits(q, limit: 8).filter { !shown.contains($0.entry.displayTitle) }.map { hit in
             Command(title: hit.entry.displayTitle,
-                    subtitle: hit.snippet?.text ?? "\(hit.entry.mood.emoji) \(hit.entry.createdAt.formatted(date: .abbreviated, time: .omitted))",
+                    subtitle: hit.snippet?.text ?? "\(hit.entry.mood.face) \(hit.entry.createdAt.formatted(date: .abbreviated, time: .omitted))",
                     icon: "text.magnifyingglass", group: "In entries", key: hit.entry.id) {
                 selection = .all
                 vm.select(hit.entry)

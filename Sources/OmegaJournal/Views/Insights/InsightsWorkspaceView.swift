@@ -237,7 +237,7 @@ struct InsightsWorkspaceContent: View {
         let dayWord = data.writingDays == 1 ? "day" : "days"
         var sentence = "You wrote \(entries.count) \(entryWord) on \(data.writingDays) \(dayWord), adding \(data.wordCount.formatted()) words."
         if let mood = averageMood {
-            sentence += " Your recorded check-ins centered around \(mood.emoji) \(mood.label.lowercased())."
+            sentence += " Your recorded check-ins centered around \(mood.face) \(mood.label.lowercased())."
         }
         return sentence
     }
@@ -313,7 +313,7 @@ extension InsightsWorkspaceContent {
                 tint: .teal
             )
             ReflectionMetric(
-                value: averageMood.map { "\($0.emoji) \($0.label)" } ?? "—",
+                value: averageMood.map { "\($0.face) \($0.label)" } ?? "—",
                 label: "Mood check-ins",
                 detail: averageMood == nil ? "No check-ins yet" : "A gentle average",
                 icon: "face.smiling",

@@ -146,7 +146,7 @@ struct MoodCheckInChart: View {
             AxisMarks(values: [1, 2, 3, 4, 5]) { value in
                 AxisGridLine().foregroundStyle(theme.secondaryTextColor.opacity(0.10))
                 AxisValueLabel {
-                    let label = [1: "😞", 2: "😕", 3: "😐", 4: "🙂", 5: "😄"][value.as(Int.self) ?? 3] ?? ""
+                    let label = UIMoodGlyph.face(forLevel: value.as(Int.self) ?? 3)
                     Text(label).font(OmegaTheme.font(.meta))
                 }
             }
@@ -198,7 +198,7 @@ struct MoodCheckInChart: View {
             let mood = Mood(rawValue: Int(point.avg.rounded())) ?? .neutral
             OmegaHoverCard(accent: mood.color) {
                 HStack(alignment: .top, spacing: 10) {
-                    Text(mood.emoji)
+                    Text(mood.face)
                         .font(OmegaTheme.font(.bodyLarge))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(point.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
@@ -266,7 +266,7 @@ struct MoodDistributionRow: View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(data) { item in
                 HStack(spacing: 10) {
-                    Text(item.mood.emoji)
+                    Text(item.mood.face)
                         .font(OmegaTheme.font(.bodyLarge))
                         .frame(width: 22)
                     VStack(alignment: .leading, spacing: 4) {
@@ -298,7 +298,7 @@ struct MoodDistributionRow: View {
             if let average = averageMood {
                 HStack(spacing: 6) {
                     Spacer()
-                    Label("Average \(average.emoji) \(average.label)",
+                    Label("Average \(average.face) \(average.label)",
                           systemImage: "line.diagonal")
                         .font(OmegaTheme.font(.meta, .semibold))
                         .foregroundColor(theme.accentColor)
@@ -365,7 +365,7 @@ struct InsightsEntryRow: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 10) {
-                Text(entry.mood.emoji)
+                Text(entry.mood.face)
                     .font(OmegaTheme.font(.bodyLarge))
                     .frame(width: 22)
 

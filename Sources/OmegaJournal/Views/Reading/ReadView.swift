@@ -319,12 +319,12 @@ struct ReadView: View {
                         Button {
                             vm.setMood(mood, for: entry)
                         } label: {
-                            Text("\(mood.emoji)  \(mood.label)")
+                            Text("\(mood.face)  \(mood.label)")
                         }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(entry.mood.emoji).font(OmegaTheme.font(.body))
+                        Text(entry.mood.face).font(OmegaTheme.font(.body))
                         Text(entry.mood.label).font(OmegaTheme.font(.meta))
                     }
                     .foregroundColor(theme.bodyTextColor)
@@ -426,7 +426,7 @@ struct ReadView: View {
             // Locked hidden entries show mood + date only: word count, reading
             // time and the place stamp are body-derived (Core helper gates them).
             let chips = A11yDescriptions.readerMetaChips(
-                mood: entry.mood.emoji + " " + entry.mood.label,
+                mood: entry.mood.face + " " + entry.mood.label,
                 date: entry.createdAt.formatted(date: .long, time: .shortened),
                 wordCount: isContentLocked ? 0 : entry.wordCount,
                 readingTime: isContentLocked ? "" : entry.readingTime,

@@ -210,7 +210,7 @@ struct CalendarEntryRow: View {
 
     private var entryContent: some View {
         HStack(spacing: 10) {
-            Text(entry.mood.emoji)
+            Text(entry.mood.face)
                 .font(OmegaTheme.font(.heading))
                 .frame(width: 24)
 

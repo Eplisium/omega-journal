@@ -133,7 +133,7 @@ struct DetailView: View {
                         ForEach(vm.reflectiveOnThisDay.prefix(3)) { entry in
                             Button { vm.select(entry) } label: {
                                 HStack(spacing: 8) {
-                                    Text(entry.mood.emoji).font(OmegaTheme.font(.body))
+                                    Text(entry.mood.face).font(OmegaTheme.font(.body))
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(entry.displayTitle)
                                             .font(OmegaTheme.font(.caption, .medium))

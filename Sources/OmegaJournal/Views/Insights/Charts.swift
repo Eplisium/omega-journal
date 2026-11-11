@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import OmegaJournalCore
 
 // MARK: - Mood Trend Chart
 
@@ -24,7 +25,7 @@ struct MoodTrendChartView: View {
                 AxisMarks(values: [1, 2, 3, 4, 5]) { v in
                     AxisGridLine().foregroundStyle(Color.secondary.opacity(0.1))
                     AxisValueLabel {
-                        let label = [1: "😞", 2: "😕", 3: "😐", 4: "🙂", 5: "😄"][v.as(Int.self) ?? 3] ?? ""
+                        let label = UIMoodGlyph.face(forLevel: v.as(Int.self) ?? 3)
                         Text(label).font(OmegaTheme.font(.meta))
                     }
                 }

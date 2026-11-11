@@ -38,7 +38,7 @@ struct FilterBar: View {
                     Button {
                         if on { vm.filter.moods.remove(mood) } else { vm.filter.moods.insert(mood) }
                     } label: {
-                        Text(mood.emoji)
+                        Text(mood.face)
                             .font(OmegaTheme.font(.caption))
                             .frame(width: 24, height: 22)
                             .background(

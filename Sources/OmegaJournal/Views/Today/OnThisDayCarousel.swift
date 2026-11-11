@@ -63,7 +63,7 @@ struct OnThisDayCarousel: View {
                     .foregroundColor(theme.secondaryTextColor)
                     .lineLimit(4)
                 Spacer(minLength: 0)
-                Text("\(entry.mood.emoji) \(entry.mood.label)")
+                Text("\(entry.mood.face) \(entry.mood.label)")
                     .font(OmegaTheme.metaFont).foregroundColor(theme.secondaryTextColor)
             }
             .padding(OmegaTheme.Spacing.m)

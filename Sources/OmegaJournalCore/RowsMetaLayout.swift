@@ -11,9 +11,10 @@ import Foundation
 /// word count. Hidden chips collapse into one "+N" chip.
 public enum RowsMetaLayout {
     public enum DateStyle: Equatable, Sendable {
-        /// "Oct 13, 2026 at 8:45 AM"
+        /// Relative date with the time for recent days ("Monday, 8:45 AM");
+        /// see `UIRowMetaFormat`.
         case dateAndTime
-        /// "Oct 13, 2026"
+        /// Relative date alone ("Monday", "Oct 13", "Oct 13, 2025").
         case dateOnly
     }
 
