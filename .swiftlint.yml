@@ -1,0 +1,65 @@
+# SwiftLint: correctness checks only, no style rules.
+#
+#   swiftlint lint --quiet            (from the repo root; SwiftLint is not a package dependency)
+#
+# Deliberately `only_rules`: the codebase has its own consistent style, and style rules
+# (identifier_name, line_length, trailing_comma, ...) would only produce churn. Every rule
+# here flags something that can be a real bug, a leak, a crash or an accessibility gap.
+# CI runs this as a non-blocking report (see .github/workflows/ci.yml, job "lint").
+#
+# Tests/.swiftlint.yml relaxes force_try for test code.
+
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+
+only_rules:
+  # Crashes
+  - force_try                         # static NSRegularExpression literals are the known exceptions
+  - force_cast
+  - fatal_error_message
+  # Concurrency, lifetime and leaks
+  - unhandled_throwing_task           # errors thrown in Task { } vanish silently
+  - discarded_notification_center_observer
+  - notification_center_detachment
+  - weak_delegate
+  - unowned_variable_capture
+  - class_delegate_protocol
+  - self_in_property_initialization
+  # Logic mistakes
+  - identical_operands
+  - duplicate_enum_cases
+  - duplicated_key_in_dictionary_literal
+  - duplicate_imports
+  - unused_setter_value
+  - unused_closure_parameter
+  - unused_enumerated
+  - void_function_in_ternary
+  - return_value_from_void_function
+  - unavailable_condition
+  - optional_data_string_conversion   # String(decoding:) hides invalid UTF-8; String(data:encoding:) does not
+  - legacy_hashing
+  - nsobject_prefer_isequal
+  - overridden_super_call
+  - prohibited_super_call
+  - compiler_protocol_init
+  - dynamic_inline
+  # Cheap performance wins that are never style questions
+  - empty_count
+  - contains_over_first_not_nil
+  - reduce_boolean
+  # Accessibility
+  - accessibility_trait_for_button
+  # Keep disable comments honest
+  - blanket_disable_command
+  - invalid_swiftlint_command
+  - superfluous_disable_command
+
+empty_count:
+  severity: warning
+
+unused_closure_parameter:
+  severity: warning
