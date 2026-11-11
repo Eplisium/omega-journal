@@ -362,6 +362,21 @@ extension JournalViewModel {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
+    /// Full flow for a Settings/menu button: pick the export (folder or .zip),
+    /// show the preview, then import.
+    func chooseAndImportAppleJournal() {
+        let panel = NSOpenPanel()
+        panel.title = "Import from Apple Journal"
+        panel.message = "In Journal, choose File › Export (on iPhone: … › Export), then pick the AppleJournalEntries folder or its .zip file."
+        panel.prompt = "Import"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.folder, .zip]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importAppleJournal(from: url, confirm: Self.confirmAppleJournalImport)
+    }
+
     /// Recursively imports `.md`/`.markdown`/`.txt` files (Obsidian vault or any notes folder).
     /// Hidden folders (`.obsidian`, `.trash`) are skipped. Front matter supplies title/date/tags/mood.
     @discardableResult
