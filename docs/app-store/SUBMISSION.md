@@ -38,7 +38,12 @@ security find-identity -v | grep -E "3rd Party Mac Developer Installer|Mac Insta
 
 - [ ] Platform **macOS**, Name **Omega Journal**, primary language English (U.S.), Bundle ID `com.eplisium.omega-journal`, SKU `omega-journal-mac`, User Access: Full Access.
 - [ ] **Pricing and Availability**: price **$2.99** (USD base price; let Apple set the other storefronts), all countries.
-- [ ] **App Privacy**: Privacy Policy URL `https://unknownprojects.net/omega-journal/privacy` (publish [privacy-policy.md](privacy-policy.md) there first). Data collection → **"No, we do not collect data from this app"**, which shows as *Data Not Collected*.
+- [ ] **App Privacy**: Privacy Policy URL `https://unknownprojects.net/omega-journal/privacy` (publish [privacy-policy.md](privacy-policy.md) there first). Data collection → **"No, we do not collect data from this app"**, which shows as *Data Not Collected*. That is accurate for the current app:
+  - The app has no networking code, no analytics, no crash reporter and no third-party SDKs. Nothing leaves the Mac unless the user exports, shares or prints.
+  - The AI assist runs on the Mac through Apple's Foundation Models. It is off until the user turns it on, never sends anything off the device, and refuses hidden entries. "Themes & tone" in Insights uses Apple's NaturalLanguage framework on the Mac.
+  - Widgets and Siri/Shortcuts get counts, a streak and the day's prompt only, never entry text. Spotlight indexing is opt-in and covers titles of non-hidden entries.
+  - `packaging/PrivacyInfo.xcprivacy` agrees: no tracking, no tracking domains, no collected data types, and only the required-reason APIs the app actually uses (UserDefaults, file timestamps).
+  - Apple's definition of "collect" means transmitting data off the device. On-device processing doesn't count, so on-device AI does not change the answer.
 - [ ] **App Information**: category, age rating and copyright from [metadata.md](metadata.md). Support URL `https://unknownprojects.net/omega-journal/support` (publish [support.md](support.md)).
 - [ ] Version page: description, keywords, promotional text, screenshots ([screenshots.md](screenshots.md)), and review notes ([review-notes.md](review-notes.md)).
 
@@ -51,15 +56,19 @@ count on `main`, so every upload from a newer commit is higher. Override it with
 ```bash
 cd ~/OmegaJournal
 git checkout main && git pull
-swift build && swift test --no-parallel
+swift build && swift test
 
 # 1) Smoke-test the sandboxed bundle (no certificates needed; QA bundle id, never your real journal)
 scripts/make_mas.sh --dev
+scripts/verify_bundle.sh ".build/packaging/appstore-dev/Omega Journal.app" --channel appstore
 
 # 2) Real package: signs with Apple Distribution, embeds the profile, builds the .pkg
 export OMEGA_JOURNAL_MAS_PROFILE=~/Developer/profiles/OmegaJournal_MAS.provisionprofile
 scripts/make_mas.sh
 #   → dist/OmegaJournal-<version>-<build>.pkg
+#   Check the signed app inside it before uploading (plist keys, entitlements, widget,
+#   privacy manifest). CI runs the same check on every push.
+scripts/verify_bundle.sh "<path to the signed Omega Journal.app>" --channel appstore
 
 # 3) Ask App Store Connect to validate it, then upload (TestFlight)
 export ASC_KEY_ID=XXXXXXXXXX ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -97,6 +106,8 @@ Setup: System Settings → Users & Groups → add a standard user "OJ Test". Log
 - [ ] Hide an entry, lock, unlock with Touch ID/password.
 - [ ] Print an entry (print panel opens).
 - [ ] Settings → About shows the support and privacy links, with no GitHub links (App Store channel).
+- [ ] Add the Omega Journal widget: it shows today's words and streak, never entry text, and nothing from a hidden entry.
+- [ ] On a Mac with Apple Intelligence: the AI assist is off by default; turning it on works with Wi-Fi off; it refuses a hidden entry. On a Mac without it, the AI controls are hidden.
 
 **B. Upgrade from the 1.0.2 DMG (the important one)**
 - [ ] On the spare account, install **Omega-Journal-1.0.2.dmg**. Create 3 entries (one hidden, one with a voice memo or image attachment) and change a couple of settings (theme, editor font). Quit.
@@ -114,10 +125,32 @@ Setup: System Settings → Users & Groups → add a standard user "OJ Test". Log
 
 ## 6. Submit
 
-- [ ] Select the processed build on the version page, answer **Export Compliance** (should be pre-answered because `ITSAppUsesNonExemptEncryption = NO` is in Info.plist; see [metadata.md](metadata.md)).
+- [ ] Select the processed build on the version page. **Export Compliance** is pre-answered by `ITSAppUsesNonExemptEncryption = false` in Info.plist (see [Export compliance](#export-compliance) below for why). If App Store Connect asks anyway, answer that the app uses encryption, that the encryption is exempt, and that it is limited to the operating system's encryption.
 - [ ] Paste [review-notes.md](review-notes.md) into *App Review Information → Notes*. No demo account is needed (sign-in not required).
 - [ ] *Version Release*: "Manually release this version" so you control launch day.
 - [ ] **Add for Review** → **Submit**.
+
+## Export compliance
+
+`packaging/Info.plist.template` sets `ITSAppUsesNonExemptEncryption` to `false`, so App Store
+Connect doesn't ask about export compliance on every upload. Why that is correct:
+
+- **What the app encrypts.** Only the user's own journal on their own Mac. Entry bodies,
+  revisions, attachments and automatic backups are sealed with AES-GCM under a key kept in
+  the user's Keychain. The optional password-protected export (`.ojenc`) uses AES-GCM with a
+  PBKDF2-derived key. Titles, tags, moods and dates are stored as plaintext metadata
+  ([architecture.md](../architecture.md#encryption-model) has the full table).
+- **Whose encryption.** Only Apple's, as provided by macOS: CryptoKit (`AES.GCM`), CommonCrypto
+  (`CCKeyDerivationPBKDF`) and the Keychain. The app ships no cryptographic code of its own and
+  no third-party crypto library.
+- **What it doesn't do.** No networking, no proprietary or non-standard algorithms, and no
+  encrypted communication with anyone. The encryption protects data at rest for the user who
+  owns it.
+
+Apple's export-compliance guidance treats an app whose encryption is limited to what the
+operating system provides as exempt. In that case Apple asks for no compliance documentation
+in App Store Connect. Revisit the answer if the app ever adds sync, a server, end-to-end
+encrypted sharing, or a non-Apple crypto library.
 
 ## How the pieces fit (reference)
 
@@ -129,6 +162,7 @@ Setup: System Settings → Users & Groups → add a standard user "OJ Test". Log
 | `packaging/OmegaJournal-AppStore.entitlements` | `make_mas.sh` | sandbox, user-selected files, bookmarks, microphone, print, app id, keychain group |
 | `packaging/PrivacyInfo.xcprivacy` | all scripts | privacy manifest (UserDefaults CA92.1, file timestamps C617.1/3B52.1) |
 | `packaging/container-migration.plist` | `make_mas.sh` | moves the DMG-era journal + prefs into the container on first sandboxed launch |
+| `scripts/verify_bundle.sh` | you, CI | checks a built app: Info.plist keys and usage strings, minimum macOS, entitlements per channel, widget appex, privacy manifest |
 
 Container migration was verified live with a QA bundle id and fake data. The manifest format is the
 one Apple documents, and macOS moved both a folder and a prefs file into a fresh container.
