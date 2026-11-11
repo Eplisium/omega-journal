@@ -124,8 +124,7 @@ extension DatabaseManager {
         // 3. Swap: put the empty journal aside, move the staged one in.
         let aside = dbPath + ".pre-import"
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
-        sqlite3_close(db)
-        db = nil
+        closeConnection()
         do {
             for suffix in ["", "-wal", "-shm"] where fm.fileExists(atPath: dbPath + suffix) {
                 try fm.moveItem(atPath: dbPath + suffix, toPath: aside + suffix)
@@ -140,8 +139,7 @@ extension DatabaseManager {
 
         var copiedFiles: [URL] = []
         func rollback(_ error: LegacyImportError) -> LegacyImportError {
-            sqlite3_close(db)
-            db = nil
+            closeConnection()
             for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: dbPath + suffix) }
             for suffix in ["", "-wal", "-shm"] where fm.fileExists(atPath: aside + suffix) {
                 try? fm.moveItem(atPath: aside + suffix, toPath: dbPath + suffix)

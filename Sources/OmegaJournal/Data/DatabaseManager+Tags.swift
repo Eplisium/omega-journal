@@ -87,14 +87,14 @@ extension DatabaseManager {
 
     func syncTagsForEntry(_ entryId: String, tags: [String]) {
         // Remove old associations
-        execParameterized("DELETE FROM entry_tags WHERE entry_id = ?;", entryId)
+        execParameterizedCached("DELETE FROM entry_tags WHERE entry_id = ?;", entryId)
 
         // Add new associations
         for tag in tags {
             let trimmed = tag.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
-            execParameterized("INSERT OR IGNORE INTO tags (name) VALUES (?);", trimmed)
-            execParameterized(
+            execParameterizedCached("INSERT OR IGNORE INTO tags (name) VALUES (?);", trimmed)
+            execParameterizedCached(
                 "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) SELECT ?, id FROM tags WHERE name = ?;",
                 entryId, trimmed
             )
@@ -108,14 +108,16 @@ extension DatabaseManager {
             WHERE et.entry_id = ?
             ORDER BY t.name;
         """
-        guard let stmt = prepareRead(sql) else { return nil }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: entryId)
-        var tags: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            tags.append(String(cString: sqlite3_column_text(stmt, 0)))
+        let tags = withCachedRead(sql, context: "fetchTagsForEntry") { stmt -> [String] in
+            bindText(stmt, index: 1, value: entryId)
+            var tags: [String] = []
+            forEachRow(stmt, context: "fetchTagsForEntry") {
+                tags.append(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+            return tags
         }
-        return tags.isEmpty ? nil : tags
+        guard let tags, !tags.isEmpty else { return nil }
+        return tags
     }
 
     /// One query for every entry's tags, grouped by entry id — avoids N+1 when

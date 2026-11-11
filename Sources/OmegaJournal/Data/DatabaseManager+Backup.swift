@@ -184,8 +184,7 @@ extension DatabaseManager {
         // 4. Swap.
         let aside = dbPath + ".pre-restore"
         for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: aside + suffix) }
-        sqlite3_close(db)
-        db = nil
+        closeConnection()
         do {
             try fm.moveItem(atPath: dbPath, toPath: aside)
         } catch {
@@ -195,8 +194,7 @@ extension DatabaseManager {
         for suffix in ["-wal", "-shm"] { try? fm.removeItem(atPath: dbPath + suffix) }
 
         func rollback(_ message: String) -> RestoreError {
-            sqlite3_close(db)
-            db = nil
+            closeConnection()
             for suffix in ["", "-wal", "-shm"] { try? fm.removeItem(atPath: dbPath + suffix) }
             try? fm.moveItem(atPath: aside, toPath: dbPath)
             openDatabase()

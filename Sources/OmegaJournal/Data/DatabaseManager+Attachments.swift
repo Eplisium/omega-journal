@@ -110,20 +110,20 @@ extension DatabaseManager {
 
     func fetchAttachments(entryId: String) -> [Attachment] {
         let sql = "SELECT id, entry_id, filename, mime_type, created_at FROM attachments WHERE entry_id = ? ORDER BY created_at;"
-        guard let stmt = prepareRead(sql) else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: entryId)
-        var attachments: [Attachment] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            attachments.append(Attachment(
-                id: String(cString: sqlite3_column_text(stmt, 0)),
-                entryId: String(cString: sqlite3_column_text(stmt, 1)),
-                filename: String(cString: sqlite3_column_text(stmt, 2)),
-                mimeType: String(cString: sqlite3_column_text(stmt, 3)),
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
-            ))
-        }
-        return attachments
+        return withCachedRead(sql, context: "fetchAttachments") { stmt -> [Attachment] in
+            bindText(stmt, index: 1, value: entryId)
+            var attachments: [Attachment] = []
+            forEachRow(stmt, context: "fetchAttachments") {
+                attachments.append(Attachment(
+                    id: String(cString: sqlite3_column_text(stmt, 0)),
+                    entryId: String(cString: sqlite3_column_text(stmt, 1)),
+                    filename: String(cString: sqlite3_column_text(stmt, 2)),
+                    mimeType: String(cString: sqlite3_column_text(stmt, 3)),
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+                ))
+            }
+            return attachments
+        } ?? []
     }
 
     func deleteAttachment(id: String) {

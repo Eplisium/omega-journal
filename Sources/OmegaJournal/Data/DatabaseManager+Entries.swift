@@ -218,18 +218,22 @@ extension DatabaseManager {
 
     func fetchEntry(id: String) -> JournalEntry? {
         let sql = "SELECT \(Self.entryColumns) FROM entries e WHERE e.id = ?;"
-        guard let stmt = prepareRead(sql) else { return nil }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: id)
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            var entry = rowToEntry(stmt)
-            entry.attachments = fetchAttachments(entryId: entry.id)
-            // Populate tags from the junction table (the text-column fallback in
-            // rowToEntry only covers the no-junction-rows case).
-            if let tags = fetchTagsForEntry(entry.id) { entry.tags = tags }
-            return entry
+        let row: JournalEntry?? = withCachedRead(sql, context: "fetchEntry") { stmt -> JournalEntry? in
+            bindText(stmt, index: 1, value: id)
+            switch sqlite3_step(stmt) {
+            case SQLITE_ROW: return rowToEntry(stmt)
+            case SQLITE_DONE: return nil
+            default:
+                noteReadFailure("fetchEntry")
+                return nil
+            }
         }
-        return nil
+        guard var entry = row ?? nil else { return nil }
+        entry.attachments = fetchAttachments(entryId: entry.id)
+        // Populate tags from the junction table (the text-column fallback in
+        // rowToEntry only covers the no-junction-rows case).
+        if let tags = fetchTagsForEntry(entry.id) { entry.tags = tags }
+        return entry
     }
 
     func collectEntries(
@@ -457,11 +461,13 @@ extension DatabaseManager {
 
     /// Stored ciphertext for the row, and whether it is currently decryptable.
     func existingBodyState(id: String) -> (exists: Bool, unreadable: Bool) {
-        guard let stmt = try? prepare("SELECT body_enc FROM entries WHERE id = ?;") else { return (false, false) }
-        defer { sqlite3_finalize(stmt) }
-        bindText(stmt, index: 1, value: id)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return (false, false) }
-        guard let sealed = blobAt(stmt, index: 0) else { return (true, false) }
+        let row: (exists: Bool, sealed: Data?)? = withCachedStatement("SELECT body_enc FROM entries WHERE id = ?;") { stmt in
+            bindText(stmt, index: 1, value: id)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return (false, nil) }
+            return (true, blobAt(stmt, index: 0))
+        }
+        guard let row, row.exists else { return (false, false) }
+        guard let sealed = row.sealed else { return (true, false) }
         // The exact bytes decrypted before are readable; skip the AES pass.
         if let cached = bodyCache[id], cached.sealed == sealed { return (true, false) }
         if case .failure = decryptBody(sealed) { return (true, true) }
@@ -471,7 +477,7 @@ extension DatabaseManager {
     func performSave(_ entry: JournalEntry) {
         // The editor's count (stamp stripped, markdown word rules), so goals,
         // the goal ring and "sort by words" agree with what the user sees.
-        let wordCount = JournalEntry.countWords(entry.body)
+        let wordCount = entry.wordCount // memoized JournalEntry.countWords(body)
         let existing = existingBodyState(id: entry.id)
         // Never replace ciphertext we cannot read: an unreadable body loads as
         // "" and re-saving that would destroy the only copy. Metadata changes
@@ -502,12 +508,6 @@ extension DatabaseManager {
             is_archived=excluded.is_archived, deleted_at=excluded.deleted_at,
             word_count=excluded.word_count, is_hidden=excluded.is_hidden, journal_id=excluded.journal_id;
         """
-        guard let stmt = try? prepare(sql) else {
-            reportError("Save failed to prepare: \(String(cString: sqlite3_errmsg(db)))")
-            flagTransactionFailure()
-            return
-        }
-        defer { sqlite3_finalize(stmt) }
         let sealedBody: Data
         do {
             sealedBody = try JournalCrypto.encryptString(entry.body)
@@ -517,6 +517,33 @@ extension DatabaseManager {
             flagTransactionFailure()
             return
         }
+        let saved = withCachedStatement(sql) { stmt -> String? in
+            bindEntryRow(stmt, entry, sealedBody: sealedBody, wordCount: wordCount)
+            return sqlite3_step(stmt) == SQLITE_DONE ? nil : String(cString: sqlite3_errmsg(db))
+        }
+        switch saved {
+        case nil:
+            reportError("Save failed to prepare: \(String(cString: sqlite3_errmsg(db)))")
+            flagTransactionFailure()
+            return
+        case let message??:
+            reportError("Save failed: \(message)")
+            // Nothing (row, tags, FTS) should survive a failed upsert.
+            flagTransactionFailure()
+        case .some(nil):
+            // The next read of this exact ciphertext needs no AES pass. (A
+            // rolled-back transaction leaves other bytes on disk: no hit.)
+            if !preserveBody {
+                bodyCache[entry.id] = CachedBody(sealed: sealedBody, body: entry.body, derived: entry.derived)
+            }
+        }
+
+        syncTagsForEntry(entry.id, tags: entry.tags)
+        updateFTS(entry)
+    }
+
+    /// Binds one `entries` upsert row (placeholders 1…14, column order).
+    private func bindEntryRow(_ stmt: OpaquePointer, _ entry: JournalEntry, sealedBody: Data, wordCount: Int) {
         // Placeholders follow column order: id, title, body_enc, mood, tags,
         // created_at, updated_at, is_pinned, is_favorite, is_archived,
         // deleted_at, word_count, is_hidden, journal_id (1…14).
@@ -538,15 +565,6 @@ extension DatabaseManager {
         sqlite3_bind_int(stmt, 12, Int32(wordCount))
         sqlite3_bind_int(stmt, 13, entry.isHidden ? 1 : 0)
         bindText(stmt, index: 14, value: entry.journalId.isEmpty ? JournalDefaults.defaultJournalId : entry.journalId)
-        if sqlite3_step(stmt) != SQLITE_DONE {
-            let msg = String(cString: sqlite3_errmsg(db))
-            reportError("Save failed: \(msg)")
-            // Nothing (row, tags, FTS) should survive a failed upsert.
-            flagTransactionFailure()
-        }
-
-        syncTagsForEntry(entry.id, tags: entry.tags)
-        updateFTS(entry)
     }
 
     /// Moves an entry to the trash. Recoverable for `trashRetentionDays`.

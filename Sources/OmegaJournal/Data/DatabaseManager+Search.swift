@@ -9,13 +9,13 @@ extension DatabaseManager {
     /// rowid is an index lookup; the UNINDEXED `entry_id` column would need a
     /// full FTS scan on every save.
     func ftsRowid(for entryId: String, create: Bool) -> Int64? {
-        if let stmt = try? prepare("SELECT fts_rowid FROM entries_fts_map WHERE entry_id = ?;") {
-            defer { sqlite3_finalize(stmt) }
+        let mapped: Int64?? = withCachedStatement("SELECT fts_rowid FROM entries_fts_map WHERE entry_id = ?;") { stmt -> Int64? in
             bindText(stmt, index: 1, value: entryId)
-            if sqlite3_step(stmt) == SQLITE_ROW { return sqlite3_column_int64(stmt, 0) }
+            return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int64(stmt, 0) : nil
         }
+        if let rowid = mapped ?? nil { return rowid }
         guard create else { return nil }
-        guard execChecked("INSERT INTO entries_fts_map (entry_id) VALUES (?);", context: "FTS map insert failed", bind: { bindText($0, index: 1, value: entryId) }) else { return nil }
+        guard execCheckedCached("INSERT INTO entries_fts_map (entry_id) VALUES (?);", context: "FTS map insert failed", bind: { bindText($0, index: 1, value: entryId) }) else { return nil }
         return sqlite3_last_insert_rowid(db)
     }
 
@@ -39,8 +39,8 @@ extension DatabaseManager {
         }
         // FTS stores only title/tags — indexing body would put plaintext back
         // on disk. Body search is handled by decryptBodyMatches in Swift.
-        guard execChecked("DELETE FROM entries_fts WHERE rowid = ?;", context: "FTS delete failed", bind: { sqlite3_bind_int64($0, 1, rowid) }),
-              execChecked("INSERT INTO entries_fts(rowid, entry_id, title, body, tags) VALUES (?, ?, ?, '', ?);", context: "FTS insert failed", bind: { stmt in
+        guard execCheckedCached("DELETE FROM entries_fts WHERE rowid = ?;", context: "FTS delete failed", bind: { sqlite3_bind_int64($0, 1, rowid) }),
+              execCheckedCached("INSERT INTO entries_fts(rowid, entry_id, title, body, tags) VALUES (?, ?, ?, '', ?);", context: "FTS insert failed", bind: { stmt in
                 sqlite3_bind_int64(stmt, 1, rowid)
                 bindText(stmt, index: 2, value: entry.id)
                 bindText(stmt, index: 3, value: entry.title)

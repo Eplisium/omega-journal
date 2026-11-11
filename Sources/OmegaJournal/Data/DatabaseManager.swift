@@ -132,6 +132,13 @@ final class DatabaseManager {
     /// The SQLite connection. Only touched on the main actor, except by `deinit`,
     /// which runs once nothing else can reach this manager.
     nonisolated(unsafe) var db: OpaquePointer?
+    /// Prepared statements by SQL text (see DatabaseManager+StatementCache).
+    /// Main actor only, except `deinit`, which finalizes them before closing.
+    nonisolated(unsafe) var statementCache: [String: OpaquePointer] = [:]
+    /// SQL of cached statements currently checked out (re-entrancy guard).
+    var statementsInUse: Set<String> = []
+    /// Cache hits since open (tests).
+    var statementCacheHits = 0
     var dbPath: String
     var attachmentsDir: String
 
@@ -155,11 +162,20 @@ final class DatabaseManager {
 
     let isPrimaryInstance: Bool
 
+    /// `~/Library/Application Support` built from the (container) home folder,
+    /// for the never-expected case that Foundation returns no such directory.
+    static func fallbackApplicationSupport() -> URL {
+        OmegaLog.database.error("No Application Support directory reported; using the home-relative path")
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+    }
+
     static func defaultPaths() -> (db: String, attachments: String, isTest: Bool) {
         let fileManager = FileManager.default
         // Application Support as THIS process sees it: the real folder when
         // unsandboxed, the container's when sandboxed.
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? Self.fallbackApplicationSupport()
         let ownDir = appSupport.appendingPathComponent("OmegaJournal", isDirectory: true)
         let sandboxed = AppEnvironment.isSandboxed
         // Test-mode env vars win; otherwise see MASDataJournalLocation for the
@@ -221,6 +237,8 @@ final class DatabaseManager {
         // Another file may be opened here (restore, import): nothing cached
         // from the previous one may be reused.
         clearBodyCache()
+        // Statements belong to the connection being replaced.
+        finalizeCachedStatements()
         openFailed = false
         isReadOnly = false
         startupError = nil
@@ -228,8 +246,9 @@ final class DatabaseManager {
             let msg = String(cString: sqlite3_errmsg(db))
             openFailed = true
             isReadOnly = true
-            startupError = "Failed to open database: \(msg)"
-            reportError(startupError!)
+            let message = "Failed to open database: \(msg)"
+            startupError = message
+            reportError(message)
             return
         }
         exec("PRAGMA busy_timeout=5000;")
@@ -497,6 +516,8 @@ final class DatabaseManager {
 
     deinit {
         JournalCrypto.unregisterEncryptedDataProbe(owner: self)
+        // sqlite3_close refuses while statements are alive.
+        for stmt in statementCache.values { sqlite3_finalize(stmt) }
         sqlite3_close(db)
     }
 }
