@@ -16,8 +16,27 @@ struct RevisionHistoryView: View {
     @State private var oldBody = ""
     @State private var diff: [DiffLine] = []
     @State private var confirmRestore = false
+    @State private var currentTitle = ""
+    @State private var currentBody = ""
 
     private var selected: EntryRevision? { revisions.first { $0.id == selectedId } }
+
+    /// Title-only versions are restorable too, so the title counts as a change.
+    private var canRestore: Bool {
+        guard let r = selected else { return false }
+        return RevisionPolicy.restoreWouldChange(revisionTitle: r.title, revisionBody: oldBody,
+                                                 currentTitle: currentTitle, currentBody: currentBody)
+    }
+
+    private var diffSummary: String {
+        let summary = TextDiff.summary(diff)
+        var parts: [String] = []
+        if !summary.isEmpty { parts.append("+\(summary.added)  −\(summary.removed) lines vs. current") }
+        if let r = selected, r.title != currentTitle {
+            parts.append(r.title.isEmpty ? "Title was empty" : "Title was “\(r.title)”")
+        }
+        return parts.isEmpty ? "Identical to the current text" : parts.joined(separator: " · ")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,15 +105,16 @@ struct RevisionHistoryView: View {
     private var diffPane: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                let summary = TextDiff.summary(diff)
-                Text(summary.isEmpty ? "Identical to the current text" : "+\(summary.added)  −\(summary.removed) lines vs. current")
+                Text(diffSummary)
                     .font(OmegaTheme.font(.meta, .medium))
                     .foregroundColor(theme.secondaryTextColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer()
                 Button("Restore this version") { confirmRestore = true }
                     .buttonStyle(.borderedProminent)
                     .tint(theme.accentColor)
-                    .disabled(selected == nil || diff.allSatisfy { $0.kind == .same })
+                    .disabled(!canRestore)
             }
             .padding(12)
             Divider().opacity(0.25)
@@ -133,9 +153,11 @@ struct RevisionHistoryView: View {
 
     /// Diff direction: selected version → current text (what restoring would change).
     private func loadSelectedDiff() {
-        guard let r = selected, let body = vm.revisionBody(r, for: entry) else { diff = []; return }
-        oldBody = body
         let current = vm.entry(id: entry.id) ?? entry
+        currentTitle = current.title
+        currentBody = current.body
+        guard let r = selected, let body = vm.revisionBody(r, for: entry) else { diff = []; oldBody = ""; return }
+        oldBody = body
         diff = TextDiff.lines(old: current.body, new: body)
     }
 

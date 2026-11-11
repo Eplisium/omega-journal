@@ -148,6 +148,16 @@ struct RevisionPolicyTests {
         #expect(RevisionPolicy.decide(latest: latest, latestText: "x", newText: "y", now: now, isAuto: false) == .insert)
     }
 
+    @Test("a version that differs only by title is still restorable (issue #7)")
+    func restoreWouldChange() {
+        #expect(RevisionPolicy.restoreWouldChange(revisionTitle: "Old", revisionBody: "same",
+                                                  currentTitle: "New", currentBody: "same"))
+        #expect(RevisionPolicy.restoreWouldChange(revisionTitle: "T", revisionBody: "a",
+                                                  currentTitle: "T", currentBody: "b"))
+        #expect(!RevisionPolicy.restoreWouldChange(revisionTitle: "T", revisionBody: "a",
+                                                   currentTitle: "T", currentBody: "a"))
+    }
+
     @Test func pruneKeepsRecentDailyWeeklyAndDropsAncient() {
         var revs: [RevisionStamp] = []
         // 5 within the last day: all kept.

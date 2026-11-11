@@ -42,6 +42,13 @@ public enum RevisionPolicy {
         return .insert
     }
 
+    /// Whether restoring a version would change the entry. A version whose only difference is
+    /// its title still counts, so title-only versions can be restored.
+    public static func restoreWouldChange(revisionTitle: String, revisionBody: String,
+                                          currentTitle: String, currentBody: String) -> Bool {
+        revisionTitle != currentTitle || revisionBody != currentBody
+    }
+
     /// Ids to delete so the remaining set follows the retention schedule. Newest wins each bucket;
     /// manual revisions are exempt from thinning (only the hard cap can remove them, oldest first).
     public static func idsToPrune(_ revisions: [RevisionStamp], now: Date,

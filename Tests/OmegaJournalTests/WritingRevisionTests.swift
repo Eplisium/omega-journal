@@ -187,4 +187,33 @@ struct WritingRevisionTests {
         #expect(vm.revisionBody(rev, for: e) == nil)
         #expect(vm.restoreRevision(rev, for: e) == nil)
     }
+
+    @MainActor
+    @Test("a title-only edit is kept as a version and restoring it brings the old title back (issue #7)")
+    func titleOnlyRevisionRestores() throws {
+        let (root, db) = DataSafetyTests.makeDB()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vm = JournalViewModel(database: db)
+        var e = vm.createEntry(title: "Original title", body: "unchanged body")
+        vm.stopEditing()
+        vm.snapshotRevision(of: e)
+        let rev = try #require(vm.revisions(for: e).first)
+        #expect(rev.title == "Original title")
+
+        e.title = "Renamed"
+        e.updatedAt = Date()
+        db.saveEntry(e); vm.updateEntry(e)
+        let current = try #require(db.fetchEntry(id: e.id))
+        let revBody = try #require(vm.revisionBody(rev, for: e))
+        #expect(revBody == current.body)
+        #expect(RevisionPolicy.restoreWouldChange(revisionTitle: rev.title, revisionBody: revBody,
+                                                  currentTitle: current.title, currentBody: current.body))
+
+        let restored = try #require(vm.restoreRevision(rev, for: e))
+        #expect(restored.title == "Original title")
+        #expect(db.fetchEntry(id: e.id)?.title == "Original title")
+        #expect(db.fetchEntry(id: e.id)?.body == "unchanged body")
+        // The renamed title was kept as a version first, so the restore can be undone.
+        #expect(vm.revisions(for: e).contains { $0.title == "Renamed" && !$0.isAuto })
+    }
 }
