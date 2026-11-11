@@ -1,4 +1,5 @@
 import Foundation
+import OmegaJournalCore
 import SwiftUI
 
 // MARK: - Mood
@@ -13,12 +14,8 @@ nonisolated enum Mood: Int, CaseIterable, Identifiable, Codable {
         case .good: "Good"; case .great: "Great"
         }
     }
-    var emoji: String {
-        switch self {
-        case .awful: "😞"; case .bad: "😕"; case .neutral: "😐"
-        case .good: "🙂"; case .great: "😄"
-        }
-    }
+    /// Same face as `face` (one `UIMoodGlyph` table): 😞 🙁 😐 🙂 😄.
+    var emoji: String { UIMoodGlyph.face(forLevel: rawValue) }
     var icon: String {
         switch self {
         case .awful: "cloud.heavyrain"; case .bad: "cloud.drizzle"; case .neutral: "cloud"

@@ -163,7 +163,7 @@ public struct ReviewDraft: Equatable, Sendable {
 }
 
 public enum ReviewGenerator {
-    static let moodEmoji = ["", "😞", "😕", "😐", "🙂", "😄"]
+    static let moodEmoji = [""] + UIMoodGlyph.faces
 
     /// The period containing `reference` (week uses the calendar's first weekday).
     public static func interval(for period: ReviewPeriod, containing reference: Date, calendar: Calendar) -> DateInterval {
