@@ -1,23 +1,39 @@
 import SwiftUI
-import Combine
 import OmegaJournalCore
 
 // MARK: - Link graph (interactive, force-directed)
 
-/// Holds the simulation so the Canvas redraws as it settles. Reduce Motion → the layout is settled up front.
+/// Holds the simulation so the Canvas redraws as it settles. It runs its own
+/// frame loop only while the layout is moving — once the energy drops below
+/// the settle threshold the loop ends, and a drag, resize or rebuild wakes it.
+/// Reduce Motion → the layout is settled up front and never animates.
 @MainActor
 @Observable
 final class GraphSimulation {
     private(set) var tick = 0
+    /// True while the frame loop is running (observable for tests / UI).
+    private(set) var isRunning = false
     // Only `tick` drives redraws; the simulation state below changes on every
     // frame and is read through `tick`.
     @ObservationIgnored private(set) var layout: GraphLayout
     @ObservationIgnored private(set) var graph: LinkGraph
     @ObservationIgnored private(set) var isSettled = false
-    @ObservationIgnored private var frames = 0
+    @ObservationIgnored private(set) var frames = 0
+    @ObservationIgnored private var loop: Task<Void, Never>?
+    @ObservationIgnored private let animates: Bool
+    @ObservationIgnored private let frameInterval: Duration
+    /// While a node is held the layout keeps responding even if settled.
+    @ObservationIgnored var isDragging = false {
+        didSet { if isDragging { wake() } }
+    }
 
-    init(graph: LinkGraph, size: CGSize, settleImmediately: Bool) {
+    /// Hard stop: a layout that never calms (huge graphs) stops after this many frames.
+    static let maxFrames = 600
+
+    init(graph: LinkGraph, size: CGSize, settleImmediately: Bool, frameInterval: Duration = .milliseconds(33)) {
         self.graph = graph
+        self.frameInterval = frameInterval
+        animates = !settleImmediately
         layout = GraphLayout(graph: graph, width: max(200, Double(size.width)), height: max(200, Double(size.height)))
         if settleImmediately { layout.settle(); isSettled = true }
     }
@@ -26,28 +42,55 @@ final class GraphSimulation {
         guard size.width > 50, size.height > 50 else { return }
         if abs(layout.width - Double(size.width)) > 1 || abs(layout.height - Double(size.height)) > 1 {
             layout.width = Double(size.width); layout.height = Double(size.height)
-            wake()
+            if animates { wake() } else { layout.settle(); tick &+= 1 }
         }
     }
 
-    func wake() { isSettled = false; frames = 0 }
+    /// Marks the layout as moving and (when animating) starts the frame loop.
+    func wake() {
+        isSettled = false; frames = 0
+        start()
+    }
+
+    /// Starts the frame loop if the layout is still moving.
+    func start() {
+        guard animates, loop == nil, !isSettled || isDragging else { return }
+        isRunning = true
+        loop = Task { @MainActor [weak self, frameInterval] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.isSettled && !self.isDragging { break }
+                self.advance(dragging: self.isDragging)
+                try? await Task.sleep(for: frameInterval)
+            }
+            self?.loop = nil
+            self?.isRunning = false
+        }
+    }
+
+    /// Stops the frame loop (view gone).
+    func stop() {
+        loop?.cancel(); loop = nil
+        isRunning = false
+    }
 
     func advance(dragging: Bool) {
         guard !isSettled || dragging else { return }
         let alpha = max(0.1, 1 - Double(frames) / 240)
         let energy = layout.step(alpha: alpha)
         frames += 1
-        if !dragging && (energy < 0.02 * Double(max(1, graph.nodes.count)) || frames > 600) { isSettled = true }
+        if !dragging && (layout.isSettled(energy: energy) || frames > Self.maxFrames) { isSettled = true }
         tick &+= 1
     }
 
     func move(_ id: String, to p: CGPoint) {
         layout.move(id, to: GraphPoint(x: Double(p.x), y: Double(p.y)))
-        wake(); tick &+= 1
+        if animates { wake() }
+        tick &+= 1
     }
 
     func position(of id: String) -> CGPoint? {
-        layout.positions[id].map { CGPoint(x: $0.x, y: $0.y) }
+        layout.position(of: id).map { CGPoint(x: $0.x, y: $0.y) }
     }
 
     func node(at point: CGPoint, radius: CGFloat = 16) -> LinkGraph.Node? {
@@ -55,7 +98,7 @@ final class GraphSimulation {
         for n in graph.nodes {
             guard let p = position(of: n.id) else { continue }
             let d = hypot(p.x - point.x, p.y - point.y)
-            if d <= radius, best == nil || d < best!.1 { best = (n, d) }
+            if d <= radius, best.map({ d < $0.1 }) ?? true { best = (n, d) }
         }
         return best?.0
     }
@@ -76,11 +119,12 @@ struct GraphView: View {
     @State private var dragMoved = false
     @State private var canvasSize = CGSize(width: 800, height: 560)
 
-    private let timer = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
-
     private func rebuild() {
+        sim?.stop()
         let graph = vm.linkGraph(includeIsolated: includeIsolated)
-        sim = GraphSimulation(graph: graph, size: canvasSize, settleImmediately: reduceMotion)
+        let next = GraphSimulation(graph: graph, size: canvasSize, settleImmediately: reduceMotion)
+        sim = next
+        next.start()
     }
 
     var body: some View {
@@ -116,10 +160,8 @@ struct GraphView: View {
         .background(theme.backgroundColor)
         .onAppear { if sim == nil { rebuild() } }
         .onChange(of: biometric.isAuthenticated) { _, _ in rebuild() }   // lock → hidden nodes vanish immediately
-        .onReceive(timer) { _ in
-            guard !reduceMotion else { return }
-            sim?.advance(dragging: draggingId != nil)
-        }
+        .onDisappear { sim?.stop() }
+        .onChange(of: reduceMotion) { _, _ in rebuild() }
     }
 
     private var summary: String {
@@ -164,7 +206,10 @@ struct GraphView: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    if draggingId == nil { draggingId = sim.node(at: value.startLocation)?.id; dragMoved = false }
+                    if draggingId == nil {
+                        draggingId = sim.node(at: value.startLocation)?.id; dragMoved = false
+                        sim.isDragging = draggingId != nil && !reduceMotion
+                    }
                     guard let id = draggingId else { return }
                     if hypot(value.translation.width, value.translation.height) > 3 { dragMoved = true }
                     if dragMoved || reduceMotion { sim.move(id, to: value.location) }
@@ -172,6 +217,7 @@ struct GraphView: View {
                 .onEnded { _ in
                     if let id = draggingId, !dragMoved, let e = vm.entry(id: id) { onOpen(e); dismiss() }
                     draggingId = nil
+                    sim.isDragging = false
                 }
         )
         .accessibilityElement(children: .contain)
