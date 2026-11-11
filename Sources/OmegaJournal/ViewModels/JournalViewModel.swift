@@ -813,15 +813,13 @@ final class JournalViewModel {
         saveDebounce?.cancel()
         pendingSave = updated
         saveDebounce = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            guard !Task.isCancelled, let self else { return }
-            await MainActor.run {
-                guard self.pendingSave != nil else { return }
-                self.flushPendingSave()
-                if self.searchResults != nil { self.refreshQuery() }
-                self.refreshTagCounts()
-                GoalManager.shared.loadGoals()
-            }
+            try? await Task.sleep(for: .milliseconds(700))
+            // Already on the main actor (the task inherits it).
+            guard !Task.isCancelled, let self, self.pendingSave != nil else { return }
+            self.flushPendingSave()
+            if self.searchResults != nil { self.refreshQuery() }
+            self.refreshTagCounts()
+            GoalManager.shared.loadGoals()
         }
     }
 
