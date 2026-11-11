@@ -77,9 +77,22 @@ public enum ImageRefs {
 public struct EntryStamp: Equatable, Sendable {
     public var location: String
     public var weather: String
-    public init(location: String = "", weather: String = "") { self.location = location; self.weather = weather }
-    public var isEmpty: Bool { location.isEmpty && weather.isEmpty }
+    /// Raw `geo=lat,lon`, kept verbatim so editor re-saves don't drop map
+    /// coordinates (read them via `PlaceStampCodec`).
+    public var geo: String = ""
+    public init(location: String = "", weather: String = "", geo: String = "") {
+        self.location = location; self.weather = weather; self.geo = geo
+    }
+    public var isEmpty: Bool { location.isEmpty && weather.isEmpty && geo.isEmpty }
     public var summary: String { [location, weather].filter { !$0.isEmpty }.joined(separator: " · ") }
+
+    /// Sets the place name typed by the user. A changed name drops the
+    /// coordinates: they belonged to the old place and would pin it on the map.
+    public mutating func editLocation(_ newValue: String) {
+        guard newValue != location else { return }
+        location = newValue
+        geo = ""
+    }
 }
 
 public enum EntryStampCodec {
@@ -102,6 +115,7 @@ public enum EntryStampCodec {
             let kv = part.trimmingCharacters(in: .whitespaces)
             if kv.hasPrefix("loc=") { stamp.location = String(kv.dropFirst(4)).removingPercentEncoding ?? "" }
             else if kv.hasPrefix("wx=") { stamp.weather = String(kv.dropFirst(3)).removingPercentEncoding ?? "" }
+            else if kv.hasPrefix("geo=") { stamp.geo = String(kv.dropFirst(4)) }
         }
         return (stamp, ns.substring(to: m.range.location))
     }
@@ -114,6 +128,8 @@ public enum EntryStampCodec {
         let wx = stamp.weather.trimmingCharacters(in: .whitespacesAndNewlines)
         if !loc.isEmpty { parts.append("loc=" + enc(loc)) }
         if !wx.isEmpty { parts.append("wx=" + enc(wx)) }
+        let geo = stamp.geo.filter { "0123456789.,-+".contains($0) }
+        if !geo.isEmpty { parts.append("geo=" + geo) }
         guard !parts.isEmpty else { return rest }
         let comment = "<!-- stamp: " + parts.joined(separator: "; ") + " -->"
         return rest.isEmpty ? comment : rest + "\n\n" + comment

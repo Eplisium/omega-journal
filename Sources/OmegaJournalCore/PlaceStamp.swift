@@ -7,10 +7,9 @@ import Foundation
 // encrypted with the body and need no schema change. This codec adds one
 // optional key, `geo=<lat>,<lon>`, that the map reads.
 //
-// `EntryStampCodec.split` ignores keys it doesn't know, so older builds read
-// these bodies fine. Until `EntryStamp` carries coordinates itself (see the
-// data-layer patch in the wave report), re-saving an entry from the editor
-// keeps the place name but drops `geo=`.
+// Older builds ignore keys they don't know, so they read these bodies fine.
+// `EntryStamp` keeps the raw `geo=` value, so re-saving an entry from the
+// editor keeps the coordinates; editing the place name drops them.
 
 public struct PlaceCoordinate: Equatable, Hashable, Sendable {
     public var latitude: Double

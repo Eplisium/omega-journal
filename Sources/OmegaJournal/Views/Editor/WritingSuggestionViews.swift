@@ -159,7 +159,9 @@ struct EntryStampEditor: View {
             Text("Typed by you and stored with this entry only. Nothing is looked up.")
                 .font(OmegaTheme.font(.meta))
                 .foregroundColor(theme.secondaryTextColor)
-            TextField("Place (e.g. Lisbon)", text: $stamp.location)
+            // Editing the name drops saved map coordinates (they belonged to the old place).
+            TextField("Place (e.g. Lisbon)", text: Binding(get: { stamp.location },
+                                                           set: { stamp.editLocation($0) }))
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Place")
             TextField("Weather (e.g. 18°C, sunny)", text: $stamp.weather)
