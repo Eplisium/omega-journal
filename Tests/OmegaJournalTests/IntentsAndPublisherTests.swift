@@ -84,7 +84,7 @@ struct IntentsCommandRoutingTests {
     @Test("every intent has an App Shortcut whose phrases name the app")
     func shortcutsCoverIntents() {
         let shortcuts = OmegaJournalShortcuts.appShortcuts
-        #expect(shortcuts.count == 5)
+        #expect(shortcuts.count == 9)
     }
 
     @Test("progress intent without an App Group answers without data")

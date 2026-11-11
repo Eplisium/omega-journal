@@ -193,6 +193,38 @@ nonisolated struct OmegaJournalShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Today's Progress",
             systemImageName: "flame")
+        AppShortcut(
+            intent: AppendToTodayIntent(),
+            phrases: [
+                "Add to today's entry in \(.applicationName)",
+                "Append to my \(.applicationName) entry",
+            ],
+            shortTitle: "Append to Today",
+            systemImageName: "text.append")
+        AppShortcut(
+            intent: LogMoodIntent(),
+            phrases: [
+                "Log my mood in \(.applicationName)",
+                "Log mood \(\.$mood) in \(.applicationName)",
+            ],
+            shortTitle: "Log Mood",
+            systemImageName: "face.smiling")
+        AppShortcut(
+            intent: FindEntriesIntent(),
+            phrases: [
+                "Find entries in \(.applicationName)",
+                "Search \(.applicationName)",
+            ],
+            shortTitle: "Find Entries",
+            systemImageName: "magnifyingglass")
+        AppShortcut(
+            intent: OpenEntryIntent(),
+            phrases: [
+                "Open \(\.$entry) in \(.applicationName)",
+                "Open an entry in \(.applicationName)",
+            ],
+            shortTitle: "Open Entry",
+            systemImageName: "book.pages")
     }
 
     static let shortcutTileColor: ShortcutTileColor = .purple
