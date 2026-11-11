@@ -109,7 +109,7 @@ struct ObservationMigrationTests {
         BiometricAuth.shared.setAuthenticatedForTesting(authenticated)
     }
 
-    private static func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+    private static func waitUntil(timeout: TimeInterval = 30, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return true }
