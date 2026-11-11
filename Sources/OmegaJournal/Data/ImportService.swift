@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import OmegaJournalCore
 
@@ -11,10 +12,33 @@ extension JournalViewModel {
         var attachments = 0
     }
 
+    /// One file to attach to an imported entry, read only after the entries commit.
+    struct PendingImportAttachment {
+        let name: String
+        let load: () -> Data?
+    }
+
     /// Builds new (never hidden) entries from parsed import records, de-duplicating against
     /// the whole stored journal by title+timestamp. `attachmentRoot` resolves relative attachment paths.
     @discardableResult
     func importRecords(_ records: [ImportedEntry], attachmentRoot: URL?, extraTag: String) -> FolderImportReport {
+        importRecords(records, extraTag: extraTag) { paths in
+            guard let root = attachmentRoot else { return [] }
+            return Self.containedAttachmentFiles(paths, root: root).map { f in
+                PendingImportAttachment(name: f.name, load: { try? Data(contentsOf: f.url) })
+            }
+        }
+    }
+
+    /// Core of every record importer. `attachments` turns a record's
+    /// `attachmentPaths` into loaders; files are read one at a time after the
+    /// transaction commits, so a large export is never held in memory at once.
+    /// With `adoptSourceIds`, a record's `sourceId` becomes the new entry's id —
+    /// a re-import then recognises the entry exactly (even if it was renamed
+    /// or trashed since) instead of relying on title + time.
+    @discardableResult
+    func importRecords(_ records: [ImportedEntry], extraTag: String, adoptSourceIds: Bool = false,
+                       attachments: ([String]) -> [PendingImportAttachment]) -> FolderImportReport {
         var report = FolderImportReport()
         guard let stored = allStoredEntries() else {
             showToast("Import aborted: couldn't read the existing journal safely", isError: true)
@@ -25,7 +49,7 @@ extension JournalViewModel {
         // A source id equal to an existing entry id (e.g. the `id:` front matter of our own
         // markdown export) means the entry is already here — even if it is trashed.
         var knownIds = Set(stored.map(\.id))
-        var pending: [(id: String, files: [(url: URL, name: String)])] = []
+        var pending: [(id: String, files: [PendingImportAttachment])] = []
         let committed = db.inTransaction {
             for r in records {
                 let title = ImportParsers.normalizeNewlines(r.title)
@@ -36,20 +60,19 @@ extension JournalViewModel {
                     report.duplicates += 1; continue
                 }
                 if let sid = r.sourceId, !sid.isEmpty { knownIds.insert(sid) }
-                var entry = JournalEntry.new()
-                entry.title = title
-                entry.body = ImportParsers.normalizeNewlines(r.body)
-                entry.tags = OmegaCore.normalizeTags(r.tags + [extraTag])
-                entry.createdAt = r.createdAt
-                entry.updatedAt = r.updatedAt
-                entry.isFavorite = r.isFavorite
-                entry.mood = r.mood.flatMap(Mood.init(rawValue:)) ?? .neutral
+                let fresh = JournalEntry.new()
+                let id = adoptSourceIds ? (r.sourceId.flatMap(Self.adoptableId) ?? fresh.id) : fresh.id
+                var entry = JournalEntry(id: id, title: title, body: ImportParsers.normalizeNewlines(r.body),
+                                         mood: r.mood.flatMap(Mood.init(rawValue:)) ?? .neutral,
+                                         tags: OmegaCore.normalizeTags(r.tags + [extraTag]),
+                                         createdAt: r.createdAt, updatedAt: r.updatedAt,
+                                         isPinned: false, isFavorite: r.isFavorite, isArchived: false,
+                                         deletedAt: nil, isHidden: false, attachments: [])
+                entry.journalId = fresh.journalId
                 db.saveEntry(entry)
                 report.added += 1
-                if let root = attachmentRoot {
-                    let files = Self.containedAttachmentFiles(r.attachmentPaths, root: root)
-                    if !files.isEmpty { pending.append((entry.id, files)) }
-                }
+                let files = r.attachmentPaths.isEmpty ? [] : attachments(r.attachmentPaths)
+                if !files.isEmpty { pending.append((entry.id, files)) }
             }
         }
         guard committed else {
@@ -59,7 +82,7 @@ extension JournalViewModel {
         }
         for (id, files) in pending {
             for f in files {
-                guard let data = try? Data(contentsOf: f.url) else { continue }
+                guard let data = f.load() else { continue }
                 if db.saveAttachment(entryId: id, data: data, filename: f.name,
                                      mimeType: Self.mimeType(forExtension: (f.name as NSString).pathExtension)) != nil {
                     report.attachments += 1
@@ -68,6 +91,11 @@ extension JournalViewModel {
         }
         reload()
         return report
+    }
+
+    /// Only canonical UUID strings become entry ids.
+    nonisolated static func adoptableId(_ sourceId: String) -> String? {
+        UUID(uuidString: sourceId)?.uuidString
     }
 
     /// Resolves import-file attachment paths (relative to `root`) to regular files that really
@@ -101,7 +129,13 @@ extension JournalViewModel {
         case "pdf": return "application/pdf"
         case "mp3": return "audio/mpeg"
         case "m4a": return "audio/mp4"
-        case "mp4": return "video/mp4"
+        case "mp4", "m4v": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "heif": return "image/heif"
+        case "tif", "tiff": return "image/tiff"
+        case "aac": return "audio/aac"
+        case "wav": return "audio/wav"
+        case "caf": return "audio/x-caf"
         default: return "application/octet-stream"
         }
     }
@@ -196,6 +230,136 @@ extension JournalViewModel {
         toast(report, noun: "Day One entries",
               note: photosSkipped && report.added > 0 ? "photos not imported (choose the export folder to include them)" : nil)
         return report
+    }
+
+    // MARK: Apple Journal
+
+    /// What an Apple Journal import would do, shown before anything is written.
+    struct AppleJournalImportPreview: Equatable {
+        var total = 0
+        var new = 0
+        var duplicates = 0
+        var attachments = 0
+        var unreadable = 0
+
+        /// "12 entries (3 already in your journal) with 20 photos and videos."
+        var summary: String {
+            var s = "\(total) \(total == 1 ? "entry" : "entries")"
+            if duplicates > 0 { s += " (\(duplicates) already in your journal)" }
+            if attachments > 0 { s += " with \(attachments) \(attachments == 1 ? "photo or recording" : "photos and recordings")" }
+            if unreadable > 0 { s += "; \(unreadable) page\(unreadable == 1 ? "" : "s") couldn't be read" }
+            return s + "."
+        }
+    }
+
+    /// Opens an Apple Journal export: the `AppleJournalEntries` folder, the
+    /// folder that contains it, its `Entries` folder, or the `.zip` Finder makes
+    /// from it. nil = not an Apple Journal export.
+    nonisolated static func openAppleJournalExport(at url: URL) -> (layout: AppleJournalLayout, read: (String) -> Data?)? {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return nil }
+        if !isDir.boolValue {
+            guard let data = try? Data(contentsOf: url, options: .alwaysMapped),
+                  let zip = try? AppleJournalZipReader(data: data) else { return nil }
+            let files = zip.filesByName
+            guard let layout = AppleJournalImport.layout(paths: Array(files.keys)) else { return nil }
+            return (layout, { path in files[path].flatMap { try? zip.contents(of: $0) } })
+        }
+        // Picked the `Entries` folder itself: read from its parent.
+        var root = url.standardizedFileURL
+        if root.lastPathComponent.lowercased() == "entries" { root = root.deletingLastPathComponent() }
+        let rootReal = root.resolvingSymlinksInPath().path
+        guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return nil }
+        var paths: [String] = []
+        for case let file as URL in walker {
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true else { continue }
+            let p = file.standardizedFileURL.resolvingSymlinksInPath().path
+            guard p.hasPrefix(rootReal + "/") else { continue }
+            paths.append(String(p.dropFirst(rootReal.count + 1)))
+            if paths.count > 200_000 { break }
+        }
+        guard let layout = AppleJournalImport.layout(paths: paths) else { return nil }
+        let known = Set(paths)
+        return (layout, { path in
+            // Only files the walk found under the chosen folder are ever read.
+            guard known.contains(path) else { return nil }
+            return try? Data(contentsOf: URL(fileURLWithPath: rootReal).appendingPathComponent(path))
+        })
+    }
+
+    /// Parses the export and counts what is new. Nothing is written.
+    func previewAppleJournal(_ result: AppleJournalImportResult) -> AppleJournalImportPreview? {
+        guard let stored = allStoredEntries() else { return nil }
+        var ids = Set(stored.map(\.id))
+        var keys = Set(stored.map { Self.dupKey(title: $0.title, createdAt: $0.createdAt) })
+        var p = AppleJournalImportPreview(total: result.entries.count, unreadable: result.skipped)
+        for r in result.entries {
+            let id = r.sourceId.flatMap(Self.adoptableId)
+            let key = Self.dupKey(title: ImportParsers.normalizeNewlines(r.title), createdAt: r.createdAt)
+            if let id, ids.contains(id) { p.duplicates += 1; continue }
+            guard keys.insert(key).inserted else { p.duplicates += 1; continue }
+            if let id { ids.insert(id) }
+            p.new += 1
+            p.attachments += r.attachmentPaths.count
+        }
+        return p
+    }
+
+    /// Apple Journal (iPhone/iPad/Mac) export → new entries tagged #apple-journal.
+    ///
+    /// `confirm` sees the preview first; returning false cancels with nothing
+    /// written. Entries are never hidden; places are kept in the entry's
+    /// place stamp; photos, videos and audio become encrypted attachments.
+    /// Everything is written in one transaction (rolled back on failure), and a
+    /// re-import of the same export adds nothing.
+    @discardableResult
+    func importAppleJournal(from url: URL, calendar: Calendar = .current,
+                            confirm: ((AppleJournalImportPreview) -> Bool)? = nil) -> FolderImportReport {
+        guard let export = Self.openAppleJournalExport(at: url) else {
+            showToast("That isn't an Apple Journal export. Choose the AppleJournalEntries folder or its .zip file.", isError: true)
+            return FolderImportReport()
+        }
+        let result = AppleJournalImport.records(layout: export.layout, read: export.read, calendar: calendar,
+                                                headerLocales: [Locale.current, Locale.autoupdatingCurrent])
+        guard !result.entries.isEmpty else {
+            showToast("No entries found in that Apple Journal export", isError: true)
+            return FolderImportReport()
+        }
+        guard let preview = previewAppleJournal(result) else {
+            showToast("Import aborted: couldn't read the existing journal safely", isError: true)
+            return FolderImportReport()
+        }
+        if let confirm, !confirm(preview) { return FolderImportReport() }
+        var report = importRecords(result.entries, extraTag: AppleJournalImport.tag, adoptSourceIds: true) { paths in
+            paths.map { path in
+                let name = DatabaseManager.sanitizedAttachmentFilename((path as NSString).lastPathComponent)
+                return PendingImportAttachment(name: name, load: { export.read(path) })
+            }
+        }
+        if result.skipped > 0 { report.skipped = Array(repeating: "page", count: result.skipped) }
+        toast(report, noun: "Apple Journal entries")
+        return report
+    }
+
+    /// Standard confirmation sheet for `importAppleJournal(confirm:)`.
+    static func confirmAppleJournalImport(_ preview: AppleJournalImportPreview) -> Bool {
+        let alert = NSAlert()
+        if preview.new == 0 {
+            alert.messageText = "Everything in this export is already in your journal"
+            alert.informativeText = preview.summary
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return false
+        }
+        alert.messageText = "Import \(preview.new) \(preview.new == 1 ? "entry" : "entries") from Apple Journal?"
+        alert.informativeText = "This export has " + preview.summary
+            + " New entries are tagged #apple-journal so you can find them later."
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Recursively imports `.md`/`.markdown`/`.txt` files (Obsidian vault or any notes folder).
