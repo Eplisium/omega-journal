@@ -65,13 +65,23 @@ No account, no cloud, no tracking. Just open it and write in Markdown, then find
 
 ## Install
 
+With [Homebrew](https://brew.sh):
+
+```sh
+brew install --cask eplisium/tap/omega-journal
+```
+
+Update later with `brew upgrade --cask omega-journal`. The cask lives in [Eplisium/homebrew-tap](https://github.com/Eplisium/homebrew-tap).
+
+Or by hand:
+
 1. Download the latest **`Omega-Journal-*.dmg`** from [Releases](https://github.com/Eplisium/omega-journal/releases/latest).
 2. Open it and drag **Omega Journal** into **Applications**. Releases are signed with a Developer ID and notarized by Apple, so it opens like any other Mac app.
 3. On first launch macOS asks permission for Omega Journal to store its encryption key in your Keychain — choose **Always Allow**.
 
 Requires macOS 14 Sonoma or later.
 
-**Honest about privacy:** some metadata (titles, tags, moods, dates) is stored unencrypted so search stays fast, automatic backups don't include attachment files, and whole-app locking isn't fully wired up yet. See [Privacy and security](#privacy-and-security), [Backups and recovery](#backups-and-recovery), and [Current limitations](#current-limitations).
+**Honest about privacy:** some metadata (titles, tags, moods, dates, check-ins) is stored unencrypted so search stays fast, and automatic backups don't include attachment files. See [Privacy and security](#privacy-and-security), [Backups and recovery](#backups-and-recovery), and [Current limitations](#current-limitations).
 
 ## Contents
 
@@ -120,6 +130,8 @@ All three entry points share `VERSION` (marketing version), `packaging/` (Info.p
 Every channel embeds the widget extension (`Contents/PlugIns/OmegaJournalWidgets.appex`, sandboxed, sharing an App Group with the app) and generates `Metadata.appintents` so the Shortcuts actions register. QA builds take `OMEGA_JOURNAL_BUNDLE_ID=com.eplisium.omega-journal.qa-<name>` and land in `.build/packaging/qa/`. The Mac App Store build also needs a provisioning profile for the widget (`OMEGA_JOURNAL_MAS_WIDGET_PROFILE`); `OMEGA_JOURNAL_MAS_SKIP_WIDGET=1` ships without it.
 
 App Store submission steps, metadata and review notes are in [`docs/app-store/`](docs/app-store/SUBMISSION.md).
+
+After publishing a release, bump the Homebrew cask: in [Eplisium/homebrew-tap](https://github.com/Eplisium/homebrew-tap) set `version` and `sha256` in `Casks/omega-journal.rb` to the new DMG (its `.sha256` file has the hash), then run `brew audit --cask --online eplisium/tap/omega-journal`.
 
 ## Workspaces
 
@@ -194,7 +206,16 @@ Parent-tag browsing and the older Save Search action have limitations; see [Curr
 
 ### Search
 
-Search combines SQLite FTS5 metadata hits with decrypted, in-memory body matching. **Body plaintext is not written into the on-disk FTS index.** Recent searches and command-palette content hits are supported.
+One query grammar is shared by the journal list, Archive / Hidden / Trash, the command palette (⌘K) and smart folders, so a search means the same thing everywhere. Matching runs over decrypted entries in memory; SQLite FTS5 (titles and tags only) just ranks the results. **Body plaintext is never written into the on-disk FTS index.** Recent searches are remembered, and the **Tips** chip under the search field shows the grammar.
+
+```text
+rain walk            every word, in any order (title, body or tags)
+"long walk"          that exact phrase
+-work                leave out entries that mention it
+-"day job"           leave out an exact phrase
+```
+
+Matching ignores case and accents. Words, phrases, exclusions and operators combine with AND.
 
 Operator examples:
 
@@ -213,9 +234,8 @@ has:task
 - Moods accept names or numeric values; multiple moods combine with OR.
 - Dates accept day/month/year forms and `today`/`yesterday`. `after:` starts at the end of the specified date interval; `before:` excludes the specified interval.
 - `has:link` recognizes web/Markdown links, not wiki links alone.
-- Locked hidden entries may match visible title/mood/date, but operator search does not inspect their bodies, tags, or attachment/task predicates.
-
-Search paths do not yet have identical semantics. Do not rely on Boolean expressions, negation, or consistent exact quoted-phrase matching.
+- Locked hidden entries match on their visible title, mood and date only: no search (including `-word` exclusions) looks at their bodies, tags, or attachment/task predicates until you unlock them.
+- There is no `OR` or parentheses.
 
 ### Linked entries
 
@@ -241,12 +261,14 @@ Reflection uses active entries in the selected notebook scope, independent of tr
 
 Themes/tone use Apple's local NaturalLanguage framework. These are lightweight descriptive signals, not mental-health assessments or evidence of causation.
 
-Settings → Writing Goals includes weekly/monthly review controls. Reviews summarize writing totals, mood, tags, favorite/pinned links, and reflection prompts and can be saved as entries. The reachable review-save action excludes hidden entries. Insights also offers a year selector and year-review PDF export.
+### Daily check-in and habits
+
+Today has a **Daily check-in** line under your writing, folded by default ("2 of 3 logged · 1 of 2 habits done"). Open it to log sleep, energy and stress, add your own metrics (scales, numbers, yes/no), and tick off habits. Insights uses these values to look for patterns with your writing. Turn it off in **Settings → Writing → Daily Check-in**. Values are stored as plain numbers, like moods and dates (see [Encryption boundaries](#encryption-boundaries)).
+
+Settings → Writing Goals includes weekly/monthly review controls. Clicking a review reminder opens the review, even when it launches the app. Reviews summarize writing totals, mood, tags, favorite/pinned links, and reflection prompts and can be saved as entries. The reachable review-save action excludes hidden entries. Insights also offers a year selector and year-review PDF export.
 
 ### Partially integrated features
 
-- **Review reminders:** scheduling controls exist, but clicking a notification is not connected to opening/generating the review.
-- **Check-ins and habits:** database/store and analytics support sleep, energy, stress, custom metrics, and habit completion. The input components are not mounted in a reachable screen, so logging is not a finished feature.
 - **On-device AI assist:** an opt-in setting and title/tag/summary service exist for macOS 26+ with Apple Intelligence. The service rejects hidden entries and uses Apple's on-device model, but no user workflow currently invokes suggestion generation.
 
 ## Appearance and Mac integration
@@ -282,7 +304,7 @@ Reflection requires explicit private inclusion as well as authentication. Full e
 
 **Single-entry export:** **Export Entry… / ⌃⌘E** asks for Touch ID or your account password before exporting a locked hidden entry.
 
-**Whole-app lock is unfinished:** settings and policy code exist, but the full-window lock overlay is not attached to the application root. Do not rely on it as a working launch/away lock. This is separate from hidden-entry locking.
+**App Lock (optional, off by default):** Settings → Privacy & Security can require Touch ID or your Mac password at launch and after the app has been in the background for a chosen time. While locked, the window is covered and its contents are disabled and hidden from VoiceOver. This is separate from hidden-entry locking, and it doesn't encrypt anything more on disk.
 
 ### Files outside the app
 
@@ -360,14 +382,10 @@ Imports and exports have format-specific fidelity; neither PDF nor a static webs
 
 These are source-level integration/behavior findings, not promises of fixes or a substitute for runtime QA:
 
-- **Whole-app lock:** overlay not mounted; do not rely on the settings toggle for protection.
-- **Audio cutoff:** automatic ten-minute stop drops the recording; manually stop and attach earlier.
-- **Check-ins/habits, AI suggestions, review-notification actions:** partially integrated as described above.
-- **Reader preferences/navigation:** saved maximum-width preference is not applied; heading navigation is approximate.
-- **Revision restoration:** title-only changes cannot be restored through the current body-diff-gated UI.
-- **Nested tags:** parent badges aggregate descendants, but clicking a parent performs exact-tag filtering. The sidebar limits the flattened tag display to 60 nodes.
+- **AI suggestions:** partially integrated as described above.
+- **Reader navigation:** heading navigation is approximate.
 - **Saved filters:** legacy Save Search retains only the first selected tag/mood, not every advanced filter. Smart-folder counts can differ from a list additionally narrowed by current filters. At most 40 smart folders are stored.
-- **Search:** plain/operator/palette paths differ; quoted phrases are not consistently preserved and there is no Boolean/negation grammar. Smart-folder and analytics date boundaries also differ for rolling periods.
+- **Search:** no `OR`/parentheses grammar. Smart-folder and analytics date boundaries differ for rolling periods.
 - **Links:** duplicate-title resolution differs between navigation and graph; unlocked hidden backlink sources can appear twice.
 - **Insights:** theme computation can remain stale after edits/scope changes with the same entry count; correlation minimum-sample messaging is inconsistent. Small-sample associations should not be treated as meaningful causal findings.
 
