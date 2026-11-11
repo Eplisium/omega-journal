@@ -4,8 +4,10 @@ import OmegaJournalShared
 
 // MARK: - App Intents (Shortcuts, Siri, Spotlight)
 //
-// Privacy rules for every intent here:
-// - Nothing returns entry titles or bodies. "Today's Progress" answers from
+// Privacy rules for every intent here (entry intents: JournalEntryIntents.swift):
+// - Nothing returns entry bodies. Entity queries return titles, dates, moods
+//   and tags through `IntentEntryCatalog`, which drops locked hidden entries,
+//   never exposes a hidden entry's tags, and answers nothing while app-locked. "Today's Progress" answers from
 //   the widget snapshot (counts, streak, prompt), which excludes hidden entries.
 // - Anything that touches the journal opens the app and goes through
 //   `AppCommandInbox` / `QuickCaptureInbox`, which wait for the launch gate
