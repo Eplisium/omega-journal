@@ -26,3 +26,6 @@ icon_*.png
 # Terra edit-tool backups
 .windop-backups/
 dist/
+
+# Agent working notes and plans (local only; may reference private journal content)
+.hermes/
