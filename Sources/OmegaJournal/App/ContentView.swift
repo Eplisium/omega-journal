@@ -89,6 +89,7 @@ struct ContentView: View {
             Text("If you used Omega Journal downloaded from GitHub, you can import that journal into this one. You can also do this later in Settings › Data.")
         }
         .modifier(ShellEntryCommands(vm: vm, selection: $sidebarSelection))
+        .modifier(AskJournalPresenter(vm: vm, selection: $sidebarSelection))
         .modifier(ShellLifecycle(vm: vm, selection: $sidebarSelection, showTemplatePicker: $showTemplatePicker,
                                  storedSelection: $storedSelection, didRestore: $didRestoreSelection))
         .modifier(ShellReviewRequests(vm: vm, selection: $sidebarSelection))
@@ -216,6 +217,7 @@ enum SidebarItem: Hashable {
     case mood(Mood)
     case insights
     case calendar
+    case map
     case onThisDay
     case archive
     case hidden
@@ -232,6 +234,7 @@ enum SidebarItem: Hashable {
         case .mood(let m): m.label
         case .insights: "Insights"
         case .calendar: "Calendar"
+        case .map: "Map"
         case .onThisDay: "On This Day"
         case .archive: "Archive"
         case .hidden: "Hidden"
@@ -250,6 +253,7 @@ enum SidebarItem: Hashable {
         case .mood(let m): m.icon
         case .insights: "chart.line.uptrend.xyaxis"
         case .calendar: "calendar"
+        case .map: "map"
         case .onThisDay: "clock.arrow.circlepath"
         case .archive: "archivebox"
         case .hidden: "lock.fill"
@@ -269,6 +273,7 @@ enum SidebarItem: Hashable {
         case .mood(let m): "mood:\(m.rawValue)"
         case .insights: "insights"
         case .calendar: "calendar"
+        case .map: "map"
         case .onThisDay: "onThisDay"
         case .archive: "archive"
         case .hidden: "hidden"
@@ -288,6 +293,7 @@ enum SidebarItem: Hashable {
         case "thisWeek": self = .thisWeek
         case "insights": self = .insights
         case "calendar": self = .calendar
+        case "map": self = .map
         case "onThisDay": self = .onThisDay
         case "archive": self = .archive
         case "hidden": self = .all
@@ -311,6 +317,7 @@ enum SidebarItem: Hashable {
         switch self {
         case .today: .today
         case .calendar: .calendar
+        case .map: .map
         case .insights: .insights
         case .onThisDay: .onThisDay
         case .all, .favorites, .thisWeek, .mood, .archive, .hidden, .trash, .tag, .smartFolder: .journal

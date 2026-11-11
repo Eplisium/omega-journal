@@ -58,6 +58,7 @@ struct SidebarView: View {
 
                     disclosureSection("REFLECT", isExpanded: $reflectExpanded) {
                         row(.calendar)
+                        row(.map)
                         row(.insights)
                         row(.onThisDay, badge: vm.reflectiveOnThisDay.count)
                     }
@@ -139,7 +140,7 @@ struct SidebarView: View {
         var groups: [G] = [
             G([.today]),
             G([.all, .favorites, .thisWeek], isExpanded: libraryExpanded),
-            G([.calendar, .insights, .onThisDay], isExpanded: reflectExpanded),
+            G([.calendar, .map, .insights, .onThisDay], isExpanded: reflectExpanded),
             G(vm.smartFolders.filter(\.isPinned).map { .smartFolder($0.id) }),
             G(vm.smartFolders.filter { !$0.isPinned }.map { .smartFolder($0.id) }, isExpanded: smartExpanded),
             G([.archive, .hidden, .trash], isExpanded: storageExpanded),

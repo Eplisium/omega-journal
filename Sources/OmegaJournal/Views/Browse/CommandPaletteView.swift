@@ -172,9 +172,15 @@ struct CommandPaletteView: View {
                 vm.createEntryFromPrompt()
             },
         ]
+        // On-device question answering over the journal (Apple Intelligence only).
+        if SmartAssist.availability.isAvailable {
+            list.append(Command(title: "Ask Your Journal…", subtitle: "On this Mac (⇧⌘A)", icon: "sparkles", group: "Create") {
+                NotificationCenter.default.post(name: .showAskJournal, object: nil)
+            })
+        }
 
         // Navigation
-        let destinations: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .insights, .onThisDay, .archive, .hidden, .trash]
+        let destinations: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .calendar, .map, .insights, .onThisDay, .archive, .hidden, .trash]
         for dest in destinations {
             list.append(Command(title: "Go to \(dest.title)", subtitle: "Navigate", icon: dest.icon, group: "Navigate") {
                 selection = dest
@@ -217,6 +223,9 @@ struct CommandPaletteView: View {
             },
             Command(title: "Export as PDF", subtitle: "Printable book", icon: "doc.richtext", group: "Data") {
                 ImportExportPanels.exportPDF(vm: vm)
+            },
+            Command(title: "Export as Book (EPUB)", subtitle: "Read in Books or any e-reader", icon: "book", group: "Data") {
+                ExportManager.exportEPUB(vm: vm, scope: .all)
             },
             Command(title: "Import Entries", subtitle: "JSON backup or markdown files", icon: "square.and.arrow.down", group: "Data") {
                 ImportExportPanels.showImportPanel(vm: vm)

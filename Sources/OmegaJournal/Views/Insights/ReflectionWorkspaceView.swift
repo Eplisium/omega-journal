@@ -13,6 +13,8 @@ struct ReflectionWorkspaceView: View {
             switch selection {
             case .calendar:
                 CalendarView(vm: vm)
+            case .map:
+                EntryMapView(vm: vm)
             case .insights:
                 InsightsView(vm: vm)
             case .onThisDay:

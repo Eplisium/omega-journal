@@ -128,6 +128,7 @@ public enum JournalWorkspace: String, CaseIterable, Hashable, Sendable {
     case today
     case journal
     case calendar
+    case map
     case insights
     case onThisDay
 
@@ -135,7 +136,7 @@ public enum JournalWorkspace: String, CaseIterable, Hashable, Sendable {
 
     public var isReflective: Bool {
         switch self {
-        case .calendar, .insights, .onThisDay: true
+        case .calendar, .map, .insights, .onThisDay: true
         case .today, .journal: false
         }
     }

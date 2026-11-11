@@ -223,6 +223,17 @@ struct ReadView: View {
         vm.updateBody(EntryStampCodec.join(stamp: bodyParts.stamp, rest: newBody), for: entry)
     }
 
+    /// Appends a memo transcript to the stored body (the place/weather stamp
+    /// stays last) through the VM's immediate-mutation path. Never offered for
+    /// Trash or a locked hidden entry.
+    private func insertTranscript(_ transcript: String) {
+        guard !isTrash, !isContentLocked else { return }
+        let current = vm.entry(id: entry.id) ?? entry
+        let body = TranscriptText.appending(transcript, to: current.body)
+        guard body != current.body else { return }
+        vm.updateBody(body, for: current)
+    }
+
     /// Black or white, whichever contrasts better with the accent color.
     private var onAccentColor: Color {
         let ns = NSColor(theme.accentColor).usingColorSpace(.sRGB) ?? .systemPurple
@@ -547,7 +558,8 @@ struct ReadView: View {
             ForEach(entry.attachments) { attachment in
                 if attachment.isAudio {
                     HStack(spacing: 9) {
-                        AudioMemoRow(attachment: attachment, db: vm.db)
+                        AudioMemoRow(attachment: attachment, db: vm.db,
+                                     onInsertTranscript: isTrash || isContentLocked ? nil : { insertTranscript($0) })
                         removeAttachmentButton(attachment)
                     }
                     .padding(8)

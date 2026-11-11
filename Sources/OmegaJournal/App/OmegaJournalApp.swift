@@ -97,6 +97,14 @@ struct OmegaJournalApp: App {
                 .keyboardShortcut("d", modifiers: [.command, .control])
             Button("Export Entry…") { post(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .control])
+            // On-device writing help (Apple Intelligence). Hidden where it can't run.
+            if SmartAssist.availability.isAvailable {
+                Divider()
+                Button("Ask Your Journal…") { post(.showAskJournal) }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                Button("Suggest Title & Tags…") { post(.suggestTitleAndTags) }
+                Button("Go Deeper…") { post(.goDeeperInEntry) }
+            }
             Divider()
             Button("Next Entry") { post(.selectNextEntry) }
                 .keyboardShortcut("]", modifiers: .command)

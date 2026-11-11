@@ -11,6 +11,7 @@ struct WorkspacePresentationTests {
         #expect(!JournalWorkspace.calendar.usesEntryCollection)
         #expect(!JournalWorkspace.insights.usesEntryCollection)
         #expect(!JournalWorkspace.onThisDay.usesEntryCollection)
+        #expect(!JournalWorkspace.map.usesEntryCollection)
     }
 
     @Test("reflective workspaces are distinct from writing workspaces")
@@ -20,6 +21,7 @@ struct WorkspacePresentationTests {
         #expect(JournalWorkspace.calendar.isReflective)
         #expect(JournalWorkspace.insights.isReflective)
         #expect(JournalWorkspace.onThisDay.isReflective)
+        #expect(JournalWorkspace.map.isReflective)
     }
 }
 

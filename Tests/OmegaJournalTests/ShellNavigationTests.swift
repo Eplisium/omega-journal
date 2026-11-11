@@ -7,7 +7,7 @@ import Testing
 struct ShellNavigationTests {
     @Test("sidebar selection round-trips through its storage key")
     func storageKeyRoundTrip() {
-        let items: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .insights, .calendar,
+        let items: [SidebarItem] = [.today, .all, .favorites, .thisWeek, .insights, .calendar, .map,
                                     .onThisDay, .archive, .trash, .mood(.good), .tag("work:deep")]
         for item in items {
             #expect(SidebarItem(storageKey: item.storageKey) == item)

@@ -44,7 +44,7 @@ struct EntryListView: View {
         switch selection {
         case .all, nil: (true, true)
         case .favorites, .thisWeek, .mood, .tag, .smartFolder: (false, true)
-        case .archive, .hidden, .trash, .today, .calendar, .insights, .onThisDay: (false, false)
+        case .archive, .hidden, .trash, .today, .calendar, .map, .insights, .onThisDay: (false, false)
         }
     }
 
@@ -161,6 +161,9 @@ struct EntryListView: View {
             collectionHeader
             if isHiddenSection {
                 hiddenBanner
+            }
+            if let message = vm.readError {
+                DataErrorBanner(message: message, onRetry: vm.retryReading)
             }
             searchBar
             if showFilters {
